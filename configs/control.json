@@ -1,0 +1,32 @@
+{
+  "model": {
+    "proprio_dim": 16,
+    "command_dim": 3,
+    "action_dim": 6,
+    "sensor_groups": 2,
+    "critic_dim": 29,
+    "history_length": 16,
+    "d_model": 64,
+    "num_heads": 4,
+    "num_layers": 2,
+    "ffn_dim": 128,
+    "critic_hidden": [256, 128, 64],
+    "time_scale_s": 0.1,
+    "initial_std": 0.2
+  },
+  "ppo": {
+    "learning_rate": 0.0001,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "clip_ratio": 0.2,
+    "value_clip": 0.2,
+    "value_coef": 1.0,
+    "entropy_coef": 0.005,
+    "epochs": 5,
+    "num_minibatches": 4,
+    "max_grad_norm": 1.0,
+    "target_kl": 0.01,
+    "normalize_advantage": true
+  },
+  "environment": {}
+}
