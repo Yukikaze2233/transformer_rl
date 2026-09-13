@@ -1,5 +1,7 @@
 # Time-aware Transformer 与控制时序架构评审
 
+> 本文主体记录首版设计与当时验证范围。后续已增加多架构、辅助学习和实验编排，并在Kaiser完成外部研究任务pilot；最新状态以[实验指南](EXPERIMENTS.md)、[Kaiser实测](KAISER_EXPERIMENTS.md)和[验证记录](VALIDATION.md)为准。
+
 日期：2026-09-13。接口依据为本仓库 [`INTERFACES.md`](INTERFACES.md)、`config.py`、`types.py` 及评审时可读实现；研究背景与公开来源见文末。本轮仅实现代码、执行定向测试与静态算术核对，没有运行机器人训练、仿真或推理 benchmark。
 
 ## 1. 结论与证据边界

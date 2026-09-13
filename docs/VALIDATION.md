@@ -1,5 +1,15 @@
 # 实现验证记录
 
+## 多架构与Kaiser后续验证
+
+2026-09-14增加六变体、辅助学习、检查点迁移、实验编排和独立评估后，本机全仓检查为**532 passed，0 failed，0 skipped，15.86秒**，包含额外SDK进程所有权及worker_module调度回归。默认网络旧检查点的参数顺序、state keys、策略输出与下一次Adam更新已用原实现精确核对。当前包源码SHA `afc83b7a6346b9dd724cb13217fa6f78bbf64297668a66bcf2cb654ac535adf4` 与Kaiser有效pilot一致。
+
+Kaiser真实完成六项各20次PPO更新：合计1,966,080训练transitions、14,400独立评估transitions。正式评估均为单seed、3秒仿真窗口，包含初始瞬态；没有收敛或架构优胜结论。额外通信延迟为零，不构成延迟鲁棒性验收。完整冻结规格、来源哈希、资源及物理指标见[实测记录](KAISER_EXPERIMENTS.md)。
+
+**当前最有用的优化诊断**：统一learning_rate=1e-4、target_kl=0.01时，time/index/supervised三项每次PPO更新仅执行一次optimizer.step，gated/MLP/GRU分别累计116/120/160步。相同采样预算不等于相同梯度计算预算；下一阶段应单独核查学习率、输出初始化和分布尺度的敏感性，再作多seed收敛比较，不用短测回报选赢家。
+
+以下保留初版实现验证记录。
+
 日期：2026-09-13。范围为网络、优化器、采集接口、时序队列、检查点、导出和CLI编排。没有运行机器人训练、真实仿真或收敛benchmark；测试中的单次合成梯度更新和预定义tensor transition仅用于验证实现。
 
 ## 最终结果

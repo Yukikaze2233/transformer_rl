@@ -11,6 +11,26 @@ from .config import ModelConfig
 from .types import ActionSample, HistoryBatch, PolicyEvaluation
 
 
+class _ResidualGate(nn.Module):
+    """GTrXL-style GRU gate across depth, with an identity-favoring update bias."""
+
+    def __init__(self, width: int) -> None:
+        super().__init__()
+        self.reset_x = nn.Linear(width, width, bias=False)
+        self.reset_y = nn.Linear(width, width)
+        self.update_x = nn.Linear(width, width, bias=False)
+        self.update_y = nn.Linear(width, width)
+        self.candidate_x = nn.Linear(width, width, bias=False)
+        self.candidate_y = nn.Linear(width, width)
+        nn.init.constant_(self.update_y.bias, -2.0)
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        reset = torch.sigmoid(self.reset_x(x) + self.reset_y(y))
+        update = torch.sigmoid(self.update_x(x) + self.update_y(y))
+        candidate = torch.tanh(self.candidate_y(y) + self.candidate_x(reset * x))
+        return (1 - update) * x + update * candidate
+
+
 class _CausalBlock(nn.Module):
     """Explicit attention keeps grad, inference and export on the same path."""
 
@@ -27,6 +47,10 @@ class _CausalBlock(nn.Module):
             nn.GELU(),
             nn.Linear(config.ffn_dim, config.d_model),
         )
+        self.gated = config.residual_type == "gated"
+        if self.gated:
+            self.attention_gate = _ResidualGate(config.d_model)
+            self.ffn_gate = _ResidualGate(config.d_model)
 
     def forward(
         self, tokens: torch.Tensor, allowed: torch.Tensor, valid: torch.Tensor
@@ -42,42 +66,28 @@ class _CausalBlock(nn.Module):
         scores = (query @ key.transpose(-2, -1)) * self.head_dim**-0.5
         weights = scores.masked_fill(~allowed[:, None], float("-inf")).softmax(-1)
         attended = (weights @ value).transpose(1, 2).reshape(batch, length, width)
-        tokens = tokens + self.attention_output(attended)
-        tokens = tokens + self.ffn(self.ffn_norm(tokens))
+        attention = self.attention_output(attended)
+        tokens = self.attention_gate(tokens, attention) if self.gated else tokens + attention
+        feedforward = self.ffn(self.ffn_norm(tokens))
+        tokens = self.ffn_gate(tokens, feedforward) if self.gated else tokens + feedforward
         return torch.where(valid[..., None], tokens, torch.zeros_like(tokens))
 
 
-class TimeAwareActor(nn.Module):
-    """Causal history encoder with a current-command query and raw Gaussian actions.
+class GaussianActor(nn.Module):
+    """Shared validated, stateless Gaussian policy interface.
 
-    Public HistoryBatch methods validate shapes, devices and meaningful values.
-    ``forward_tensors`` / ``encode_tensors`` are unchecked tensor-only export
-    entry points; validate their inputs at the integration boundary. Padding may
-    contain arbitrary values, including nonfinite frames and timestamps.
+    Construction registers no parameters or buffers. Concrete actors own their
+    registration order, including log_std and preprocessing buffers, so existing
+    checkpoint parameter IDs remain stable. Representation methods belong to
+    the concrete architecture; only the five-input mean is shared.
     """
 
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
         self.config = config
-        self.frame_projection = nn.Linear(config.frame_dim, config.d_model)
-        self.command_projection = nn.Linear(config.command_dim, config.d_model)
-        self.query_embedding = nn.Parameter(torch.zeros(config.d_model))
-        self.blocks = nn.ModuleList(
-            _CausalBlock(config) for _ in range(config.num_layers)
-        )
-        self.output_norm = nn.LayerNorm(config.d_model)
-        self.mean_head = nn.Linear(config.d_model, config.action_dim)
-        self.log_std = nn.Parameter(
-            torch.full((config.action_dim,), math.log(config.initial_std))
-        )
-        self.register_buffer(
-            "time_frequencies",
-            torch.exp(
-                -math.log(10000.0)
-                * torch.arange(0, config.d_model, 2, dtype=torch.float32)
-                / config.d_model
-            ),
-        )
+
+    def _register_frame_scale(self) -> None:
+        config = self.config
         # Frames carry seconds; normalize time scalars only inside the model.
         frame_scale = torch.ones(config.frame_dim)
         age_start = config.proprio_dim + config.command_dim + config.action_dim
@@ -110,7 +120,7 @@ class TimeAwareActor(nn.Module):
             "command": (batch, self.config.command_dim),
             "now": (batch,),
         }
-        reference = self.frame_projection.weight
+        reference = next(self.parameters())
         for name, tensor in items.items():
             if tuple(tensor.shape) != shapes[name]:
                 raise ValueError(f"history.{name} must have shape {shapes[name]}")
@@ -145,10 +155,139 @@ class TimeAwareActor(nn.Module):
         if ((history.times[:, 1:] <= previous[:, :-1]) & history.valid[:, 1:]).any():
             raise ValueError("valid history timestamps must be strictly increasing")
 
+    def forward_tensors(
+        self,
+        frames: torch.Tensor,
+        times: torch.Tensor,
+        valid: torch.Tensor,
+        command: torch.Tensor,
+        now: torch.Tensor,
+    ) -> torch.Tensor:
+        """Unchecked, exportable tensor-only mean; preserves the raw action domain."""
+        raise NotImplementedError("concrete actors must implement the five-input mean")
+
+    def forward(self, history: HistoryBatch) -> torch.Tensor:
+        self._validate_history(history)
+        return self.forward_tensors(
+            history.frames, history.times, history.valid, history.command, history.now
+        )
+
+    def describe(self) -> dict:
+        config = self.config
+        transformer = config.actor_type == "transformer"
+        return {
+            "actor_type": config.actor_type,
+            "history_length": config.history_length,
+            "dimensions": (
+                {"d_model": config.d_model, "num_heads": config.num_heads,
+                 "num_layers": config.num_layers, "ffn_dim": config.ffn_dim}
+                if transformer else {"hidden": list(config.baseline_hidden)}
+                if config.actor_type == "mlp" else {"gru_hidden": config.gru_hidden}
+            ),
+            "compute": {
+                "transformer": "dense attention quadratic in window length; gates add depth projections",
+                "mlp": "flattened window first projection grows linearly with window length",
+                "gru": "sequential cell recomputation linear in window length",
+            }[config.actor_type],
+            "state": "finite window recomputed each call; no cross-call hidden state",
+            "history_encoder": {
+                "transformer": "causal self-attention with appended current-command query",
+                "mlp": "flattened masked history MLP with separate current command",
+                "gru": "masked finite-window GRU with separate current command",
+            }[config.actor_type],
+            "time_encoding": {
+                "position": config.time_encoding if transformer else "none",
+                "history_time_features": (
+                    "fixed sin/cos of elapsed age / time_scale_s" if transformer
+                    and config.time_encoding == "elapsed" else
+                    "fixed sin/cos of slot index" if transformer else
+                    "float64(now - times), cast to model dtype, divided by time_scale_s"
+                ),
+                "frame_times": "sensor ages and policy interval retained, divided by time_scale_s",
+                "time_scale_s": config.time_scale_s,
+            },
+            "residual_type": config.residual_type if transformer else None,
+            "gating": "GRU-style depth residual, not streaming recurrence"
+            if transformer and config.residual_type == "gated" else None,
+            "auxiliary_indices": list(config.auxiliary_indices),
+            "auxiliary_source": "query representation" if config.auxiliary_indices else None,
+            "parameter_count": sum(p.numel() for p in self.parameters()),
+            "parameter_count_scope": "training actor including Gaussian std and optional auxiliary head",
+            "comparison": "parameter counts and compute differ across architectures",
+        }
+
+    def _distribution(self, mean: torch.Tensor) -> Normal:
+        return Normal(mean, self.log_std.exp().expand_as(mean), validate_args=False)
+
+    @staticmethod
+    def _evaluation(distribution: Normal, action: torch.Tensor) -> PolicyEvaluation:
+        return PolicyEvaluation(
+            log_prob=distribution.log_prob(action).sum(-1),
+            entropy=distribution.entropy().sum(-1),
+            mean=distribution.mean,
+            std=distribution.stddev,
+        )
+
+    def act(self, history: HistoryBatch, deterministic: bool = False) -> ActionSample:
+        distribution = self._distribution(self(history))
+        action = distribution.mean if deterministic else distribution.sample()
+        return ActionSample(action, self._evaluation(distribution, action))
+
+    def evaluate(self, history: HistoryBatch, raw_action: torch.Tensor) -> PolicyEvaluation:
+        mean = self(history)
+        if not isinstance(raw_action, torch.Tensor):
+            raise TypeError("raw_action must be a tensor")
+        if raw_action.shape != mean.shape:
+            raise ValueError(f"raw_action must have shape {tuple(mean.shape)}")
+        if raw_action.dtype != mean.dtype:
+            raise TypeError("raw_action must have the model floating dtype")
+        if raw_action.device != mean.device:
+            raise ValueError("raw_action must be on the model device")
+        if not torch.isfinite(raw_action).all():
+            raise ValueError("raw_action must be finite")
+        return self._evaluation(self._distribution(mean), raw_action)
+
+
+class TimeAwareActor(GaussianActor):
+    """Causal history encoder with a current-command query and raw Gaussian actions.
+
+    Public HistoryBatch methods validate shapes, devices and meaningful values.
+    ``forward_tensors`` / ``encode_tensors`` are unchecked tensor-only export
+    entry points; validate their inputs at the integration boundary. Padding may
+    contain arbitrary values, including nonfinite frames and timestamps.
+    """
+
+    def __init__(self, config: ModelConfig) -> None:
+        if config.actor_type != "transformer":
+            raise ValueError("TimeAwareActor requires actor_type='transformer'")
+        super().__init__(config)
+        self.frame_projection = nn.Linear(config.frame_dim, config.d_model)
+        self.command_projection = nn.Linear(config.command_dim, config.d_model)
+        self.query_embedding = nn.Parameter(torch.zeros(config.d_model))
+        self.blocks = nn.ModuleList(
+            _CausalBlock(config) for _ in range(config.num_layers)
+        )
+        self.output_norm = nn.LayerNorm(config.d_model)
+        self.mean_head = nn.Linear(config.d_model, config.action_dim)
+        self.log_std = nn.Parameter(
+            torch.full((config.action_dim,), math.log(config.initial_std))
+        )
+        self.register_buffer(
+            "time_frequencies",
+            torch.exp(
+                -math.log(10000.0)
+                * torch.arange(0, config.d_model, 2, dtype=torch.float32)
+                / config.d_model
+            ),
+        )
+        self._register_frame_scale()
+        if config.auxiliary_indices:
+            self.auxiliary_head = nn.Linear(config.d_model, len(config.auxiliary_indices))
+
     def time_features_tensors(
         self, times: torch.Tensor, valid: torch.Tensor, now: torch.Tensor
     ) -> torch.Tensor:
-        """Fixed sin/cos features of age / time_scale_s; padding encodes zero.
+        """Fixed sin/cos of elapsed age or slot index; padding encodes zero.
 
         Subtract in float64 *before* converting to the network dtype. Converting
         an already rounded float32 timestamp cannot recover lost precision.
@@ -156,7 +295,11 @@ class TimeAwareActor(nn.Module):
         now64 = now.to(torch.float64)[:, None]
         times64 = torch.where(valid, times.to(torch.float64), now64)
         age = (now64 - times64).to(self.frame_projection.weight.dtype)
-        phase = (age / self.config.time_scale_s)[..., None] * self.time_frequencies
+        if self.config.time_encoding == "index":
+            position = torch.arange(times.shape[1], device=times.device)
+            phase = position.to(age.dtype)[None, :, None] * self.time_frequencies
+        else:
+            phase = (age / self.config.time_scale_s)[..., None] * self.time_frequencies
         features = torch.cat((phase.sin(), phase.cos()), dim=-1)
         return torch.where(valid[..., None], features, torch.zeros_like(features))
 
@@ -215,42 +358,70 @@ class TimeAwareActor(nn.Module):
         tokens = self.encode_tensors(frames, times, valid, command, now)
         return self.mean_head(tokens[:, -1])
 
-    def forward(self, history: HistoryBatch) -> torch.Tensor:
-        self._validate_history(history)
-        return self.forward_tensors(
-            history.frames, history.times, history.valid, history.command, history.now
+    def predict_auxiliary(self, history: HistoryBatch) -> torch.Tensor:
+        if not self.config.auxiliary_indices:
+            raise ValueError("actor has no configured auxiliary head")
+        return self.auxiliary_head(self.encode(history)[:, -1])
+
+
+class _WindowActor(GaussianActor):
+    """Masked elapsed-time frame features shared by finite-window baselines."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__(config)
+        self.log_std = nn.Parameter(
+            torch.full((config.action_dim,), math.log(config.initial_std))
         )
+        self._register_frame_scale()
 
-    def _distribution(self, mean: torch.Tensor) -> Normal:
-        return Normal(mean, self.log_std.exp().expand_as(mean), validate_args=False)
+    def _window_features(self, frames, times, valid, now):
+        valid = valid & (times <= now[:, None])
+        frames = torch.where(valid[..., None], frames, torch.zeros_like(frames))
+        now64 = now.to(torch.float64)[:, None]
+        times64 = torch.where(valid, times.to(torch.float64), now64)
+        age = (now64 - times64).to(frames.dtype) / self.config.time_scale_s
+        features = torch.cat((frames * self.frame_scale, age[..., None],
+                              valid.to(frames.dtype)[..., None]), dim=-1)
+        return features, valid
 
-    @staticmethod
-    def _evaluation(distribution: Normal, action: torch.Tensor) -> PolicyEvaluation:
-        return PolicyEvaluation(
-            log_prob=distribution.log_prob(action).sum(-1),
-            entropy=distribution.entropy().sum(-1),
-            mean=distribution.mean,
-            std=distribution.stddev,
+
+class HistoryMLPActor(_WindowActor):
+    def __init__(self, config: ModelConfig) -> None:
+        if config.actor_type != "mlp":
+            raise ValueError("HistoryMLPActor requires actor_type='mlp'")
+        super().__init__(config)
+        width = config.history_length * (config.frame_dim + 2) + config.command_dim
+        layers: list[nn.Module] = []
+        for hidden in config.baseline_hidden:
+            layers.extend((nn.Linear(width, hidden), nn.ELU()))
+            width = hidden
+        layers.append(nn.Linear(width, config.action_dim))
+        self.network = nn.Sequential(*layers)
+
+    def forward_tensors(self, frames, times, valid, command, now):
+        features, _ = self._window_features(frames, times, valid, now)
+        # Public short histories are left-padded to the configured fixed window.
+        features = torch.nn.functional.pad(
+            features, (0, 0, self.config.history_length - frames.shape[1], 0)
         )
+        return self.network(torch.cat((features.flatten(1), command), dim=-1))
 
-    def act(self, history: HistoryBatch, deterministic: bool = False) -> ActionSample:
-        distribution = self._distribution(self(history))
-        action = distribution.mean if deterministic else distribution.sample()
-        return ActionSample(action, self._evaluation(distribution, action))
 
-    def evaluate(self, history: HistoryBatch, raw_action: torch.Tensor) -> PolicyEvaluation:
-        mean = self(history)
-        if not isinstance(raw_action, torch.Tensor):
-            raise TypeError("raw_action must be a tensor")
-        if raw_action.shape != mean.shape:
-            raise ValueError(f"raw_action must have shape {tuple(mean.shape)}")
-        if raw_action.dtype != mean.dtype:
-            raise TypeError("raw_action must have the model floating dtype")
-        if raw_action.device != mean.device:
-            raise ValueError("raw_action must be on the model device")
-        if not torch.isfinite(raw_action).all():
-            raise ValueError("raw_action must be finite")
-        return self._evaluation(self._distribution(mean), raw_action)
+class WindowGRUActor(_WindowActor):
+    def __init__(self, config: ModelConfig) -> None:
+        if config.actor_type != "gru":
+            raise ValueError("WindowGRUActor requires actor_type='gru'")
+        super().__init__(config)
+        self.cell = nn.GRUCell(config.frame_dim + 2, config.gru_hidden)
+        self.mean_head = nn.Linear(config.gru_hidden + config.command_dim, config.action_dim)
+
+    def forward_tensors(self, frames, times, valid, command, now):
+        features, valid = self._window_features(frames, times, valid, now)
+        hidden = frames.new_zeros((frames.shape[0], self.config.gru_hidden))
+        for index in range(frames.shape[1]):
+            candidate = self.cell(features[:, index], hidden)
+            hidden = torch.where(valid[:, index, None], candidate, hidden)
+        return self.mean_head(torch.cat((hidden, command), dim=-1))
 
 
 class ValueCritic(nn.Module):
@@ -286,5 +457,7 @@ class ActorCritic(nn.Module):
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
         self.config = config
-        self.actor = TimeAwareActor(config)
+        self.actor = {
+            "transformer": TimeAwareActor, "mlp": HistoryMLPActor, "gru": WindowGRUActor,
+        }[config.actor_type](config)
         self.critic = ValueCritic(config)

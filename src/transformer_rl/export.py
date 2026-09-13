@@ -20,7 +20,7 @@ from .checkpoint import (
 )
 from .config import ModelConfig
 from .history import pack_frame
-from .model import TimeAwareActor
+from .model import GaussianActor
 from .types import HistoryBatch
 
 
@@ -31,7 +31,7 @@ _ATOL = 1e-6
 
 
 class _PolicyMean(nn.Module):
-    def __init__(self, actor: TimeAwareActor) -> None:
+    def __init__(self, actor: GaussianActor) -> None:
         super().__init__()
         self.actor = actor
 
@@ -111,7 +111,7 @@ def _verification_cases(config: ModelConfig) -> list[tuple[str, HistoryBatch]]:
 
 
 def _verify_runtime(
-    data: bytes, actor: TimeAwareActor, cases: list[tuple[str, HistoryBatch]]
+    data: bytes, actor: GaussianActor, cases: list[tuple[str, HistoryBatch]]
 ) -> dict:
     import onnxruntime as ort
 
@@ -213,7 +213,7 @@ def export_policy(checkpoint_path: str | Path, output_path: str | Path) -> dict:
     sidecar_path = Path(f"{output_path}.json")
     _require_new_paths([output_path, sidecar_path])
     checkpoint_bytes = checkpoint_path.read_bytes()
-    model, _, update, _ = _load_checkpoint_bytes(checkpoint_bytes, device="cpu")
+    model, trainer, update, _ = _load_checkpoint_bytes(checkpoint_bytes, device="cpu")
     if next(model.actor.parameters()).dtype != torch.float32:
         raise ValueError("ONNX policy export requires a float32 checkpoint")
     actor = model.actor.eval()
@@ -235,7 +235,8 @@ def export_policy(checkpoint_path: str | Path, output_path: str | Path) -> dict:
 
     graph = onnx.load_model_from_string(data)
     onnx.checker.check_model(graph)
-    if any("critic" in item.name or "log_std" in item.name for item in graph.graph.initializer):
+    if any(any(name in item.name for name in ("critic", "log_std", "auxiliary_head"))
+           for item in graph.graph.initializer):
         raise RuntimeError("ONNX graph unexpectedly contains non-mean policy parameters")
     validation = _verify_runtime(data, actor, cases)
     digest = hashlib.sha256(data).hexdigest()
@@ -247,6 +248,13 @@ def export_policy(checkpoint_path: str | Path, output_path: str | Path) -> dict:
         "opset": _OPSET, "onnx_file": output_path.name, "onnx_sha256": digest,
         "checkpoint": {
             "path": str(checkpoint_path), "sha256": checkpoint_digest, "update": update,
+            "source_schema_version": model.checkpoint_source_schema_version,
+        },
+        "actor": actor.describe(),
+        "training_auxiliary": {
+            "indices": list(config.auxiliary_indices),
+            "coefficient": trainer.config.auxiliary_coef,
+            "exported": False,
         },
         "model_config": _config_payload(config), "model_dtype": "float32",
         "inputs": _input_contract(config),
@@ -285,6 +293,8 @@ def export_policy(checkpoint_path: str | Path, output_path: str | Path) -> dict:
         "validation": validation,
         "exporter_warnings": [str(item.message) for item in caught],
     }
+    if config.actor_type != "transformer" or config.time_encoding != "elapsed":
+        sidecar["time_encoding"] = actor.describe()["time_encoding"]
     sidecar_text = json.dumps(sidecar, indent=2, ensure_ascii=False, allow_nan=False)
     sidecar_bytes = (sidecar_text + "\n").encode("utf-8")
     _publish_new_files({output_path: data, sidecar_path: sidecar_bytes})

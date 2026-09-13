@@ -19,7 +19,12 @@ from .ppo import PPOTrainer
 
 
 _FORMAT = "transformer_rl.checkpoint"
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
+_V2_MODEL_DEFAULTS = {
+    "actor_type": "transformer", "time_encoding": "elapsed", "residual_type": "add",
+    "auxiliary_indices": [], "baseline_hidden": [128, 64], "gru_hidden": 64,
+}
+_V2_PPO_DEFAULTS = {"auxiliary_coef": 0.0}
 _DTYPES = {
     "float16": torch.float16,
     "bfloat16": torch.bfloat16,
@@ -121,7 +126,8 @@ def _json_metadata(metadata: object) -> dict:
 def _config_payload(config: ModelConfig | PPOConfig) -> dict:
     data = asdict(config)
     if isinstance(config, ModelConfig):
-        data["critic_hidden"] = list(config.critic_hidden)
+        for name in ("critic_hidden", "baseline_hidden", "auxiliary_indices"):
+            data[name] = list(getattr(config, name))
     return data
 
 
@@ -144,7 +150,8 @@ def _parse_config(
             raise ValueError(f"invalid {cls.__name__}.{field.name} type or value")
     arguments = dict(data)
     if cls is ModelConfig:
-        arguments["critic_hidden"] = tuple(arguments["critic_hidden"])
+        for name in ("critic_hidden", "baseline_hidden", "auxiliary_indices"):
+            arguments[name] = tuple(arguments[name])
     try:
         return cls(**arguments)
     except (TypeError, ValueError, OverflowError) as error:
@@ -184,7 +191,7 @@ def _validate_model_state(state: object, model: ActorCritic) -> None:
         _validate_tensor(f"model_state.{name}", state[name], reference.shape, reference.dtype)
     # These buffers define preprocessing promised by ModelConfig and the ONNX
     # sidecar. They are not learned parameters and must not drift independently.
-    for name in ("actor.time_frequencies", "actor.frame_scale"):
+    for name, _ in model.named_buffers():
         if not torch.equal(state[name].cpu(), expected[name].cpu()):
             raise ValueError(f"model_state.{name} differs from configured preprocessing")
 
@@ -268,23 +275,48 @@ def _new_model(config: ModelConfig, dtype: torch.dtype) -> ActorCritic:
 def _validated_components(
     payload: object, device: str | torch.device = "cpu"
 ) -> tuple[ActorCritic, PPOTrainer, int, dict]:
-    if type(payload) is not dict or set(payload) != _PAYLOAD_KEYS:
+    if type(payload) is not dict:
+        raise ValueError("checkpoint requires exactly the declared top-level keys")
+    if "schema_version" in payload and (
+        type(payload["schema_version"]) is not int or payload["schema_version"] not in (1, 2)
+    ):
+        raise ValueError("unsupported checkpoint schema_version")
+    expected_keys = _PAYLOAD_KEYS | (
+        {"source_schema_version"} if payload.get("schema_version") == 2 else set()
+    )
+    if set(payload) != expected_keys:
         raise ValueError("checkpoint requires exactly the declared top-level keys")
     if payload["format"] != _FORMAT:
         raise ValueError("unrecognized checkpoint format")
-    if type(payload["schema_version"]) is not int or payload["schema_version"] != _SCHEMA_VERSION:
-        raise ValueError("unsupported checkpoint schema_version")
+    source_schema = payload.get("source_schema_version", payload["schema_version"])
+    if type(source_schema) is not int or source_schema not in (1, 2):
+        raise ValueError("unsupported source_schema_version")
+    if payload["schema_version"] == 1:
+        payload = dict(payload)
+        for key, cls, additions in (
+            ("model_config", ModelConfig, _V2_MODEL_DEFAULTS),
+            ("ppo_config", PPOConfig, _V2_PPO_DEFAULTS),
+        ):
+            original = payload[key]
+            legacy_keys = {field.name for field in fields(cls)} - additions.keys()
+            if type(original) is not dict or set(original) != legacy_keys:
+                raise ValueError(f"schema 1 {key} requires exactly its original keys")
+            payload[key] = {**original, **additions}
+        payload["schema_version"] = _SCHEMA_VERSION
     if type(payload["update"]) is not int or payload["update"] < 0:
         raise ValueError("checkpoint update must be a nonnegative integer")
     metadata = _json_metadata(payload["metadata"])
     config = _parse_config(payload["model_config"], ModelConfig)
     ppo_config = _parse_config(payload["ppo_config"], PPOConfig)
+    if ppo_config.auxiliary_coef > 0 and not config.auxiliary_indices:
+        raise ValueError("positive auxiliary_coef requires explicit auxiliary_indices")
     dtype_name = payload["model_dtype"]
     if type(dtype_name) is not str or dtype_name not in _DTYPES:
         raise ValueError("unsupported checkpoint model_dtype")
     if payload["optimizer_type"] != "Adam":
         raise ValueError("unsupported checkpoint optimizer_type")
     model = _new_model(config, _DTYPES[dtype_name])
+    model.checkpoint_source_schema_version = source_schema
     _validate_model_state(payload["model_state"], model)
     _validate_optimizer_state(payload["optimizer_state"], model)
     model.load_state_dict(payload["model_state"], strict=True)
@@ -325,6 +357,7 @@ def save_checkpoint(
     payload = {
         "format": _FORMAT,
         "schema_version": _SCHEMA_VERSION,
+        "source_schema_version": getattr(model, "checkpoint_source_schema_version", 2),
         "model_config": _config_payload(model.config),
         "ppo_config": _config_payload(trainer.config),
         "model_dtype": dtype_name,

@@ -24,11 +24,20 @@ class PPOTrainer:
     ``grad_norm`` is the step-mean *pre-clipping* norm. ``sample_count`` counts
     endpoint uses, including repeated uses across epochs. Rejected KL batches
     are excluded from these aggregates and reported through ``stop_kl``.
+    ``auxiliary_loss`` is the unscaled MSE over configured critic target columns,
+    sample-weighted like other losses; it is zero when ``auxiliary_coef`` is zero.
     """
 
     def __init__(self, model: ActorCritic, config: PPOConfig):
         self.model = model
         self.config = config
+        self.auxiliary_indices = ()
+        if config.auxiliary_coef > 0:
+            self.auxiliary_indices = getattr(getattr(model, "config", None), "auxiliary_indices", ())
+            if not self.auxiliary_indices:
+                raise ValueError("positive auxiliary_coef requires explicit model.config.auxiliary_indices")
+            if not callable(getattr(model.actor, "predict_auxiliary", None)):
+                raise ValueError("positive auxiliary_coef requires an actor auxiliary prediction head")
         self.model.eval()
         self.optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
@@ -78,6 +87,19 @@ class PPOTrainer:
             f.name: getattr(batch, f.name).detach() for f in fields(batch) if f.name != "history"
         })
 
+    def _auxiliary_loss(self, batch: PPOBatch) -> torch.Tensor:
+        # Privileged critic columns are supervision only, never actor inputs.
+        targets = batch.critic[:, self.auxiliary_indices].detach()
+        prediction = self.model.actor.predict_auxiliary(batch.history)
+        if not isinstance(prediction, torch.Tensor) or prediction.shape != targets.shape:
+            raise ValueError(f"auxiliary prediction must have shape {tuple(targets.shape)}")
+        if prediction.device != targets.device or not prediction.is_floating_point():
+            raise ValueError("auxiliary prediction must be floating point on the batch device")
+        self._require_finite("auxiliary prediction", prediction)
+        loss = (prediction - targets).square().mean()
+        self._require_finite("auxiliary loss", loss)
+        return loss
+
     @torch.enable_grad()
     def update(self, batch: PPOBatch) -> dict[str, float | int | bool]:
         self.model.eval()  # Deterministic dropout behavior; this does not disable autograd.
@@ -93,7 +115,7 @@ class PPOTrainer:
             batch = replace(batch, advantages=advantages)
 
         totals = dict(actor_loss=0.0, value_loss=0.0, entropy=0.0, kl=0.0,
-                      clip_fraction=0.0, loss=0.0)
+                      clip_fraction=0.0, loss=0.0, auxiliary_loss=0.0)
         grad_norm_sum = 0.0
         optimizer_steps = sample_count = 0
         early_stopped = False
@@ -147,6 +169,10 @@ class PPOTrainer:
                 entropy = evaluation.entropy.mean()
                 loss = (actor_loss + self.config.value_coef * value_loss
                         - self.config.entropy_coef * entropy)
+                auxiliary_loss = loss.new_zeros(())
+                if self.config.auxiliary_coef > 0:
+                    auxiliary_loss = self._auxiliary_loss(minibatch)
+                    loss = loss + self.config.auxiliary_coef * auxiliary_loss
                 for name, component in (("actor loss", actor_loss), ("value loss", value_loss),
                                         ("entropy", entropy), ("loss", loss)):
                     self._require_finite(name, component)
@@ -171,7 +197,7 @@ class PPOTrainer:
                 count = len(minibatch)
                 for name, metric in dict(actor_loss=actor_loss, value_loss=value_loss,
                                          entropy=entropy, kl=kl, clip_fraction=clip_fraction,
-                                         loss=loss).items():
+                                         loss=loss, auxiliary_loss=auxiliary_loss).items():
                     totals[name] += metric.detach().item() * count
                 grad_norm_sum += grad_norm.item()
                 optimizer_steps += 1
@@ -181,6 +207,7 @@ class PPOTrainer:
         self.optimizer.zero_grad(set_to_none=True)
         return {
             **{name: total / sample_count if sample_count else 0.0 for name, total in totals.items()},
+            "auxiliary_coef": self.config.auxiliary_coef,
             "grad_norm": grad_norm_sum / optimizer_steps if optimizer_steps else 0.0,
             "optimizer_steps": optimizer_steps,
             "sample_count": sample_count,

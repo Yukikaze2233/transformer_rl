@@ -1,0 +1,873 @@
+{
+  "scope": "bounded_engineering_pilot_not_convergence_or_hardware_validation",
+  "snapshot_directory": "/home/kaiser/robot-rl-sim60/transformer-comparison-pilot-20260914T0353",
+  "source_archive_sha256": "21b7aeb1cba2591be87d094236ebac1f5e7c851cfddd7d52dcabd6fdbeb4d5a0",
+  "package_source_sha256": "afc83b7a6346b9dd724cb13217fa6f78bbf64297668a66bcf2cb654ac535adf4",
+  "plan_sha256": "c1f5d5c65e56212f29957979b294f8f0cdd1ea7ef76af3ac876a54c2062fa57d",
+  "spec_sha256": "4141287f7b2f1546afc7cce0052527fcc17d5ec28d0e9c5f59b66294cce1d9e5",
+  "spec": {
+    "base_config": "pilot-base.json",
+    "environment_factory": "examples.isaaclab_task:make_env",
+    "seeds": [
+      11
+    ],
+    "variants": [
+      {
+        "name": "time_attention",
+        "model": {},
+        "ppo": {},
+        "group": "architecture"
+      },
+      {
+        "name": "index_attention",
+        "model": {
+          "time_encoding": "index"
+        },
+        "ppo": {},
+        "group": "architecture"
+      },
+      {
+        "name": "gated_attention",
+        "model": {
+          "residual_type": "gated"
+        },
+        "ppo": {},
+        "group": "architecture"
+      },
+      {
+        "name": "supervised_attention",
+        "model": {
+          "auxiliary_indices": [
+            25,
+            26,
+            27
+          ]
+        },
+        "ppo": {
+          "auxiliary_coef": 0.1
+        },
+        "group": "supervision"
+      },
+      {
+        "name": "history_mlp",
+        "model": {
+          "actor_type": "mlp"
+        },
+        "ppo": {},
+        "group": "architecture"
+      },
+      {
+        "name": "history_gru",
+        "model": {
+          "actor_type": "gru"
+        },
+        "ppo": {},
+        "group": "architecture"
+      }
+    ],
+    "training": {
+      "updates": 20,
+      "rollout_steps": 32,
+      "max_seconds": 600,
+      "checkpoint_interval": 20,
+      "action_clip": 100.0
+    },
+    "execution": {
+      "devices": [
+        "cuda:0"
+      ],
+      "max_parallel": 2,
+      "job_timeout_seconds": 900,
+      "worker_module": "examples._isaaclab_process"
+    },
+    "evaluation": {
+      "steps": 300,
+      "seeds": [
+        101
+      ],
+      "environment": {
+        "mode": "evaluation",
+        "num_envs": 8,
+        "fixed_command": [
+          0.0,
+          0.0,
+          0.3
+        ]
+      }
+    }
+  },
+  "base_config": {
+    "model": {
+      "proprio_dim": 16,
+      "command_dim": 3,
+      "action_dim": 6,
+      "sensor_groups": 2,
+      "critic_dim": 29,
+      "history_length": 16,
+      "d_model": 64,
+      "num_heads": 4,
+      "num_layers": 2,
+      "ffn_dim": 128,
+      "critic_hidden": [
+        256,
+        128,
+        64
+      ],
+      "time_scale_s": 0.1,
+      "initial_std": 0.2
+    },
+    "ppo": {
+      "learning_rate": 0.0001,
+      "gamma": 0.99,
+      "gae_lambda": 0.95,
+      "clip_ratio": 0.2,
+      "value_clip": 0.2,
+      "value_coef": 1.0,
+      "entropy_coef": 0.005,
+      "epochs": 2,
+      "num_minibatches": 4,
+      "max_grad_norm": 1.0,
+      "target_kl": 0.01,
+      "normalize_advantage": true
+    },
+    "environment": {
+      "task_root": "/home/kaiser/robot-rl-sim60/v40-live-snapshot03",
+      "contract": "contracts/own_v40_v2.json",
+      "stage": "locomotion",
+      "num_envs": 512,
+      "mode": "train"
+    }
+  },
+  "execution": {
+    "runner_exit_code": 0,
+    "abort_reason": null,
+    "elapsed_s": 627.1735437339958,
+    "samples": 600,
+    "actual_max_workers": 2,
+    "gpu_memory_peak_mib": 15370,
+    "gpu_util_peak_percent": 98,
+    "gpu_util_mean_percent": 68.78166666666667,
+    "memory_available_min_mib": 2543.5625,
+    "time_weighted_mean_workers": 1.9664440725104486,
+    "three_worker_seconds": 0.0,
+    "actual_peak_train_workers": 2,
+    "observed_train_processes": 6,
+    "observed_evaluation_processes": 6,
+    "total_training_transitions": 1966080,
+    "total_policy_updates": 120,
+    "total_optimizer_steps": 456,
+    "total_evaluation_transitions": 14400,
+    "total_training_transitions_per_session_second": 3134.826109364519
+  },
+  "variants": [
+    {
+      "variant": "time_attention",
+      "group": "architecture",
+      "train_seed": 11,
+      "status": "completed",
+      "model_config": {
+        "action_dim": 6,
+        "actor_type": "transformer",
+        "auxiliary_indices": [],
+        "baseline_hidden": [
+          128,
+          64
+        ],
+        "command_dim": 3,
+        "critic_dim": 29,
+        "critic_hidden": [
+          256,
+          128,
+          64
+        ],
+        "d_model": 64,
+        "ffn_dim": 128,
+        "gru_hidden": 64,
+        "history_length": 16,
+        "initial_std": 0.2,
+        "num_heads": 4,
+        "num_layers": 2,
+        "proprio_dim": 16,
+        "residual_type": "add",
+        "sensor_groups": 2,
+        "time_encoding": "elapsed",
+        "time_scale_s": 0.1
+      },
+      "actor_parameters": 69772,
+      "critic_parameters": 48897,
+      "ppo_auxiliary_coef": 0.0,
+      "updates_completed": 20,
+      "optimizer_steps": 20,
+      "kl_early_stopped_updates": 20,
+      "collected_transitions": 327680,
+      "train_elapsed_s": 169.91254492900043,
+      "collection_elapsed_s": 70.13435681098781,
+      "collection_transitions_per_second": 4672.175163495091,
+      "end_to_end_train_transitions_per_second": 1928.5215234515156,
+      "final_train_reward": 0.004947415820793333,
+      "checkpoint_sha256": "58f4d04aeb21ada7bd0c7c7d53741a384066f7f28d96bcb23d40e53232a6dc3b",
+      "evaluation": {
+        "checkpoint_update": 20,
+        "seed": 101,
+        "vector_steps": 300,
+        "num_envs": 8,
+        "transitions": 2400,
+        "reward_mean": 0.02583476780981679,
+        "terminated_count": 0,
+        "truncated_count": 0,
+        "metrics": {
+          "height_abs_error": {
+            "mean": 0.09098460149640838,
+            "rms": 0.09251012759409408,
+            "min": 0.0021925270557403564,
+            "max": 0.09918145835399628,
+            "count": 2400
+          },
+          "non_wheel_net_force": {
+            "mean": 52.7809193833669,
+            "rms": 71.83019046624301,
+            "min": 0.0,
+            "max": 512.7005004882812,
+            "count": 2400
+          },
+          "planar_speed": {
+            "mean": 0.09519721645548998,
+            "rms": 0.14506070653028866,
+            "min": 0.000810394820291549,
+            "max": 0.6693159937858582,
+            "count": 2400
+          },
+          "vx_abs_error": {
+            "mean": 0.08018927179401847,
+            "rms": 0.11738201929529575,
+            "min": 4.2540719732642174e-05,
+            "max": 0.5607082843780518,
+            "count": 2400
+          },
+          "wz_abs_error": {
+            "mean": 0.15221226032517735,
+            "rms": 0.34526924758162736,
+            "min": 1.4169432688504457e-05,
+            "max": 1.8345955610275269,
+            "count": 2400
+          }
+        },
+        "elapsed_s": 38.80079607399239,
+        "policy": "deterministic_mean",
+        "action_clip": 100.0
+      },
+      "environment_identity": {
+        "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+        "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+        "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+        "usd_seed_sha256": null,
+        "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+        "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+      },
+      "train_eval_identity_equal": true,
+      "sampled_train_rss_peak_mib": 4736.484375,
+      "per_process_gpu_peak_mib": null,
+      "gpu_attribution_note": "WSL nvidia-smi does not expose per-process GPU memory"
+    },
+    {
+      "variant": "index_attention",
+      "group": "architecture",
+      "train_seed": 11,
+      "status": "completed",
+      "model_config": {
+        "action_dim": 6,
+        "actor_type": "transformer",
+        "auxiliary_indices": [],
+        "baseline_hidden": [
+          128,
+          64
+        ],
+        "command_dim": 3,
+        "critic_dim": 29,
+        "critic_hidden": [
+          256,
+          128,
+          64
+        ],
+        "d_model": 64,
+        "ffn_dim": 128,
+        "gru_hidden": 64,
+        "history_length": 16,
+        "initial_std": 0.2,
+        "num_heads": 4,
+        "num_layers": 2,
+        "proprio_dim": 16,
+        "residual_type": "add",
+        "sensor_groups": 2,
+        "time_encoding": "index",
+        "time_scale_s": 0.1
+      },
+      "actor_parameters": 69772,
+      "critic_parameters": 48897,
+      "ppo_auxiliary_coef": 0.0,
+      "updates_completed": 20,
+      "optimizer_steps": 20,
+      "kl_early_stopped_updates": 20,
+      "collected_transitions": 327680,
+      "train_elapsed_s": 165.23315336499945,
+      "collection_elapsed_s": 69.97094485297566,
+      "collection_transitions_per_second": 4683.086682458379,
+      "end_to_end_train_transitions_per_second": 1983.1371206488811,
+      "final_train_reward": 0.004536337448443312,
+      "checkpoint_sha256": "094843e886577c101a9163e57b0824c32edc6937cbfd8148b31b7382c40362f8",
+      "evaluation": {
+        "checkpoint_update": 20,
+        "seed": 101,
+        "vector_steps": 300,
+        "num_envs": 8,
+        "transitions": 2400,
+        "reward_mean": 0.025139166031755547,
+        "terminated_count": 0,
+        "truncated_count": 0,
+        "metrics": {
+          "height_abs_error": {
+            "mean": 0.08061969566469392,
+            "rms": 0.08220685718646939,
+            "min": 0.0007027089595794678,
+            "max": 0.08792367577552795,
+            "count": 2400
+          },
+          "non_wheel_net_force": {
+            "mean": 46.49587429205577,
+            "rms": 48.11230089446386,
+            "min": 0.0,
+            "max": 68.13866424560547,
+            "count": 2400
+          },
+          "planar_speed": {
+            "mean": 0.06857909388580083,
+            "rms": 0.14845155655960088,
+            "min": 0.0001435188896721229,
+            "max": 0.7488529086112976,
+            "count": 2400
+          },
+          "vx_abs_error": {
+            "mean": 0.04322780372533392,
+            "rms": 0.11512886728055947,
+            "min": 2.4859793484210968e-05,
+            "max": 0.6330450773239136,
+            "count": 2400
+          },
+          "wz_abs_error": {
+            "mean": 0.16488339316934192,
+            "rms": 0.4034031390956423,
+            "min": 4.4889748096466064e-06,
+            "max": 2.1882894039154053,
+            "count": 2400
+          }
+        },
+        "elapsed_s": 37.58776164599112,
+        "policy": "deterministic_mean",
+        "action_clip": 100.0
+      },
+      "environment_identity": {
+        "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+        "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+        "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+        "usd_seed_sha256": null,
+        "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+        "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+      },
+      "train_eval_identity_equal": true,
+      "sampled_train_rss_peak_mib": 4729.24609375,
+      "per_process_gpu_peak_mib": null,
+      "gpu_attribution_note": "WSL nvidia-smi does not expose per-process GPU memory"
+    },
+    {
+      "variant": "gated_attention",
+      "group": "architecture",
+      "train_seed": 11,
+      "status": "completed",
+      "model_config": {
+        "action_dim": 6,
+        "actor_type": "transformer",
+        "auxiliary_indices": [],
+        "baseline_hidden": [
+          128,
+          64
+        ],
+        "command_dim": 3,
+        "critic_dim": 29,
+        "critic_hidden": [
+          256,
+          128,
+          64
+        ],
+        "d_model": 64,
+        "ffn_dim": 128,
+        "gru_hidden": 64,
+        "history_length": 16,
+        "initial_std": 0.2,
+        "num_heads": 4,
+        "num_layers": 2,
+        "proprio_dim": 16,
+        "residual_type": "gated",
+        "sensor_groups": 2,
+        "time_encoding": "elapsed",
+        "time_scale_s": 0.1
+      },
+      "actor_parameters": 168844,
+      "critic_parameters": 48897,
+      "ppo_auxiliary_coef": 0.0,
+      "updates_completed": 20,
+      "optimizer_steps": 116,
+      "kl_early_stopped_updates": 10,
+      "collected_transitions": 327680,
+      "train_elapsed_s": 167.41189677099464,
+      "collection_elapsed_s": 69.12751976997242,
+      "collection_transitions_per_second": 4740.2250375882495,
+      "end_to_end_train_transitions_per_second": 1957.3280413173898,
+      "final_train_reward": 0.00393382757787103,
+      "checkpoint_sha256": "1d7270404a1f42b2d4424cd70e5f185dc1318e7a5c373312ca4c2225c051ec94",
+      "evaluation": {
+        "checkpoint_update": 20,
+        "seed": 101,
+        "vector_steps": 300,
+        "num_envs": 8,
+        "transitions": 2400,
+        "reward_mean": 0.02346946525387466,
+        "terminated_count": 0,
+        "truncated_count": 0,
+        "metrics": {
+          "height_abs_error": {
+            "mean": 0.05022096070150534,
+            "rms": 0.050963957425999906,
+            "min": 0.0019582509994506836,
+            "max": 0.05830642580986023,
+            "count": 2400
+          },
+          "non_wheel_net_force": {
+            "mean": 26.531330196857454,
+            "rms": 44.71542902170222,
+            "min": 0.0,
+            "max": 450.4042663574219,
+            "count": 2400
+          },
+          "planar_speed": {
+            "mean": 0.08068546989622215,
+            "rms": 0.10309536755319393,
+            "min": 0.009480826556682587,
+            "max": 0.40871211886405945,
+            "count": 2400
+          },
+          "vx_abs_error": {
+            "mean": 0.05781477842421737,
+            "rms": 0.06076117162407117,
+            "min": 8.948147296905518e-06,
+            "max": 0.13869808614253998,
+            "count": 2400
+          },
+          "wz_abs_error": {
+            "mean": 0.09300345371516111,
+            "rms": 0.14653586137130536,
+            "min": 0.0023101158440113068,
+            "max": 0.6116217374801636,
+            "count": 2400
+          }
+        },
+        "elapsed_s": 36.205856074011535,
+        "policy": "deterministic_mean",
+        "action_clip": 100.0
+      },
+      "environment_identity": {
+        "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+        "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+        "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+        "usd_seed_sha256": null,
+        "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+        "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+      },
+      "train_eval_identity_equal": true,
+      "sampled_train_rss_peak_mib": 4766.58984375,
+      "per_process_gpu_peak_mib": null,
+      "gpu_attribution_note": "WSL nvidia-smi does not expose per-process GPU memory"
+    },
+    {
+      "variant": "supervised_attention",
+      "group": "supervision",
+      "train_seed": 11,
+      "status": "completed",
+      "model_config": {
+        "action_dim": 6,
+        "actor_type": "transformer",
+        "auxiliary_indices": [
+          25,
+          26,
+          27
+        ],
+        "baseline_hidden": [
+          128,
+          64
+        ],
+        "command_dim": 3,
+        "critic_dim": 29,
+        "critic_hidden": [
+          256,
+          128,
+          64
+        ],
+        "d_model": 64,
+        "ffn_dim": 128,
+        "gru_hidden": 64,
+        "history_length": 16,
+        "initial_std": 0.2,
+        "num_heads": 4,
+        "num_layers": 2,
+        "proprio_dim": 16,
+        "residual_type": "add",
+        "sensor_groups": 2,
+        "time_encoding": "elapsed",
+        "time_scale_s": 0.1
+      },
+      "actor_parameters": 69967,
+      "critic_parameters": 48897,
+      "ppo_auxiliary_coef": 0.1,
+      "updates_completed": 20,
+      "optimizer_steps": 20,
+      "kl_early_stopped_updates": 20,
+      "collected_transitions": 327680,
+      "train_elapsed_s": 171.345226112011,
+      "collection_elapsed_s": 71.82998670300003,
+      "collection_transitions_per_second": 4561.88306639787,
+      "end_to_end_train_transitions_per_second": 1912.396437504425,
+      "final_train_reward": 0.0049583422441575875,
+      "checkpoint_sha256": "c857caa373c9191ec64c92a37c54e5527ddc8d3e3a20e6b85e80d8d31f93ad0e",
+      "evaluation": {
+        "checkpoint_update": 20,
+        "seed": 101,
+        "vector_steps": 300,
+        "num_envs": 8,
+        "transitions": 2400,
+        "reward_mean": 0.02561477407425021,
+        "terminated_count": 0,
+        "truncated_count": 0,
+        "metrics": {
+          "height_abs_error": {
+            "mean": 0.09267666875074307,
+            "rms": 0.09427612843103512,
+            "min": 0.002521723508834839,
+            "max": 0.09800569713115692,
+            "count": 2400
+          },
+          "non_wheel_net_force": {
+            "mean": 74.56235425233841,
+            "rms": 149.56685224874403,
+            "min": 0.0,
+            "max": 1170.6334228515625,
+            "count": 2400
+          },
+          "planar_speed": {
+            "mean": 0.10412769688448559,
+            "rms": 0.15173916506201335,
+            "min": 0.03852028772234917,
+            "max": 0.6381303071975708,
+            "count": 2400
+          },
+          "vx_abs_error": {
+            "mean": 0.08735630081656079,
+            "rms": 0.11942631752670688,
+            "min": 0.003166496753692627,
+            "max": 0.5166864991188049,
+            "count": 2400
+          },
+          "wz_abs_error": {
+            "mean": 0.18993341270368547,
+            "rms": 0.38011381499260755,
+            "min": 0.040217142552137375,
+            "max": 2.163449764251709,
+            "count": 2400
+          }
+        },
+        "elapsed_s": 37.54044137999881,
+        "policy": "deterministic_mean",
+        "action_clip": 100.0
+      },
+      "environment_identity": {
+        "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+        "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+        "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+        "usd_seed_sha256": null,
+        "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+        "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+      },
+      "train_eval_identity_equal": true,
+      "sampled_train_rss_peak_mib": 4729.02734375,
+      "per_process_gpu_peak_mib": null,
+      "gpu_attribution_note": "WSL nvidia-smi does not expose per-process GPU memory"
+    },
+    {
+      "variant": "history_mlp",
+      "group": "architecture",
+      "train_seed": 11,
+      "status": "completed",
+      "model_config": {
+        "action_dim": 6,
+        "actor_type": "mlp",
+        "auxiliary_indices": [],
+        "baseline_hidden": [
+          128,
+          64
+        ],
+        "command_dim": 3,
+        "critic_dim": 29,
+        "critic_hidden": [
+          256,
+          128,
+          64
+        ],
+        "d_model": 64,
+        "ffn_dim": 128,
+        "gru_hidden": 64,
+        "history_length": 16,
+        "initial_std": 0.2,
+        "num_heads": 4,
+        "num_layers": 2,
+        "proprio_dim": 16,
+        "residual_type": "add",
+        "sensor_groups": 2,
+        "time_encoding": "elapsed",
+        "time_scale_s": 0.1
+      },
+      "actor_parameters": 74700,
+      "critic_parameters": 48897,
+      "ppo_auxiliary_coef": 0.0,
+      "updates_completed": 20,
+      "optimizer_steps": 120,
+      "kl_early_stopped_updates": 7,
+      "collected_transitions": 327680,
+      "train_elapsed_s": 158.80932377099816,
+      "collection_elapsed_s": 65.51024899704498,
+      "collection_transitions_per_second": 5001.965417881115,
+      "end_to_end_train_transitions_per_second": 2063.3549228665697,
+      "final_train_reward": 0.0031739222879931805,
+      "checkpoint_sha256": "538dd5b5eb85b396f862217967c479df3ce85145c374ae90763024283564ca34",
+      "evaluation": {
+        "checkpoint_update": 20,
+        "seed": 101,
+        "vector_steps": 300,
+        "num_envs": 8,
+        "transitions": 2400,
+        "reward_mean": 0.02649135178071447,
+        "terminated_count": 0,
+        "truncated_count": 0,
+        "metrics": {
+          "height_abs_error": {
+            "mean": 0.035332270512978235,
+            "rms": 0.03680820051492801,
+            "min": 0.0003490149974822998,
+            "max": 0.042096495628356934,
+            "count": 2400
+          },
+          "non_wheel_net_force": {
+            "mean": 36.215355337460835,
+            "rms": 43.443387758735334,
+            "min": 0.0,
+            "max": 327.4604187011719,
+            "count": 2400
+          },
+          "planar_speed": {
+            "mean": 0.05081773332073681,
+            "rms": 0.11199692027433518,
+            "min": 1.9207298464607447e-05,
+            "max": 0.5359280109405518,
+            "count": 2400
+          },
+          "vx_abs_error": {
+            "mean": 0.03823036043565026,
+            "rms": 0.09909458813888956,
+            "min": 9.934010449796915e-07,
+            "max": 0.506179690361023,
+            "count": 2400
+          },
+          "wz_abs_error": {
+            "mean": 0.07525677410386077,
+            "rms": 0.1449950312289243,
+            "min": 6.08246773481369e-06,
+            "max": 0.5559547543525696,
+            "count": 2400
+          }
+        },
+        "elapsed_s": 35.58764089200122,
+        "policy": "deterministic_mean",
+        "action_clip": 100.0
+      },
+      "environment_identity": {
+        "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+        "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+        "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+        "usd_seed_sha256": null,
+        "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+        "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+      },
+      "train_eval_identity_equal": true,
+      "sampled_train_rss_peak_mib": 4712.95703125,
+      "per_process_gpu_peak_mib": null,
+      "gpu_attribution_note": "WSL nvidia-smi does not expose per-process GPU memory"
+    },
+    {
+      "variant": "history_gru",
+      "group": "architecture",
+      "train_seed": 11,
+      "status": "completed",
+      "model_config": {
+        "action_dim": 6,
+        "actor_type": "gru",
+        "auxiliary_indices": [],
+        "baseline_hidden": [
+          128,
+          64
+        ],
+        "command_dim": 3,
+        "critic_dim": 29,
+        "critic_hidden": [
+          256,
+          128,
+          64
+        ],
+        "d_model": 64,
+        "ffn_dim": 128,
+        "gru_hidden": 64,
+        "history_length": 16,
+        "initial_std": 0.2,
+        "num_heads": 4,
+        "num_layers": 2,
+        "proprio_dim": 16,
+        "residual_type": "add",
+        "sensor_groups": 2,
+        "time_encoding": "elapsed",
+        "time_scale_s": 0.1
+      },
+      "actor_parameters": 19230,
+      "critic_parameters": 48897,
+      "ppo_auxiliary_coef": 0.0,
+      "updates_completed": 20,
+      "optimizer_steps": 160,
+      "kl_early_stopped_updates": 0,
+      "collected_transitions": 327680,
+      "train_elapsed_s": 162.34694806799234,
+      "collection_elapsed_s": 66.96943362400634,
+      "collection_transitions_per_second": 4892.978516732408,
+      "end_to_end_train_transitions_per_second": 2018.393347701028,
+      "final_train_reward": 0.003661809633813462,
+      "checkpoint_sha256": "8500de6a4aec3aba9245bfae4a7b013a4044a5f396517a5bae173a845fe539e9",
+      "evaluation": {
+        "checkpoint_update": 20,
+        "seed": 101,
+        "vector_steps": 300,
+        "num_envs": 8,
+        "transitions": 2400,
+        "reward_mean": 0.024463709804307048,
+        "terminated_count": 0,
+        "truncated_count": 0,
+        "metrics": {
+          "height_abs_error": {
+            "mean": 0.051305289367834725,
+            "rms": 0.053078911733922554,
+            "min": 0.000701904296875,
+            "max": 0.06406514346599579,
+            "count": 2400
+          },
+          "non_wheel_net_force": {
+            "mean": 37.34786424398422,
+            "rms": 75.59148064557972,
+            "min": 0.0,
+            "max": 814.6163940429688,
+            "count": 2400
+          },
+          "planar_speed": {
+            "mean": 0.05341332924127831,
+            "rms": 0.11319680816722236,
+            "min": 0.00031959370244294405,
+            "max": 0.5271981954574585,
+            "count": 2400
+          },
+          "vx_abs_error": {
+            "mean": 0.032338939422067295,
+            "rms": 0.08016969275192934,
+            "min": 3.3724354580044746e-06,
+            "max": 0.4242478609085083,
+            "count": 2400
+          },
+          "wz_abs_error": {
+            "mean": 0.10359815661266111,
+            "rms": 0.20381117451047892,
+            "min": 4.804949276149273e-05,
+            "max": 0.6036700010299683,
+            "count": 2400
+          }
+        },
+        "elapsed_s": 34.938340894004796,
+        "policy": "deterministic_mean",
+        "action_clip": 100.0
+      },
+      "environment_identity": {
+        "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+        "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+        "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+        "usd_seed_sha256": null,
+        "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+        "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+      },
+      "train_eval_identity_equal": true,
+      "sampled_train_rss_peak_mib": 4691.75,
+      "per_process_gpu_peak_mib": null,
+      "gpu_attribution_note": "WSL nvidia-smi does not expose per-process GPU memory"
+    }
+  ],
+  "fairness_checks": {
+    "architecture": {
+      "partial": false,
+      "training_transition_counts": [
+        327680
+      ],
+      "evaluation_transition_counts": [
+        2400
+      ],
+      "comparison_available": true,
+      "reasons": [],
+      "scope": "within-group configuration and sample-budget checks, not a quality ranking"
+    },
+    "supervision": {
+      "partial": false,
+      "training_transition_counts": [
+        327680
+      ],
+      "evaluation_transition_counts": [
+        2400
+      ],
+      "comparison_available": true,
+      "reasons": [],
+      "scope": "within-group configuration and sample-budget checks, not a quality ranking"
+    }
+  },
+  "tmux_before": [
+    "r3a-post-eval-waiter: 1 windows (created Mon Sep 14 03:16:53 2026)",
+    "r3a-train-35f06fa3504049f8924f9ccd1ed02b93: 1 windows (created Mon Sep 14 02:51:40 2026)",
+    "transformer-pilot-0353: 1 windows (created Mon Sep 14 03:53:21 2026)"
+  ],
+  "tmux_after": [
+    "r3a-post-eval-waiter: 1 windows (created Mon Sep 14 03:16:53 2026)",
+    "r3a-train-35f06fa3504049f8924f9ccd1ed02b93: 1 windows (created Mon Sep 14 02:51:40 2026)"
+  ],
+  "interpretation": "Descriptive available-seed statistics only; no winner or physical-success claim. Missing seeds remain explicit. Sample std uses independent training seeds, not frames.",
+  "prior_capacity_attempt": {
+    "directory": "/home/kaiser/robot-rl-sim60/transformer-comparison-pilot-20260914T0348",
+    "plan_sha256": "97d5eb79a37318f4ba9848d21f5e73e6d25528e16f239a69844ee681b5130f30",
+    "runner_exit_code": 1,
+    "abort_reason": "memory_reserve",
+    "elapsed_s": 97.88010546199803,
+    "samples": 93,
+    "actual_max_workers": 3,
+    "gpu_memory_peak_mib": 15390,
+    "gpu_util_peak_percent": 47,
+    "gpu_util_mean_percent": 35.87096774193548,
+    "memory_available_min_mib": 588.6171875,
+    "excluded_from_variant_results": true,
+    "reason": "three 512-env workers exceeded WSL memory reserve during startup; rerun all variants with max_parallel=2"
+  }
+}

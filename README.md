@@ -2,6 +2,34 @@
 
 **独立的时间感知 Transformer 控制研究仓库。** Actor 以因果注意力编码本体观测、历史指令与真实时间信息，再通过当前命令 query 输出连续动作。采集、PPO、控制时序和模型导出采用独立接口；不依赖 RSL-RL。
 
+## 多架构对照
+
+现支持六种配置变体，统一历史信息、环境与样本预算，分别保存优化器和产物：
+
+| 变体 | 目的 | 默认actor参数量 |
+|---|---|---:|
+| `time_attention` | 真实时间年龄编码的Transformer基线 | 69,772 |
+| `index_attention` | 历史位置编码消融；frame中的时间信息仍保留 | 69,772 |
+| `gated_attention` | GRU式深度残差门控，研究优化稳定性 | 168,844 |
+| `supervised_attention` | query辅助状态预测，研究显式监督的作用 | 69,967 |
+| `history_mlp` | 同窗口、同可见信息的MLP对照 | 74,700 |
+| `history_gru` | 每窗从零重算的GRU对照，无跨调用隐藏状态 | 19,230 |
+
+监督变体独立分组；辅助目标列必须由环境解释，不能仅凭列号冒称速度真值。参数量和实际计算量不同，不宣称等参数对照。原始默认网络检查点可通过显式迁移继续加载。
+
+`configs/comparison.json`默认规划6变体×3训练seed，各自用3个独立评估seed验证：
+
+```bash
+python -m transformer_rl.experiment_cli plan --spec configs/comparison.json --root runs/comparison
+python -m transformer_rl.experiment_cli summarize --root runs/comparison
+# 在新规格中配置实际环境工厂后执行，可显式选择并发数：
+python -m transformer_rl.experiment_cli run --root runs/configured_comparison --max-parallel 2
+```
+
+默认通用规格的工厂为null，只能规划；机器人例子另见[Kaiser接入与实测](docs/KAISER_EXPERIMENTS.md)。调度有独立进程组、超时回收、来源/配置哈希与分层seed统计，详情见[实验指南](docs/EXPERIMENTS.md)。
+
+**Kaiser已完成6/6真实训练＋独立评估pilot**：每项512环境、20次PPO更新、327,680个训练样本；有效并发2，总训练样本1,966,080。全机GPU利用率峰值98%（含已有任务）。3并发启动时WSL内存余量不足，已保留该中止记录。这是单seed短测，不是收敛或架构优胜证明。
+
 ## 当前实现
 
 - **时间感知 actor**：默认64维、2层、4 heads、FFN128；16帧历史，末尾附加当前命令 query。无dropout、无可变KV缓存。
@@ -11,7 +39,7 @@
 - **控制时序组件**：按秒运行的batched延迟指令通道；区分issued、到达、控制侧应用和目标保持；提供独立policy/controller/physics周期约束。
 - **检查点与导出**：模型/Adam恢复、严格元数据校验；ONNX导出前通过多种合成历史的CPU ORT一致性检查。
 
-这是网络与训练基础设施，**尚未接入经过核实的机器人资产、真实通信和下位机PID**。旧部署demo不是本仓库的硬件依据。定向测试验证实现正确性，不代表已经训练出有效控制策略。
+核心保持通用tensor接口；`examples/isaaclab_task.py`已接入Kaiser现有的外部研究物理任务并完成上述pilot。**研究资产、真实通信和下位机PID的硬件一致性仍未验证**，旧部署demo不是硬件依据。当前任务沿用研究合同，额外通信延迟为零；不能由此声称获得延迟鲁棒性或有效实机策略。
 
 ## 快速使用
 

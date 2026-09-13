@@ -156,6 +156,15 @@ def _train(args, model_config: ModelConfig, ppo_config: PPOConfig, environment: 
             env = factory(model_config=model_config, environment_config=environment,
                           device=torch.device(args.device))
             budget.install()  # Reclaim flag-only handlers if an SDK installed its own.
+            provenance = json.loads(json.dumps(getattr(env, "metadata", {}), allow_nan=False))
+            if not isinstance(provenance, dict):
+                raise ValueError("environment metadata must be a JSON object")
+            if args.resume:
+                expected_identity = origin.get("environment_provenance", {}).get("identity")
+                if expected_identity is not None and provenance.get("identity") != expected_identity:
+                    raise ValueError("resume environment identity differs from checkpoint")
+            metadata["environment_provenance"] = provenance
+            _write_json(run_dir / "environment.json", provenance)
             if args.resume:
                 # Rebind Adam after device conversion via the checkpoint loader.
                 model, trainer, _, _ = load_checkpoint(args.resume, device=args.device)
@@ -203,6 +212,7 @@ def _train(args, model_config: ModelConfig, ppo_config: PPOConfig, environment: 
                 "collected_transitions": collector.total_transitions,
                 "elapsed_s": time.monotonic() - started,
                 "checkpoints": saved,
+                "environment_provenance": provenance,
                 "scope": "optimization execution; control quality requires independent evaluation",
             }
             _write_json(run_dir / "completion.json", result)
@@ -241,11 +251,34 @@ def main(argv: list[str] | None = None) -> int:
     export = subparsers.add_parser("export", help="Export and verify deterministic ONNX policy")
     export.add_argument("--checkpoint", type=Path, required=True)
     export.add_argument("--output", type=Path, required=True)
+    evaluate = subparsers.add_parser("evaluate", help="Evaluate a checkpoint with independent scenario seeds")
+    evaluate.add_argument("--checkpoint", type=Path, required=True)
+    evaluate.add_argument("--config", type=Path, required=True)
+    evaluate.add_argument("--env-factory", required=True)
+    evaluate.add_argument("--steps", type=_positive_int, required=True)
+    evaluate.add_argument("--seed", type=int, required=True)
+    evaluate.add_argument("--device", default="cpu")
+    evaluate.add_argument("--action-clip", type=_positive_seconds)
+    evaluate.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.operation == "export":
             from .export import export_policy
             result = export_policy(args.checkpoint, args.output)
+        elif args.operation == "evaluate":
+            from .checkpoint import load_checkpoint
+            from .evaluation import evaluate_policy
+            if args.output.exists() or args.output.is_symlink():
+                raise FileExistsError("evaluation output already exists")
+            if not args.output.parent.is_dir():
+                raise FileNotFoundError("evaluation output parent does not exist")
+            model_config, _, environment = load_config(args.config)
+            model, _, _, _ = load_checkpoint(args.checkpoint)
+            if model.config != model_config:
+                raise ValueError("evaluation model configuration differs from checkpoint")
+            result = evaluate_policy(args.checkpoint, _factory(args.env_factory), environment,
+                                     args.steps, args.seed, args.device, args.action_clip)
+            _write_json(args.output, result)
         else:
             model_config, ppo_config, environment = (load_config(args.config) if args.config
                                                       else (ModelConfig(), PPOConfig(), {}))
@@ -253,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
                 with torch.random.fork_rng(devices=[]):
                     model = ActorCritic(model_config)
                 result = {
-                    "architecture": "time-aware causal Transformer with command query",
+                    "architecture": model.actor.describe(),
                     "model": asdict(model_config),
                     "frame_dim": model_config.frame_dim,
                     "actor_parameters": sum(p.numel() for p in model.actor.parameters()),

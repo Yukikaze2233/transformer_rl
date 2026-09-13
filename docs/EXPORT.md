@@ -20,7 +20,7 @@ model, trainer, update, metadata = load_checkpoint(
 
 ### 格式与校验
 
-- 格式标识为 `transformer_rl.checkpoint`，内部 `schema_version=1`，文件名不要求带版本号。
+- 格式标识为 `transformer_rl.checkpoint`，新文件内部`schema_version=2`，文件名不要求带版本号。旧schema 1仅按精确旧字段集合显式补默认值迁移；`source_schema_version`保留来源格式，原metadata保留。
 - 保存完整 `ModelConfig`、`PPOConfig`、模型 dtype、actor/critic weights 与 buffers、Adam 状态、累计 update 和 JSON metadata。
 - metadata 必须为字符串键 JSON object；嵌套值仅接受 object、list、string、有限 number、boolean、null。tuple、tensor、非字符串键及循环引用被拒绝。
 - 读取显式使用 `torch.load(..., weights_only=True, map_location="cpu")`，不回退到非受限 pickle。
@@ -69,11 +69,11 @@ print(report["path"], report["sidecar_path"], report["sha256"])
 | `[27,29)` | sensor age known | float32 的 0/1 标志 |
 | `[29,30)` | policy dt | 秒；reset 首帧可为 0 |
 
-sidecar 根据实际 ModelConfig 生成布局，维度改变时不硬编码默认偏移。传感器 age 与 policy dt 在网络内除以 `time_scale_s`。真实历史 age 先计算 `float64(now - times)`，然后 cast 到 float32，再使用固定 Fourier 编码；生产端应直接提供 float64 timestamp，不能先转 float32 再期望恢复 uptime 下的毫秒精度。
+sidecar根据实际ModelConfig生成布局和actor.describe()，维度改变时不硬编码默认偏移。传感器age与policy dt在网络内除以time_scale_s。elapsed Transformer将float64时间差转为网络精度后作Fourier编码；index变体以位置索引编码历史位置；MLP/GRU将真实age直接作为额外窗口特征。生产端应直接提供float64 timestamp，不能先转float32再期望恢复uptime下的毫秒精度。
 
 有效 timestamp 须严格递增且 `<= now`。所有有意义的输入须有限；无效 padding 的 frame/time 可含 NaN/Inf，不参与模型计算。空历史合法；partial reset 由调用方清理对应环境的 history，图内部没有可变 KV/cache。导出路径不执行 Python 数据校验，调用方须在 ONNX 调用前满足这些约束。
 
-输出没有 tanh、clipping、动作抽样或 actuator conversion；图不包含 critic、optimizer 或 Gaussian log_std。外部命令限幅/缩放由调用方负责，随后写回 history 的应为 **issued action**。该导出不包含 applied action、传输 FIFO、PID、执行器响应或真实硬件时序模型。
+输出没有tanh、clipping、动作抽样或actuator conversion；图不包含critic、optimizer、Gaussian log_std或辅助预测头。sidecar仍记录辅助目标列与训练系数，避免把额外监督隐藏起来。外部命令限幅/缩放由调用方负责，随后写回history的应为 **issued action**。该导出不包含applied action、传输FIFO、PID、执行器响应或真实硬件时序模型。
 
 ### 发布前验证
 
@@ -95,8 +95,7 @@ ONNX 与 sidecar 全部在验证成功后暂存，sidecar 最后发布作为完�
 ## 定向测试
 
 ```bash
-PYTHONPATH=src /tmp/opencode/v40-sim60-ci/bin/python -m pytest \
-  tests/test_checkpoint.py tests/test_export.py -q -rs
+python -m pytest tests/test_variants.py tests/test_checkpoint.py tests/test_export.py -q -rs
 ```
 
 测试使用合成模型参数和 fake gradients 验证 Adam 状态往返及下一次更新的一致性，覆盖损坏格式、非法配置/张量/metadata、全局 RNG 保持、拒绝覆盖、staging 失败和 sidecar 发布竞争。所有测试均为实现验证。

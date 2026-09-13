@@ -1,0 +1,124 @@
+"""Independent deterministic policy evaluation with explicit task-owned metrics."""
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+from pathlib import Path
+import random
+import time
+
+import torch
+
+from .adapters import _TensorEnvContract
+from .checkpoint import _load_checkpoint_bytes
+from .history import HistoryBuffer
+
+
+class _MetricAccumulator:
+    def __init__(self):
+        self.count = 0
+        self.total = self.square_total = 0.0
+        self.minimum, self.maximum = math.inf, -math.inf
+
+    def add(self, values):
+        values = values.detach().double()
+        self.count += values.numel()
+        self.total += values.sum().item()
+        self.square_total += values.square().sum().item()
+        self.minimum = min(self.minimum, values.min().item())
+        self.maximum = max(self.maximum, values.max().item())
+
+    def report(self):
+        return {"mean": self.total / self.count,
+                "rms": math.sqrt(self.square_total / self.count),
+                "min": self.minimum, "max": self.maximum, "count": self.count}
+
+
+@torch.no_grad()
+def evaluate_policy(checkpoint_path, env_factory, environment_config, steps, seed,
+                    device, action_clip=None) -> dict:
+    """Evaluate fixed mean actions; the factory owns scenario and physical semantics.
+
+    Metrics must be PRE-reset float tensors [N], with the same names each step.
+    No optimizer updates occur. Counts describe the complete sampled interval,
+    including initial transients and any auto-resets; they do not prove a
+    continuous no-reset standing interval or convergence.
+    """
+    if type(steps) is not int or steps < 1 or type(seed) is not int or seed < 0:
+        raise ValueError("steps must be positive and seed nonnegative integers")
+    if not callable(env_factory) or not isinstance(environment_config, dict):
+        raise TypeError("evaluation requires a factory and environment object")
+    if action_clip is not None and (type(action_clip) not in (int, float)
+                                   or not math.isfinite(action_clip) or action_clip <= 0):
+        raise ValueError("action_clip must be None or finite and positive")
+    environment_config = json.loads(json.dumps(environment_config, allow_nan=False))
+    data = Path(checkpoint_path).read_bytes()
+    model, _, update, metadata = _load_checkpoint_bytes(data, device="cpu")
+    if "action_clip" in metadata and metadata["action_clip"] != action_clip:
+        raise ValueError("evaluation action_clip differs from training checkpoint")
+    random.seed(seed)
+    torch.manual_seed(seed)
+    started = time.monotonic()
+    env = env_factory(model_config=model.config, environment_config=environment_config,
+                      device=torch.device(device))
+    try:
+        # Keep SDK initialization ahead of CUDA model placement.
+        model.to(device).eval()
+        contract = _TensorEnvContract(model.config, env.num_envs, env.device)
+        provenance = json.loads(json.dumps(getattr(env, "metadata", {}), allow_nan=False))
+        if not isinstance(provenance, dict):
+            raise ValueError("environment metadata must be a JSON object")
+        expected_identity = metadata.get("environment_provenance", {}).get("identity")
+        if expected_identity is not None and provenance.get("identity") != expected_identity:
+            raise ValueError("evaluation environment identity differs from training checkpoint")
+        history = HistoryBuffer(model.config, env.num_envs, env.device)
+        observation = contract.observation(env.reset(seed=seed))
+        current = history.append(observation)
+        rewards = _MetricAccumulator()
+        metrics = {}
+        metric_names = None
+        terminated = truncated = done_count = 0
+        for _ in range(steps):
+            # Do not sample a distribution or use its exploration std in evaluation.
+            action = contract.tensor("policy mean", model.actor(current),
+                                     (env.num_envs, model.config.action_dim))
+            if action_clip is not None:
+                action = action.clamp(-action_clip, action_clip)
+            result = contract.step(env.step(action.clone()))
+            rewards.add(result.reward)
+            terminated += result.terminated.sum().item()
+            truncated += result.truncated.sum().item()
+            done = result.terminated | result.truncated
+            done_count += done.sum().item()
+            physical = result.info.get("evaluation_metrics", {})
+            if not isinstance(physical, dict) or any(type(k) is not str or not k for k in physical):
+                raise ValueError("evaluation_metrics must map nonempty names to tensors")
+            if metric_names is None:
+                metric_names = set(physical)
+                metrics = {name: _MetricAccumulator() for name in physical}
+            if set(physical) != metric_names:
+                raise ValueError("evaluation metric names must remain constant across steps")
+            for name, value in physical.items():
+                metrics[name].add(contract.tensor(f"evaluation_metrics.{name}", value, (env.num_envs,)))
+            history.reset(done)
+            current = history.append(result.observation)
+        if contract.device.type == "cuda":
+            torch.cuda.synchronize(contract.device)
+        report = {
+            "policy": "deterministic_mean", "checkpoint_sha256": hashlib.sha256(data).hexdigest(),
+            "checkpoint_update": update, "seed": seed, "vector_steps": steps,
+            "num_envs": env.num_envs, "transitions": steps * env.num_envs,
+            "reward_mean": rewards.report()["mean"], "terminated_count": terminated,
+            "truncated_count": truncated, "done_count": done_count,
+            "metrics": {name: metric.report() for name, metric in sorted(metrics.items())},
+            "physical_metrics_available": bool(metrics),
+            "environment": environment_config, "environment_provenance": provenance,
+            "action_clip": action_clip, "actor": model.actor.describe(),
+            "elapsed_s": time.monotonic() - started,
+            "scope": "full interval including transients and auto-resets; task metrics are pre-reset",
+        }
+        json.dumps(report, allow_nan=False)
+        return report
+    finally:
+        env.close()

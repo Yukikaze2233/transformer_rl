@@ -1,0 +1,16 @@
+{
+  "base_config": "control.json",
+  "environment_factory": null,
+  "seeds": [11, 22, 33],
+  "variants": [
+    {"name": "time_attention", "model": {}, "ppo": {}, "group": "architecture"},
+    {"name": "index_attention", "model": {"time_encoding": "index"}, "ppo": {}, "group": "architecture"},
+    {"name": "gated_attention", "model": {"residual_type": "gated"}, "ppo": {}, "group": "architecture"},
+    {"name": "supervised_attention", "model": {"auxiliary_indices": [25, 26, 27]}, "ppo": {"auxiliary_coef": 0.1}, "group": "supervision"},
+    {"name": "history_mlp", "model": {"actor_type": "mlp"}, "ppo": {}, "group": "architecture"},
+    {"name": "history_gru", "model": {"actor_type": "gru"}, "ppo": {}, "group": "architecture"}
+  ],
+  "training": {"updates": 1000, "rollout_steps": 48, "max_seconds": 3600, "checkpoint_interval": 100, "action_clip": null},
+  "execution": {"devices": ["cuda:0"], "max_parallel": 1, "job_timeout_seconds": 4200},
+  "evaluation": {"steps": 2000, "seeds": [101, 102, 103], "environment": {}}
+}
