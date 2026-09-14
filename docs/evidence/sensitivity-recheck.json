@@ -1,0 +1,3209 @@
+{
+  "schema_version": 1,
+  "scope": "new_source_numerical_guard_recheck_not_new_independent_seeds",
+  "snapshot_directory": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920",
+  "source": {
+    "files_sha256": {
+      "src/transformer_rl/__init__.py": "436c0fd75df78c0bf59b4a881c512e1560cb13e27226c072d13d2a581407afe9",
+      "src/transformer_rl/__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
+      "src/transformer_rl/adapters.py": "0f8f0a8b43d09a034e23b4002cd9de5af86c94b635adf932fb97d81eb3e9fcd4",
+      "src/transformer_rl/checkpoint.py": "e09f09bc61ae806cd2c7fd7f54590b2660469fe0fe2fc518a059bcf42b82d8b2",
+      "src/transformer_rl/cli.py": "fb89fe3877419ffc6b778938b2d31860f1db17f219e173249161e313ee292534",
+      "src/transformer_rl/config.py": "3aec043ef4c88d27a4022dd0061cd710a0c933020607052a2bec070c6b02c7aa",
+      "src/transformer_rl/evaluation.py": "0d1fa19a39a55e8f0a53274ae3b5f972204a12d03e538b740604f776f6caf699",
+      "src/transformer_rl/experiment_cli.py": "078628d9b1a81d64c83d3cdb92dad01eaa387b8c228f8397db04e8c00c11e106",
+      "src/transformer_rl/experiments.py": "eb9f48a5d7d5cc2d93c2ba16ab86dcac5b6e01ae79bbd5516ac88350e7f5782d",
+      "src/transformer_rl/export.py": "36a1a515e6a37c4d52b5c07935823451e1e9733af9151621b54dbfb4de03b311",
+      "src/transformer_rl/history.py": "ff9e7d059904fadc343945de9ec02e815b4e1e53130ae0625edc375c83914b57",
+      "src/transformer_rl/model.py": "9982cd569bd1368dc5be9601b368fd86a20a74e2805b2add64c28537bf224942",
+      "src/transformer_rl/ppo.py": "8994d71c41ebb51feeb568d9a8830c36ca73829a89818836c7dbde88c6e238a2",
+      "src/transformer_rl/runner.py": "ef76f46a2afa5007b569cb920d560bbdcc2edcf54aa5efdd053eb6c81384154d",
+      "src/transformer_rl/storage.py": "236bd8d599f7a37dc92309cec2649d812ef9e0a514a7356bce0bae848bdaca66",
+      "src/transformer_rl/timing.py": "943a347f3e74ac8a4a6c9d50b617d7ff39730b238b0ed803c7235745e202b6d3",
+      "src/transformer_rl/types.py": "416bc05a95dc319a595731a81332dbfd24903599e9d78441a36aa2ab9bbe1af4",
+      "src/transformer_rl.egg-info/PKG-INFO": "6dcc46c891964ba097fc87912c6d6594b0951adb18877c4591d1d44dbf0bc1e1",
+      "src/transformer_rl.egg-info/SOURCES.txt": "9d17b7bf92fd073e61c4d37726446b1664909f55e127f2401510b10fbf84c354",
+      "src/transformer_rl.egg-info/dependency_links.txt": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "src/transformer_rl.egg-info/entry_points.txt": "1939cd58a9fe036cb07313a8988e11331763877eaadae5499b698c65e27b5931",
+      "src/transformer_rl.egg-info/requires.txt": "daae52463d92bd8b11f11026bc5793919bc381592f06fe63f428987266fed33b",
+      "src/transformer_rl.egg-info/top_level.txt": "e2ef9676881a87fb68c4b454585a4d510c3d42dec7e270aeb02440c50d70f7ce",
+      "examples/__init__.py": "03444d3eae0a5197c711ebc64534aae68d9d07509aecfae397ba814053437dfd",
+      "examples/_isaaclab_process.py": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b",
+      "examples/isaaclab_task.py": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+      "configs/comparison.json": "ed5cd19489bc10d0d9659efcb12b6ced7a23ea83e487d8dcfa7c9f4ee9d821e9",
+      "configs/control.json": "fc467951d9a7d67a6dc7f955a908812a6a3e2dfaeb38cf4626691380fe45ff92",
+      "configs/sensitivity.json": "393e5cde84f4aabb64e1afaabc469fb55bacb97ede1aeb838d80011b1e14cebc"
+    },
+    "package_source": {
+      "files": {
+        "__init__.py": "436c0fd75df78c0bf59b4a881c512e1560cb13e27226c072d13d2a581407afe9",
+        "__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
+        "adapters.py": "0f8f0a8b43d09a034e23b4002cd9de5af86c94b635adf932fb97d81eb3e9fcd4",
+        "checkpoint.py": "e09f09bc61ae806cd2c7fd7f54590b2660469fe0fe2fc518a059bcf42b82d8b2",
+        "cli.py": "fb89fe3877419ffc6b778938b2d31860f1db17f219e173249161e313ee292534",
+        "config.py": "3aec043ef4c88d27a4022dd0061cd710a0c933020607052a2bec070c6b02c7aa",
+        "evaluation.py": "0d1fa19a39a55e8f0a53274ae3b5f972204a12d03e538b740604f776f6caf699",
+        "experiment_cli.py": "078628d9b1a81d64c83d3cdb92dad01eaa387b8c228f8397db04e8c00c11e106",
+        "experiments.py": "eb9f48a5d7d5cc2d93c2ba16ab86dcac5b6e01ae79bbd5516ac88350e7f5782d",
+        "export.py": "36a1a515e6a37c4d52b5c07935823451e1e9733af9151621b54dbfb4de03b311",
+        "history.py": "ff9e7d059904fadc343945de9ec02e815b4e1e53130ae0625edc375c83914b57",
+        "model.py": "9982cd569bd1368dc5be9601b368fd86a20a74e2805b2add64c28537bf224942",
+        "ppo.py": "8994d71c41ebb51feeb568d9a8830c36ca73829a89818836c7dbde88c6e238a2",
+        "runner.py": "ef76f46a2afa5007b569cb920d560bbdcc2edcf54aa5efdd053eb6c81384154d",
+        "storage.py": "236bd8d599f7a37dc92309cec2649d812ef9e0a514a7356bce0bae848bdaca66",
+        "timing.py": "943a347f3e74ac8a4a6c9d50b617d7ff39730b238b0ed803c7235745e202b6d3",
+        "types.py": "416bc05a95dc319a595731a81332dbfd24903599e9d78441a36aa2ab9bbe1af4"
+      },
+      "sha256": "f182eaeb41a9f4a6bed0c6aff6aca9be01f9364cc4c707b7848a071f4516c209"
+    },
+    "changed_files_vs_old": {
+      "src/transformer_rl/ppo.py": {
+        "old": "76d01590a934dfa874344fe3fd3bc7ded03ba90c9599935c66fecc1a4f091b9b",
+        "new": "8994d71c41ebb51feeb568d9a8830c36ca73829a89818836c7dbde88c6e238a2"
+      }
+    },
+    "archive_sha256": "3455c1fc7c33ac02473a77013e804089a37f442ee0d6bc28b8bfc8bc8e0ae435",
+    "stage_a_plan_sha256": "6b269a7f6c8af5f5e91e9e4abdd9933b37b230941e43de36e830fc253a0572df",
+    "stage_b_plan_sha256": "cfd7e503d88d4bbafeb23ffa4c68a1af1e9ff96baadd81e14c3f2965a6d824e7"
+  },
+  "source_freeze_file_sha256": "a95bed526495a9e832f83a43a885453d24cf20e904c2b1cd884ef0c294e7b23f",
+  "protocol": {
+    "frozen_unix_s": 1789377733.343228,
+    "origin_selection_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-20260914T071345Z/selection.json",
+    "origin_selection_sha256": "b71b81e7985155ecfc8583b5a8bc8579ed8d8c7765661f1823d594112d2a0980",
+    "candidate": {
+      "name": "lr3e5_head01",
+      "model": {
+        "mean_init_scale": 0.1
+      },
+      "ppo": {
+        "learning_rate": 3e-05
+      },
+      "group": "sensitivity"
+    },
+    "no_reselection": true,
+    "same_training_seeds_are_not_new_independent_seeds": true,
+    "requested_training_jobs": 7,
+    "requested_primary_evaluations": 7,
+    "requested_extra_b_evaluations": 12,
+    "total_expected_evaluation_transitions": 91200,
+    "global_deadline_seconds": 3500,
+    "max_parallel": 2,
+    "memory_reserve_mib": 1024
+  },
+  "offline_acceptance": {
+    "status": "passed",
+    "cases": [
+      {
+        "case": "new_guard_original_full_rollout",
+        "expected_pass": true,
+        "passed": true,
+        "error": null,
+        "endpoints": 16384,
+        "chunks": 4,
+        "chunk_size": 4096
+      },
+      {
+        "case": "old_guard_original_full_rollout",
+        "expected_pass": false,
+        "passed": false,
+        "error": "old_log_prob mismatch before first optimizer step (max absolute error 1.23978e-05); check behavior policy statistics, weights, full history snapshots and raw_action",
+        "endpoints": 16384,
+        "chunks": 4,
+        "chunk_size": 4096
+      },
+      {
+        "case": "corrupt_old_log_prob_last_endpoint",
+        "expected_pass": false,
+        "passed": false,
+        "error": "old_log_prob mismatch before first optimizer step (max absolute error 0.0999999); log_prob must match its own Gaussian mean/std and raw_action",
+        "endpoints": 16384,
+        "chunks": 4,
+        "chunk_size": 4096
+      },
+      {
+        "case": "corrupt_old_mean_last_endpoint",
+        "expected_pass": false,
+        "passed": false,
+        "error": "old_mean mismatch before first optimizer step (max absolute error 0.0100001); check behavior policy statistics, weights, full history snapshots and raw_action",
+        "endpoints": 16384,
+        "chunks": 4,
+        "chunk_size": 4096
+      },
+      {
+        "case": "corrupt_old_std_last_endpoint",
+        "expected_pass": false,
+        "passed": false,
+        "error": "old_std mismatch before first optimizer step (max absolute error 0.01); check behavior policy statistics, weights, full history snapshots and raw_action",
+        "endpoints": 16384,
+        "chunks": 4,
+        "chunk_size": 4096
+      },
+      {
+        "case": "corrupt_raw_action_last_endpoint",
+        "expected_pass": false,
+        "passed": false,
+        "error": "old_log_prob mismatch before first optimizer step (max absolute error 2.27709); log_prob must match its own Gaussian mean/std and raw_action",
+        "endpoints": 16384,
+        "chunks": 4,
+        "chunk_size": 4096
+      },
+      {
+        "case": "corrupt_current_log_prob",
+        "expected_pass": false,
+        "passed": false,
+        "error": "current_log_prob mismatch before first optimizer step (max absolute error 0.1); log_prob must match its own Gaussian mean/std and raw_action",
+        "endpoints": 16384,
+        "chunks": 4,
+        "chunk_size": 4096
+      },
+      {
+        "case": "new_guard_original_repeat",
+        "expected_pass": true,
+        "passed": true,
+        "error": null,
+        "endpoints": 16384,
+        "chunks": 4,
+        "chunk_size": 4096
+      }
+    ],
+    "integrity": {
+      "model_unchanged": true,
+      "original_batch_unchanged": true,
+      "original_history_unchanged": true,
+      "cpu_rng_unchanged": true,
+      "cuda_rng_unchanged": true,
+      "python_rng_unchanged": true,
+      "optimizer_state_empty": true,
+      "payload_sha256_unchanged": true
+    },
+    "backend": {
+      "torch": "2.11.0+cu128",
+      "cuda": "12.8",
+      "cudnn": 91900,
+      "gpu": "NVIDIA GeForce RTX 4090",
+      "matmul_allow_tf32": false,
+      "cudnn_allow_tf32": true,
+      "float32_matmul_precision": "highest",
+      "deterministic_algorithms": false,
+      "cudnn_benchmark": true,
+      "autocast_cuda": false
+    },
+    "source": {
+      "files": {
+        "__init__.py": "436c0fd75df78c0bf59b4a881c512e1560cb13e27226c072d13d2a581407afe9",
+        "__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
+        "adapters.py": "0f8f0a8b43d09a034e23b4002cd9de5af86c94b635adf932fb97d81eb3e9fcd4",
+        "checkpoint.py": "e09f09bc61ae806cd2c7fd7f54590b2660469fe0fe2fc518a059bcf42b82d8b2",
+        "cli.py": "fb89fe3877419ffc6b778938b2d31860f1db17f219e173249161e313ee292534",
+        "config.py": "3aec043ef4c88d27a4022dd0061cd710a0c933020607052a2bec070c6b02c7aa",
+        "evaluation.py": "0d1fa19a39a55e8f0a53274ae3b5f972204a12d03e538b740604f776f6caf699",
+        "experiment_cli.py": "078628d9b1a81d64c83d3cdb92dad01eaa387b8c228f8397db04e8c00c11e106",
+        "experiments.py": "eb9f48a5d7d5cc2d93c2ba16ab86dcac5b6e01ae79bbd5516ac88350e7f5782d",
+        "export.py": "36a1a515e6a37c4d52b5c07935823451e1e9733af9151621b54dbfb4de03b311",
+        "history.py": "ff9e7d059904fadc343945de9ec02e815b4e1e53130ae0625edc375c83914b57",
+        "model.py": "9982cd569bd1368dc5be9601b368fd86a20a74e2805b2add64c28537bf224942",
+        "ppo.py": "8994d71c41ebb51feeb568d9a8830c36ca73829a89818836c7dbde88c6e238a2",
+        "runner.py": "ef76f46a2afa5007b569cb920d560bbdcc2edcf54aa5efdd053eb6c81384154d",
+        "storage.py": "236bd8d599f7a37dc92309cec2649d812ef9e0a514a7356bce0bae848bdaca66",
+        "timing.py": "943a347f3e74ac8a4a6c9d50b617d7ff39730b238b0ed803c7235745e202b6d3",
+        "types.py": "416bc05a95dc319a595731a81332dbfd24903599e9d78441a36aa2ab9bbe1af4"
+      },
+      "sha256": "f182eaeb41a9f4a6bed0c6aff6aca9be01f9364cc4c707b7848a071f4516c209"
+    },
+    "payload_path": "/home/kaiser/robot-rl-sim60/behavior-precision-20260914/payload.pt",
+    "payload_sha256": "9add976532474297239e560dd42c8f6d92434641fdbcbd8466ed28c2b8155d2d",
+    "old_ppo_sha256": "76d01590a934dfa874344fe3fd3bc7ded03ba90c9599935c66fecc1a4f091b9b",
+    "new_ppo_sha256": "8994d71c41ebb51feeb568d9a8830c36ca73829a89818836c7dbde88c6e238a2",
+    "tolerance": {
+      "rtol": 1e-05,
+      "atol": 1e-05
+    },
+    "optimizer_steps": 0,
+    "elapsed_s": 1.8476039030065294
+  },
+  "global_deadline": {
+    "started_unix_s": 1789377729.1278062,
+    "deadline_unix_s": 1789381229.1278062
+  },
+  "master_exit_code": 0,
+  "generated_unix_s": 1789379606.256001,
+  "stages": {
+    "stage-a": {
+      "plan_sha256": "6b269a7f6c8af5f5e91e9e4abdd9933b37b230941e43de36e830fc253a0572df",
+      "spec_sha256": "3f20dedc96688dd58f0547e71bcfe7217d403dfb316cbc899f16fd3b8fb32389",
+      "spec": {
+        "base_config": "sensitivity-base.json",
+        "environment_factory": "examples.isaaclab_task:make_env",
+        "seeds": [
+          11
+        ],
+        "variants": [
+          {
+            "name": "std_01",
+            "model": {
+              "initial_std": 0.1
+            },
+            "ppo": {},
+            "group": "sensitivity"
+          }
+        ],
+        "training": {
+          "updates": 40,
+          "rollout_steps": 32,
+          "max_seconds": 1200,
+          "checkpoint_interval": 40,
+          "action_clip": 100.0,
+          "diagnostics": true
+        },
+        "execution": {
+          "devices": [
+            "cuda:0"
+          ],
+          "max_parallel": 2,
+          "job_timeout_seconds": 1500,
+          "worker_module": "examples._isaaclab_process"
+        },
+        "evaluation": {
+          "steps": 600,
+          "seeds": [
+            101
+          ],
+          "environment": {
+            "mode": "evaluation",
+            "num_envs": 8,
+            "fixed_command": [
+              0.0,
+              0.0,
+              0.3
+            ]
+          }
+        }
+      },
+      "base_config": {
+        "model": {
+          "proprio_dim": 16,
+          "command_dim": 3,
+          "action_dim": 6,
+          "sensor_groups": 2,
+          "critic_dim": 29,
+          "history_length": 16,
+          "d_model": 64,
+          "num_heads": 4,
+          "num_layers": 2,
+          "ffn_dim": 128,
+          "critic_hidden": [
+            256,
+            128,
+            64
+          ],
+          "time_scale_s": 0.1,
+          "initial_std": 0.2,
+          "mean_init_scale": 1.0
+        },
+        "ppo": {
+          "learning_rate": 0.0001,
+          "gamma": 0.99,
+          "gae_lambda": 0.95,
+          "clip_ratio": 0.2,
+          "value_clip": 0.2,
+          "value_coef": 1.0,
+          "entropy_coef": 0.005,
+          "epochs": 2,
+          "num_minibatches": 4,
+          "max_grad_norm": 1.0,
+          "target_kl": 0.01,
+          "normalize_advantage": true
+        },
+        "environment": {
+          "task_root": "/home/kaiser/robot-rl-sim60/v40-live-snapshot03",
+          "contract": "contracts/own_v40_v2.json",
+          "stage": "locomotion",
+          "num_envs": 512,
+          "mode": "train"
+        }
+      },
+      "package_source_sha256": "f182eaeb41a9f4a6bed0c6aff6aca9be01f9364cc4c707b7848a071f4516c209",
+      "execution": {
+        "exit_code": 0,
+        "abort_reason": null,
+        "elapsed_s": 198.5097213370027,
+        "samples": 191,
+        "max_workers": 1,
+        "memory_available_min_mib": 10250.29296875,
+        "gpu_memory_peak_mib": 8229,
+        "gpu_util_mean_percent": 32.86910994764398,
+        "resources_sha256": "4d33d953c561650973ec04eff8a7a09e88929d395e6ca3d24fedeac020482d86"
+      },
+      "jobs": [
+        {
+          "stage": "stage-a",
+          "variant": "std_01",
+          "train_seed": 11,
+          "status": "completed",
+          "result": {
+            "job": "std_01/seed_11",
+            "plan_sha256": "6b269a7f6c8af5f5e91e9e4abdd9933b37b230941e43de36e830fc253a0572df",
+            "device": "cuda:0",
+            "status": "completed"
+          },
+          "config_sha256": "3d0a4abeb127a1b9a68823ea280c0517af0682a99d1a7e30e5832852f6709288",
+          "learning_rate": 0.0001,
+          "mean_init_scale": 1.0,
+          "initial_std": 0.1,
+          "evaluations": [
+            {
+              "stage": "stage-a",
+              "variant": "std_01",
+              "train_seed": 11,
+              "height": 0.3,
+              "exit_code": 0,
+              "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-a/jobs/std_01/seed_11/evaluation_101.json",
+              "output_sha256": "c5187beec9a31f81c2c6184dff449eeaf8f52eddc80f5f33baaa8fc51d4d392d",
+              "seed": 101,
+              "checkpoint_sha256": "4fbd3dbddcc60bbfb9e896777d0622b17d6e54b614492c0b0e08d5867ad2f389",
+              "checkpoint_update": 40,
+              "vector_steps": 600,
+              "num_envs": 8,
+              "transitions": 4800,
+              "reward_mean": 0.022722991125532038,
+              "terminated_count": 0,
+              "truncated_count": 0,
+              "metrics": {
+                "height_abs_error": {
+                  "mean": 0.10705899049527944,
+                  "rms": 0.10797652128393906,
+                  "min": 0.0017391741275787354,
+                  "max": 0.11057509481906891,
+                  "count": 4800
+                },
+                "non_wheel_net_force": {
+                  "mean": 54.026668735345204,
+                  "rms": 88.05387095939497,
+                  "min": 0.0,
+                  "max": 846.4910278320312,
+                  "count": 4800
+                },
+                "planar_speed": {
+                  "mean": 0.23322395473951474,
+                  "rms": 0.2360139245300706,
+                  "min": 0.04817149043083191,
+                  "max": 0.5947080254554749,
+                  "count": 4800
+                },
+                "vx_abs_error": {
+                  "mean": 0.22280327646217,
+                  "rms": 0.22498133713821847,
+                  "min": 0.012802742421627045,
+                  "max": 0.4395333528518677,
+                  "count": 4800
+                },
+                "wz_abs_error": {
+                  "mean": 0.25258073296397926,
+                  "rms": 0.3044396679179352,
+                  "min": 0.07046180963516235,
+                  "max": 1.5896775722503662,
+                  "count": 4800
+                }
+              },
+              "policy": "deterministic_mean",
+              "elapsed_s": 36.990030360000674,
+              "action_clip": 100.0
+            }
+          ],
+          "optimization": {
+            "updates_observed": 40,
+            "actual_optimizer_steps": 40,
+            "planned_optimizer_steps": 320,
+            "early_stopped_updates": 40,
+            "first_update": {
+              "actor_loss": -0.011979315429925919,
+              "value_loss": 0.023701097816228867,
+              "entropy": -5.3018798828125,
+              "kl": 0.0,
+              "clip_fraction": 0.0,
+              "loss": 0.03823117911815643,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 5.995997428894043,
+              "optimizer_steps": 1,
+              "planned_optimizer_steps": 8,
+              "sample_count": 4096,
+              "early_stopped": true,
+              "stop_kl": 0.7994519472122192,
+              "initial_mean_abs": 0.4028385802193455,
+              "initial_std_mean": 0.10000000149011612,
+              "initial_std_min": 0.10000000149011612,
+              "initial_std_max": 0.10000000149011612,
+              "first_step_kl": 0.8017947093510085,
+              "first_step_mean_kl": 0.8017946494595444,
+              "first_step_std_kl": 5.989146411902973e-08,
+              "first_step_mean_change_rms": 0.05170002378119182,
+              "first_step_normalized_mean_change_rms": 0.5170002301080144,
+              "final_kl": 0.8017947093510085,
+              "final_mean_kl": 0.8017946494595444,
+              "final_std_kl": 5.989146411902973e-08,
+              "final_mean_change_rms": 0.05170002378119182,
+              "final_std_mean": 0.10000333189964294
+            },
+            "last_update": {
+              "actor_loss": 0.0033387690782546997,
+              "value_loss": 0.00500662624835968,
+              "entropy": -5.296458721160889,
+              "kl": 0.0,
+              "clip_fraction": 0.0,
+              "loss": 0.034827686846256256,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 5.756889343261719,
+              "optimizer_steps": 1,
+              "planned_optimizer_steps": 8,
+              "sample_count": 4096,
+              "early_stopped": true,
+              "stop_kl": 0.07759378850460052,
+              "initial_mean_abs": 0.6729583002548243,
+              "initial_std_mean": 0.10009040931860605,
+              "initial_std_min": 0.0999584048986435,
+              "initial_std_max": 0.10014992952346802,
+              "first_step_kl": 0.07801423193653875,
+              "first_step_mean_kl": 0.07801421805329017,
+              "first_step_std_kl": 1.3883248574154711e-08,
+              "first_step_mean_change_rms": 0.01614692273473716,
+              "first_step_normalized_mean_change_rms": 0.16126832947335432,
+              "final_kl": 0.07801423193653875,
+              "final_mean_kl": 0.07801421805329017,
+              "final_std_kl": 1.3883248574154711e-08,
+              "final_mean_change_rms": 0.01614692273473716,
+              "final_std_mean": 0.10009391730030377
+            },
+            "metrics_sha256": "8432124a40b55091a5e2aafb8a43b421b328b79cab00ab451dbafb62d013109a",
+            "step_utilization": 0.125
+          },
+          "historical_same_seed_comparison": {
+            "shared_logged_updates": 0,
+            "old_metrics_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-20260914T071345Z/stage-a/jobs/std_01/seed_11/train/metrics.jsonl",
+            "old_metrics_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "optimization_rows_exactly_equal": null,
+            "collection_reward_means_exactly_equal": null,
+            "interpretation": "Read-only descriptive comparison; old rows are never used as new-run completion evidence."
+          },
+          "train_process": {
+            "argv": [
+              "/home/kaiser/robot-rl-sim60/env/bin/python",
+              "-m",
+              "examples._isaaclab_process",
+              "train",
+              "--config",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-a/configs/std_01.json",
+              "--run-dir",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-a/jobs/std_01/seed_11/train",
+              "--seed",
+              "11",
+              "--env-factory",
+              "examples.isaaclab_task:make_env",
+              "--device",
+              "cuda:0",
+              "--action-clip",
+              "100.0",
+              "--updates",
+              "40",
+              "--rollout-steps",
+              "32",
+              "--max-seconds",
+              "1200",
+              "--checkpoint-interval",
+              "40",
+              "--diagnostics"
+            ],
+            "log_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-a/jobs/std_01/seed_11/train.log",
+            "started_unix_s": 1789377733.4145522,
+            "exit_code": 0,
+            "status": "completed",
+            "exit_evidence": "stock _process polled and reaped real SDK worker; nonzero returns raise",
+            "elapsed_s": 158.50427474299795
+          },
+          "training": {
+            "updates_completed": 40,
+            "collected_transitions": 655360,
+            "elapsed_s": 157.1225537409773,
+            "collection_elapsed_s": 64.57719011398149
+          },
+          "checkpoint": {
+            "path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-a/jobs/std_01/seed_11/train/checkpoints/checkpoint_000040.pt",
+            "sha256": "4fbd3dbddcc60bbfb9e896777d0622b17d6e54b614492c0b0e08d5867ad2f389",
+            "update": 40
+          },
+          "environment_identity": {
+            "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+            "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+            "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+            "usd_seed_sha256": null,
+            "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+            "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+          },
+          "sampled_training_rss_peak_mib": 4737.01953125
+        }
+      ],
+      "fairness_checks": {
+        "sensitivity": {
+          "partial": false,
+          "training_transition_counts": [
+            655360
+          ],
+          "evaluation_transition_counts": [
+            4800
+          ],
+          "comparison_available": true,
+          "reasons": [],
+          "scope": "within-group configuration and sample-budget checks, not a quality ranking"
+        }
+      }
+    },
+    "stage-b": {
+      "plan_sha256": "cfd7e503d88d4bbafeb23ffa4c68a1af1e9ff96baadd81e14c3f2965a6d824e7",
+      "spec_sha256": "74db727273451bd7563b6a253d080a7c943419ef5b1ecf9aaf593b88dcb1f1c5",
+      "spec": {
+        "base_config": "sensitivity-base.json",
+        "environment_factory": "examples.isaaclab_task:make_env",
+        "seeds": [
+          22,
+          33,
+          44
+        ],
+        "variants": [
+          {
+            "name": "baseline",
+            "model": {},
+            "ppo": {},
+            "group": "sensitivity"
+          },
+          {
+            "name": "lr3e5_head01",
+            "model": {
+              "mean_init_scale": 0.1
+            },
+            "ppo": {
+              "learning_rate": 3e-05
+            },
+            "group": "sensitivity"
+          }
+        ],
+        "training": {
+          "updates": 80,
+          "rollout_steps": 32,
+          "max_seconds": 1200,
+          "checkpoint_interval": 80,
+          "action_clip": 100.0,
+          "diagnostics": true
+        },
+        "execution": {
+          "devices": [
+            "cuda:0"
+          ],
+          "max_parallel": 2,
+          "job_timeout_seconds": 1500,
+          "worker_module": "examples._isaaclab_process"
+        },
+        "evaluation": {
+          "steps": 600,
+          "seeds": [
+            201
+          ],
+          "environment": {
+            "mode": "evaluation",
+            "num_envs": 8,
+            "fixed_command": [
+              0.0,
+              0.0,
+              0.3
+            ]
+          }
+        }
+      },
+      "base_config": {
+        "model": {
+          "proprio_dim": 16,
+          "command_dim": 3,
+          "action_dim": 6,
+          "sensor_groups": 2,
+          "critic_dim": 29,
+          "history_length": 16,
+          "d_model": 64,
+          "num_heads": 4,
+          "num_layers": 2,
+          "ffn_dim": 128,
+          "critic_hidden": [
+            256,
+            128,
+            64
+          ],
+          "time_scale_s": 0.1,
+          "initial_std": 0.2,
+          "mean_init_scale": 1.0
+        },
+        "ppo": {
+          "learning_rate": 0.0001,
+          "gamma": 0.99,
+          "gae_lambda": 0.95,
+          "clip_ratio": 0.2,
+          "value_clip": 0.2,
+          "value_coef": 1.0,
+          "entropy_coef": 0.005,
+          "epochs": 2,
+          "num_minibatches": 4,
+          "max_grad_norm": 1.0,
+          "target_kl": 0.01,
+          "normalize_advantage": true
+        },
+        "environment": {
+          "task_root": "/home/kaiser/robot-rl-sim60/v40-live-snapshot03",
+          "contract": "contracts/own_v40_v2.json",
+          "stage": "locomotion",
+          "num_envs": 512,
+          "mode": "train"
+        }
+      },
+      "package_source_sha256": "f182eaeb41a9f4a6bed0c6aff6aca9be01f9364cc4c707b7848a071f4516c209",
+      "execution": {
+        "exit_code": 0,
+        "abort_reason": null,
+        "elapsed_s": 1206.701752449997,
+        "samples": 1157,
+        "max_workers": 2,
+        "memory_available_min_mib": 6359.5703125,
+        "gpu_memory_peak_mib": 12491,
+        "gpu_util_mean_percent": 73.19792566983578,
+        "resources_sha256": "9063aea656378669d94855b97f3e9cf695c7879bff671049596e6e9af4e383af"
+      },
+      "jobs": [
+        {
+          "stage": "stage-b",
+          "variant": "baseline",
+          "train_seed": 22,
+          "status": "completed",
+          "result": {
+            "job": "baseline/seed_22",
+            "plan_sha256": "cfd7e503d88d4bbafeb23ffa4c68a1af1e9ff96baadd81e14c3f2965a6d824e7",
+            "device": "cuda:0",
+            "status": "completed"
+          },
+          "config_sha256": "53cdcdcc16b33c6bdbc05fb553ef0dd6461c89c7c1293ff432a0504539587aa4",
+          "learning_rate": 0.0001,
+          "mean_init_scale": 1.0,
+          "initial_std": 0.2,
+          "evaluations": [
+            {
+              "stage": "stage-b",
+              "variant": "baseline",
+              "train_seed": 22,
+              "height": 0.3,
+              "exit_code": 0,
+              "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_22/evaluation_201.json",
+              "output_sha256": "a2930e45069a36d82f8da4c6135b6bffa096407f97f5d383acfe1022cb545d70",
+              "seed": 201,
+              "checkpoint_sha256": "359a0a1d2ea15dbba5914e8a2344f5c1458a6c37c3e92503728ff18e1cdf61fc",
+              "checkpoint_update": 80,
+              "vector_steps": 600,
+              "num_envs": 8,
+              "transitions": 4800,
+              "reward_mean": 0.029169569324391582,
+              "terminated_count": 0,
+              "truncated_count": 0,
+              "metrics": {
+                "height_abs_error": {
+                  "mean": 0.09890812417802711,
+                  "rms": 0.09953066027056999,
+                  "min": 0.0006364583969116211,
+                  "max": 0.10535608232021332,
+                  "count": 4800
+                },
+                "non_wheel_net_force": {
+                  "mean": 107.81106673439344,
+                  "rms": 134.59315151466478,
+                  "min": 0.0,
+                  "max": 1432.4996337890625,
+                  "count": 4800
+                },
+                "planar_speed": {
+                  "mean": 0.021594467797888987,
+                  "rms": 0.05091309037049912,
+                  "min": 0.003399174427613616,
+                  "max": 0.37341952323913574,
+                  "count": 4800
+                },
+                "vx_abs_error": {
+                  "mean": 0.016901516153402553,
+                  "rms": 0.04973491922769913,
+                  "min": 2.1588755771517754e-05,
+                  "max": 0.37333443760871887,
+                  "count": 4800
+                },
+                "wz_abs_error": {
+                  "mean": 0.01987105667521367,
+                  "rms": 0.07370570738022988,
+                  "min": 3.489106893539429e-05,
+                  "max": 1.0653635263442993,
+                  "count": 4800
+                }
+              },
+              "policy": "deterministic_mean",
+              "elapsed_s": 52.87582615800784,
+              "action_clip": 100.0
+            }
+          ],
+          "optimization": {
+            "updates_observed": 80,
+            "actual_optimizer_steps": 92,
+            "planned_optimizer_steps": 640,
+            "early_stopped_updates": 80,
+            "first_update": {
+              "actor_loss": 0.009765847586095333,
+              "value_loss": 0.010457458905875683,
+              "entropy": -1.1429965496063232,
+              "kl": 0.0,
+              "clip_fraction": 0.0,
+              "loss": 0.025938289240002632,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 1.7726689577102661,
+              "optimizer_steps": 1,
+              "planned_optimizer_steps": 8,
+              "sample_count": 4096,
+              "early_stopped": true,
+              "stop_kl": 0.08976577967405319,
+              "initial_mean_abs": 0.5161109620149773,
+              "initial_std_mean": 0.20000000298023224,
+              "initial_std_min": 0.20000000298023224,
+              "initial_std_max": 0.20000000298023224,
+              "first_step_kl": 0.08981883608197253,
+              "first_step_mean_kl": 0.08981877605309657,
+              "first_step_std_kl": 6.002887595551e-08,
+              "first_step_mean_change_rms": 0.03460641806896185,
+              "first_step_normalized_mean_change_rms": 0.17303208776643023,
+              "final_kl": 0.08981883608197253,
+              "final_mean_kl": 0.08981877605309657,
+              "final_std_kl": 6.002887595551e-08,
+              "final_mean_change_rms": 0.03460641806896185,
+              "final_std_mean": 0.19999999552965164
+            },
+            "last_update": {
+              "actor_loss": -0.01256442628800869,
+              "value_loss": 0.005910963751375675,
+              "entropy": -1.134211778640747,
+              "kl": 0.0,
+              "clip_fraction": 0.0,
+              "loss": -0.0009824037551879883,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 2.00864577293396,
+              "optimizer_steps": 1,
+              "planned_optimizer_steps": 8,
+              "sample_count": 4096,
+              "early_stopped": true,
+              "stop_kl": 0.023151865229010582,
+              "initial_mean_abs": 0.9207854834610695,
+              "initial_std_mean": 0.20029311875502268,
+              "initial_std_min": 0.20006617903709412,
+              "initial_std_max": 0.2005515992641449,
+              "first_step_kl": 0.023176911302731088,
+              "first_step_mean_kl": 0.02317690724969857,
+              "first_step_std_kl": 4.05303251862173e-09,
+              "first_step_mean_change_rms": 0.01759762721267751,
+              "first_step_normalized_mean_change_rms": 0.08789656247996418,
+              "final_kl": 0.023176911302731088,
+              "final_mean_kl": 0.02317690724969857,
+              "final_std_kl": 4.05303251862173e-09,
+              "final_mean_change_rms": 0.01759762721267751,
+              "final_std_mean": 0.2002975692351659
+            },
+            "metrics_sha256": "e942d5d352db4fb1326045ca913a783428a29d448d943324c5ba024ffbf2345a",
+            "step_utilization": 0.14375
+          },
+          "historical_same_seed_comparison": {
+            "shared_logged_updates": 80,
+            "old_metrics_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-20260914T071345Z/stage-b/jobs/baseline/seed_22/train/metrics.jsonl",
+            "old_metrics_sha256": "6dcb3e52ed6d47e2e07267a2b27552ae4051b86c66898b122aba8585ca75f300",
+            "optimization_rows_exactly_equal": true,
+            "collection_reward_means_exactly_equal": true,
+            "interpretation": "Read-only descriptive comparison; old rows are never used as new-run completion evidence."
+          },
+          "train_process": {
+            "argv": [
+              "/home/kaiser/robot-rl-sim60/env/bin/python",
+              "-m",
+              "examples._isaaclab_process",
+              "train",
+              "--config",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/configs/baseline.json",
+              "--run-dir",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_22/train",
+              "--seed",
+              "22",
+              "--env-factory",
+              "examples.isaaclab_task:make_env",
+              "--device",
+              "cuda:0",
+              "--action-clip",
+              "100.0",
+              "--updates",
+              "80",
+              "--rollout-steps",
+              "32",
+              "--max-seconds",
+              "1200",
+              "--checkpoint-interval",
+              "80",
+              "--diagnostics"
+            ],
+            "log_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_22/train.log",
+            "started_unix_s": 1789377931.9531195,
+            "exit_code": 0,
+            "status": "completed",
+            "exit_evidence": "stock _process polled and reaped real SDK worker; nonzero returns raise",
+            "elapsed_s": 333.207811322005
+          },
+          "training": {
+            "updates_completed": 80,
+            "collected_transitions": 1310720,
+            "elapsed_s": 331.9344419960107,
+            "collection_elapsed_s": 227.13452295394382
+          },
+          "checkpoint": {
+            "path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_22/train/checkpoints/checkpoint_000080.pt",
+            "sha256": "359a0a1d2ea15dbba5914e8a2344f5c1458a6c37c3e92503728ff18e1cdf61fc",
+            "update": 80
+          },
+          "environment_identity": {
+            "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+            "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+            "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+            "usd_seed_sha256": null,
+            "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+            "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+          },
+          "sampled_training_rss_peak_mib": 4717.48046875
+        },
+        {
+          "stage": "stage-b",
+          "variant": "baseline",
+          "train_seed": 33,
+          "status": "completed",
+          "result": {
+            "job": "baseline/seed_33",
+            "plan_sha256": "cfd7e503d88d4bbafeb23ffa4c68a1af1e9ff96baadd81e14c3f2965a6d824e7",
+            "device": "cuda:0",
+            "status": "completed"
+          },
+          "config_sha256": "53cdcdcc16b33c6bdbc05fb553ef0dd6461c89c7c1293ff432a0504539587aa4",
+          "learning_rate": 0.0001,
+          "mean_init_scale": 1.0,
+          "initial_std": 0.2,
+          "evaluations": [
+            {
+              "stage": "stage-b",
+              "variant": "baseline",
+              "train_seed": 33,
+              "height": 0.3,
+              "exit_code": 0,
+              "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_33/evaluation_201.json",
+              "output_sha256": "ec105571fb020940e0210e37d2c7708c9cbe60e94cf3aae262c8440c6723e657",
+              "seed": 201,
+              "checkpoint_sha256": "9a89b6ff97bb16c0556b110672f86876d7874cf6de70e4d13a177cbfd307bb48",
+              "checkpoint_update": 80,
+              "vector_steps": 600,
+              "num_envs": 8,
+              "transitions": 4800,
+              "reward_mean": 0.012594963920031054,
+              "terminated_count": 0,
+              "truncated_count": 0,
+              "metrics": {
+                "height_abs_error": {
+                  "mean": 0.061286994355420274,
+                  "rms": 0.06161233853423757,
+                  "min": 0.0001538991928100586,
+                  "max": 0.06227335333824158,
+                  "count": 4800
+                },
+                "non_wheel_net_force": {
+                  "mean": 784.5001999855042,
+                  "rms": 799.5621698165594,
+                  "min": 0.0,
+                  "max": 2993.909423828125,
+                  "count": 4800
+                },
+                "planar_speed": {
+                  "mean": 0.180949909601671,
+                  "rms": 0.18261841812824745,
+                  "min": 0.013180476613342762,
+                  "max": 0.4005625247955322,
+                  "count": 4800
+                },
+                "vx_abs_error": {
+                  "mean": 0.16368443416198716,
+                  "rms": 0.16520553341282976,
+                  "min": 0.008764952421188354,
+                  "max": 0.40007483959198,
+                  "count": 4800
+                },
+                "wz_abs_error": {
+                  "mean": 0.9510053256231671,
+                  "rms": 0.9595552557332271,
+                  "min": 0.05461244285106659,
+                  "max": 1.8868502378463745,
+                  "count": 4800
+                }
+              },
+              "policy": "deterministic_mean",
+              "elapsed_s": 52.6898546719749,
+              "action_clip": 100.0
+            }
+          ],
+          "optimization": {
+            "updates_observed": 80,
+            "actual_optimizer_steps": 102,
+            "planned_optimizer_steps": 640,
+            "early_stopped_updates": 79,
+            "first_update": {
+              "actor_loss": 0.04225626215338707,
+              "value_loss": 0.0120488116517663,
+              "entropy": -1.1429965496063232,
+              "kl": 0.0,
+              "clip_fraction": 0.0,
+              "loss": 0.06002005562186241,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 1.548914909362793,
+              "optimizer_steps": 1,
+              "planned_optimizer_steps": 8,
+              "sample_count": 4096,
+              "early_stopped": true,
+              "stop_kl": 0.08657015860080719,
+              "initial_mean_abs": 0.442314147569301,
+              "initial_std_mean": 0.20000000298023224,
+              "initial_std_min": 0.20000000298023224,
+              "initial_std_max": 0.20000000298023224,
+              "first_step_kl": 0.08595781459038807,
+              "first_step_mean_kl": 0.08595775456151211,
+              "first_step_std_kl": 6.002887595551e-08,
+              "first_step_mean_change_rms": 0.033854415476198906,
+              "first_step_normalized_mean_change_rms": 0.16927207485864404,
+              "final_kl": 0.08595781459038807,
+              "final_mean_kl": 0.08595775456151211,
+              "final_std_kl": 6.002887595551e-08,
+              "final_mean_change_rms": 0.033854415476198906,
+              "final_std_mean": 0.19999999552965164
+            },
+            "last_update": {
+              "actor_loss": 0.0009243131207767874,
+              "value_loss": 0.0037343666481319815,
+              "entropy": -1.1335468143224716,
+              "kl": 0.0054943647410254925,
+              "clip_fraction": 0.066986083984375,
+              "loss": 0.010326413612347096,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 3.47375950217247,
+              "optimizer_steps": 8,
+              "planned_optimizer_steps": 8,
+              "sample_count": 32768,
+              "early_stopped": false,
+              "stop_kl": 0.0,
+              "initial_mean_abs": 1.3037988537486171,
+              "initial_std_mean": 0.20030250151952106,
+              "initial_std_min": 0.20010507106781006,
+              "initial_std_max": 0.2003980278968811,
+              "first_step_kl": 0.0026950853416151843,
+              "first_step_mean_kl": 0.002695081292955026,
+              "first_step_std_kl": 4.048660158456673e-09,
+              "first_step_mean_change_rms": 0.006005189874603451,
+              "first_step_normalized_mean_change_rms": 0.029972950570116827,
+              "final_kl": 0.005848248888068249,
+              "final_mean_kl": 0.0058479879427536085,
+              "final_std_kl": 2.6094531463971164e-07,
+              "final_mean_change_rms": 0.00884520311920472,
+              "final_std_mean": 0.2003361831108729
+            },
+            "metrics_sha256": "7528451376b103b90755f9bfdc3c471945e38b6a2ea75ac638e935af8812c58f",
+            "step_utilization": 0.159375
+          },
+          "historical_same_seed_comparison": {
+            "shared_logged_updates": 80,
+            "old_metrics_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-20260914T071345Z/stage-b/jobs/baseline/seed_33/train/metrics.jsonl",
+            "old_metrics_sha256": "2274da35c8b4a613c8d16727de913813831a46b3fa268e217a465171aee2def6",
+            "optimization_rows_exactly_equal": true,
+            "collection_reward_means_exactly_equal": true,
+            "interpretation": "Read-only descriptive comparison; old rows are never used as new-run completion evidence."
+          },
+          "train_process": {
+            "argv": [
+              "/home/kaiser/robot-rl-sim60/env/bin/python",
+              "-m",
+              "examples._isaaclab_process",
+              "train",
+              "--config",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/configs/baseline.json",
+              "--run-dir",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_33/train",
+              "--seed",
+              "33",
+              "--env-factory",
+              "examples.isaaclab_task:make_env",
+              "--device",
+              "cuda:0",
+              "--action-clip",
+              "100.0",
+              "--updates",
+              "80",
+              "--rollout-steps",
+              "32",
+              "--max-seconds",
+              "1200",
+              "--checkpoint-interval",
+              "80",
+              "--diagnostics"
+            ],
+            "log_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_33/train.log",
+            "started_unix_s": 1789377931.952865,
+            "exit_code": 0,
+            "status": "completed",
+            "exit_evidence": "stock _process polled and reaped real SDK worker; nonzero returns raise",
+            "elapsed_s": 330.6514528199914
+          },
+          "training": {
+            "updates_completed": 80,
+            "collected_transitions": 1310720,
+            "elapsed_s": 329.35017318601604,
+            "collection_elapsed_s": 224.6496163517877
+          },
+          "checkpoint": {
+            "path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_33/train/checkpoints/checkpoint_000080.pt",
+            "sha256": "9a89b6ff97bb16c0556b110672f86876d7874cf6de70e4d13a177cbfd307bb48",
+            "update": 80
+          },
+          "environment_identity": {
+            "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+            "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+            "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+            "usd_seed_sha256": null,
+            "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+            "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+          },
+          "sampled_training_rss_peak_mib": 4731.84375
+        },
+        {
+          "stage": "stage-b",
+          "variant": "baseline",
+          "train_seed": 44,
+          "status": "completed",
+          "result": {
+            "job": "baseline/seed_44",
+            "plan_sha256": "cfd7e503d88d4bbafeb23ffa4c68a1af1e9ff96baadd81e14c3f2965a6d824e7",
+            "device": "cuda:0",
+            "status": "completed"
+          },
+          "config_sha256": "53cdcdcc16b33c6bdbc05fb553ef0dd6461c89c7c1293ff432a0504539587aa4",
+          "learning_rate": 0.0001,
+          "mean_init_scale": 1.0,
+          "initial_std": 0.2,
+          "evaluations": [
+            {
+              "stage": "stage-b",
+              "variant": "baseline",
+              "train_seed": 44,
+              "height": 0.3,
+              "exit_code": 0,
+              "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_44/evaluation_201.json",
+              "output_sha256": "f121133af94928dc0eae910ef34ba7a21824007803d8ee735309ce7703c3b181",
+              "seed": 201,
+              "checkpoint_sha256": "b3c07b7c1402d00d8a270a256d88af31ba21e4acdd2756f2cddbc48b674fbd05",
+              "checkpoint_update": 80,
+              "vector_steps": 600,
+              "num_envs": 8,
+              "transitions": 4800,
+              "reward_mean": 0.02755831595209505,
+              "terminated_count": 0,
+              "truncated_count": 0,
+              "metrics": {
+                "height_abs_error": {
+                  "mean": 0.09267019563975433,
+                  "rms": 0.09328846475748047,
+                  "min": 0.0027404725551605225,
+                  "max": 0.09478500485420227,
+                  "count": 4800
+                },
+                "non_wheel_net_force": {
+                  "mean": 45.10465929985046,
+                  "rms": 65.77195865357463,
+                  "min": 0.0,
+                  "max": 850.8865356445312,
+                  "count": 4800
+                },
+                "planar_speed": {
+                  "mean": 0.012946351959503015,
+                  "rms": 0.04921051162517999,
+                  "min": 3.836610630969517e-05,
+                  "max": 0.39854052662849426,
+                  "count": 4800
+                },
+                "vx_abs_error": {
+                  "mean": 0.011451650730738266,
+                  "rms": 0.0444144375704651,
+                  "min": 2.272634446853772e-06,
+                  "max": 0.36260849237442017,
+                  "count": 4800
+                },
+                "wz_abs_error": {
+                  "mean": 0.016369286866641537,
+                  "rms": 0.05445795984690702,
+                  "min": 8.456408977508545e-07,
+                  "max": 0.419125497341156,
+                  "count": 4800
+                }
+              },
+              "policy": "deterministic_mean",
+              "elapsed_s": 54.09378992000711,
+              "action_clip": 100.0
+            }
+          ],
+          "optimization": {
+            "updates_observed": 80,
+            "actual_optimizer_steps": 96,
+            "planned_optimizer_steps": 640,
+            "early_stopped_updates": 78,
+            "first_update": {
+              "actor_loss": -0.006827354431152344,
+              "value_loss": 0.012325345538556576,
+              "entropy": -1.1429965496063232,
+              "kl": 0.0,
+              "clip_fraction": 0.0,
+              "loss": 0.011212973855435848,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 1.530940294265747,
+              "optimizer_steps": 1,
+              "planned_optimizer_steps": 8,
+              "sample_count": 4096,
+              "early_stopped": true,
+              "stop_kl": 0.09111514687538147,
+              "initial_mean_abs": 0.5141113878167591,
+              "initial_std_mean": 0.20000000298023224,
+              "initial_std_min": 0.20000000298023224,
+              "initial_std_max": 0.20000000298023224,
+              "first_step_kl": 0.09131687751361511,
+              "first_step_mean_kl": 0.09131681748473916,
+              "first_step_std_kl": 6.002887595551e-08,
+              "first_step_mean_change_rms": 0.03489354039145398,
+              "first_step_normalized_mean_change_rms": 0.17446769935749856,
+              "final_kl": 0.09131687751361511,
+              "final_mean_kl": 0.09131681748473916,
+              "final_std_kl": 6.002887595551e-08,
+              "final_mean_change_rms": 0.03489354039145398,
+              "final_std_mean": 0.19999999552965164
+            },
+            "last_update": {
+              "actor_loss": -0.0031088441610336304,
+              "value_loss": 0.005105641670525074,
+              "entropy": -1.1332507133483887,
+              "kl": 0.0,
+              "clip_fraction": 0.0,
+              "loss": 0.0076630511321127415,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 2.595358371734619,
+              "optimizer_steps": 1,
+              "planned_optimizer_steps": 8,
+              "sample_count": 4096,
+              "early_stopped": true,
+              "stop_kl": 0.014035522937774658,
+              "initial_mean_abs": 1.194681481304864,
+              "initial_std_mean": 0.20032521337270737,
+              "initial_std_min": 0.19989265501499176,
+              "initial_std_max": 0.20048817992210388,
+              "first_step_kl": 0.01403907956776601,
+              "first_step_mean_kl": 0.01403907544010202,
+              "first_step_std_kl": 4.127663990222137e-09,
+              "first_step_mean_change_rms": 0.01369490192030331,
+              "first_step_normalized_mean_change_rms": 0.06840892023488028,
+              "final_kl": 0.01403907956776601,
+              "final_mean_kl": 0.01403907544010202,
+              "final_std_kl": 4.127663990222137e-09,
+              "final_mean_change_rms": 0.01369490192030331,
+              "final_std_mean": 0.20032917708158493
+            },
+            "metrics_sha256": "0e72ad4eef0cb0fd5f447e77feaeb2d6120d9c738020fd72ed0b1e4283b749db",
+            "step_utilization": 0.15
+          },
+          "historical_same_seed_comparison": {
+            "shared_logged_updates": 51,
+            "old_metrics_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-20260914T071345Z/stage-b/jobs/baseline/seed_44/train/metrics.jsonl",
+            "old_metrics_sha256": "131df0e7b8c22d874ce1fc29b9f82a81b49a0ebc51f898fb3cd6b3f8baef1c1f",
+            "optimization_rows_exactly_equal": true,
+            "collection_reward_means_exactly_equal": true,
+            "interpretation": "Read-only descriptive comparison; old rows are never used as new-run completion evidence."
+          },
+          "train_process": {
+            "argv": [
+              "/home/kaiser/robot-rl-sim60/env/bin/python",
+              "-m",
+              "examples._isaaclab_process",
+              "train",
+              "--config",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/configs/baseline.json",
+              "--run-dir",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_44/train",
+              "--seed",
+              "44",
+              "--env-factory",
+              "examples.isaaclab_task:make_env",
+              "--device",
+              "cuda:0",
+              "--action-clip",
+              "100.0",
+              "--updates",
+              "80",
+              "--rollout-steps",
+              "32",
+              "--max-seconds",
+              "1200",
+              "--checkpoint-interval",
+              "80",
+              "--diagnostics"
+            ],
+            "log_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_44/train.log",
+            "started_unix_s": 1789378317.8170147,
+            "exit_code": 0,
+            "status": "completed",
+            "exit_evidence": "stock _process polled and reaped real SDK worker; nonzero returns raise",
+            "elapsed_s": 339.469224423985
+          },
+          "training": {
+            "updates_completed": 80,
+            "collected_transitions": 1310720,
+            "elapsed_s": 337.98552538000513,
+            "collection_elapsed_s": 231.57223820890067
+          },
+          "checkpoint": {
+            "path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/baseline/seed_44/train/checkpoints/checkpoint_000080.pt",
+            "sha256": "b3c07b7c1402d00d8a270a256d88af31ba21e4acdd2756f2cddbc48b674fbd05",
+            "update": 80
+          },
+          "environment_identity": {
+            "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+            "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+            "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+            "usd_seed_sha256": null,
+            "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+            "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+          },
+          "sampled_training_rss_peak_mib": 4725.42578125
+        },
+        {
+          "stage": "stage-b",
+          "variant": "lr3e5_head01",
+          "train_seed": 22,
+          "status": "completed",
+          "result": {
+            "job": "lr3e5_head01/seed_22",
+            "plan_sha256": "cfd7e503d88d4bbafeb23ffa4c68a1af1e9ff96baadd81e14c3f2965a6d824e7",
+            "device": "cuda:0",
+            "status": "completed"
+          },
+          "config_sha256": "6f920c832268add0dcf2be8d854ec232ed03fce672d91dd45b0344a33e383748",
+          "learning_rate": 3e-05,
+          "mean_init_scale": 0.1,
+          "initial_std": 0.2,
+          "evaluations": [
+            {
+              "stage": "stage-b",
+              "variant": "lr3e5_head01",
+              "train_seed": 22,
+              "height": 0.3,
+              "exit_code": 0,
+              "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_22/evaluation_201.json",
+              "output_sha256": "8f5d5a44b31d477343e709d8c3e103f5fc2b2c79aa0cd79d328bbe7e6f895eb5",
+              "seed": 201,
+              "checkpoint_sha256": "bbc7fa9940d4d4133f2bddecfd172b94cf4ed8f9ee38581ed9a0a6a5f86f3c71",
+              "checkpoint_update": 80,
+              "vector_steps": 600,
+              "num_envs": 8,
+              "transitions": 4800,
+              "reward_mean": 0.025166377301017444,
+              "terminated_count": 0,
+              "truncated_count": 0,
+              "metrics": {
+                "height_abs_error": {
+                  "mean": 0.06273570334849259,
+                  "rms": 0.0630890740921725,
+                  "min": 0.0016554594039916992,
+                  "max": 0.07203175127506256,
+                  "count": 4800
+                },
+                "non_wheel_net_force": {
+                  "mean": 779.5836880993843,
+                  "rms": 806.7502917317879,
+                  "min": 0.0,
+                  "max": 3187.308837890625,
+                  "count": 4800
+                },
+                "planar_speed": {
+                  "mean": 0.03092290532881937,
+                  "rms": 0.07323037600894639,
+                  "min": 0.00774157652631402,
+                  "max": 0.4726881980895996,
+                  "count": 4800
+                },
+                "vx_abs_error": {
+                  "mean": 0.016158169898008053,
+                  "rms": 0.04648702729032718,
+                  "min": 7.275957614183426e-06,
+                  "max": 0.24526555836200714,
+                  "count": 4800
+                },
+                "wz_abs_error": {
+                  "mean": 0.04874971889463874,
+                  "rms": 0.10338157034233031,
+                  "min": 5.867518484592438e-05,
+                  "max": 0.7350453734397888,
+                  "count": 4800
+                }
+              },
+              "policy": "deterministic_mean",
+              "elapsed_s": 53.74621846299851,
+              "action_clip": 100.0
+            }
+          ],
+          "optimization": {
+            "updates_observed": 80,
+            "actual_optimizer_steps": 640,
+            "planned_optimizer_steps": 640,
+            "early_stopped_updates": 0,
+            "first_update": {
+              "actor_loss": -0.0017580445273779333,
+              "value_loss": 0.014991374220699072,
+              "entropy": -1.143046572804451,
+              "kl": 0.003074231673963368,
+              "clip_fraction": 0.028076171875,
+              "loss": 0.018948563025332987,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 1.9059011340141296,
+              "optimizer_steps": 8,
+              "planned_optimizer_steps": 8,
+              "sample_count": 32768,
+              "early_stopped": false,
+              "stop_kl": 0.0,
+              "initial_mean_abs": 0.0526077435121645,
+              "initial_std_mean": 0.20000000298023224,
+              "initial_std_min": 0.20000000298023224,
+              "initial_std_max": 0.20000000298023224,
+              "first_step_kl": 0.00033815895053248787,
+              "first_step_mean_kl": 0.0003381535411909801,
+              "first_step_std_kl": 5.409341507763097e-09,
+              "first_step_mean_change_rms": 0.002123390410597424,
+              "first_step_normalized_mean_change_rms": 0.01061695189478221,
+              "final_kl": 0.006393740114451486,
+              "final_mean_kl": 0.006393610662876482,
+              "final_std_kl": 1.2945157500395097e-07,
+              "final_mean_change_rms": 0.009232247575241073,
+              "final_std_mean": 0.19999514520168304
+            },
+            "last_update": {
+              "actor_loss": -0.0010225242003798485,
+              "value_loss": 0.003561102057574317,
+              "entropy": -1.1229582726955414,
+              "kl": 0.0010327149839213234,
+              "clip_fraction": 0.0018310546875,
+              "loss": 0.008153369359206408,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 1.8864601701498032,
+              "optimizer_steps": 8,
+              "planned_optimizer_steps": 8,
+              "sample_count": 32768,
+              "early_stopped": false,
+              "stop_kl": 0.0,
+              "initial_mean_abs": 0.3064751189152351,
+              "initial_std_mean": 0.20066293080647785,
+              "initial_std_min": 0.20049549639225006,
+              "initial_std_max": 0.20091408491134644,
+              "first_step_kl": 4.437616812520081e-05,
+              "first_step_mean_kl": 4.4375194341417885e-05,
+              "first_step_std_kl": 9.737837829226642e-10,
+              "first_step_mean_change_rms": 0.0007717032777938439,
+              "first_step_normalized_mean_change_rms": 0.0038460568675909895,
+              "final_kl": 0.004155262753871289,
+              "final_mean_kl": 0.004155230849948479,
+              "final_std_kl": 3.1903922809949104e-08,
+              "final_mean_change_rms": 0.007466648488308927,
+              "final_std_mean": 0.20067583272854486
+            },
+            "metrics_sha256": "56c772efb1809678dee91af7b6b3297d9cda3c50e104f704063578eaf1cb5e76",
+            "step_utilization": 1.0
+          },
+          "historical_same_seed_comparison": {
+            "shared_logged_updates": 80,
+            "old_metrics_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-20260914T071345Z/stage-b/jobs/lr3e5_head01/seed_22/train/metrics.jsonl",
+            "old_metrics_sha256": "cb3542dc8f42f0d647791b6edd5b9c81f65cc1d202cb315f2b1c8dd0f7ef5193",
+            "optimization_rows_exactly_equal": true,
+            "collection_reward_means_exactly_equal": true,
+            "interpretation": "Read-only descriptive comparison; old rows are never used as new-run completion evidence."
+          },
+          "train_process": {
+            "argv": [
+              "/home/kaiser/robot-rl-sim60/env/bin/python",
+              "-m",
+              "examples._isaaclab_process",
+              "train",
+              "--config",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/configs/lr3e5_head01.json",
+              "--run-dir",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_22/train",
+              "--seed",
+              "22",
+              "--env-factory",
+              "examples.isaaclab_task:make_env",
+              "--device",
+              "cuda:0",
+              "--action-clip",
+              "100.0",
+              "--updates",
+              "80",
+              "--rollout-steps",
+              "32",
+              "--max-seconds",
+              "1200",
+              "--checkpoint-interval",
+              "80",
+              "--diagnostics"
+            ],
+            "log_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_22/train.log",
+            "started_unix_s": 1789378320.5206537,
+            "exit_code": 0,
+            "status": "completed",
+            "exit_evidence": "stock _process polled and reaped real SDK worker; nonzero returns raise",
+            "elapsed_s": 340.8759149450052
+          },
+          "training": {
+            "updates_completed": 80,
+            "collected_transitions": 1310720,
+            "elapsed_s": 339.5249647190212,
+            "collection_elapsed_s": 217.9980614069791
+          },
+          "checkpoint": {
+            "path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_22/train/checkpoints/checkpoint_000080.pt",
+            "sha256": "bbc7fa9940d4d4133f2bddecfd172b94cf4ed8f9ee38581ed9a0a6a5f86f3c71",
+            "update": 80
+          },
+          "environment_identity": {
+            "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+            "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+            "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+            "usd_seed_sha256": null,
+            "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+            "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+          },
+          "sampled_training_rss_peak_mib": 4724.59375
+        },
+        {
+          "stage": "stage-b",
+          "variant": "lr3e5_head01",
+          "train_seed": 33,
+          "status": "completed",
+          "result": {
+            "job": "lr3e5_head01/seed_33",
+            "plan_sha256": "cfd7e503d88d4bbafeb23ffa4c68a1af1e9ff96baadd81e14c3f2965a6d824e7",
+            "device": "cuda:0",
+            "status": "completed"
+          },
+          "config_sha256": "6f920c832268add0dcf2be8d854ec232ed03fce672d91dd45b0344a33e383748",
+          "learning_rate": 3e-05,
+          "mean_init_scale": 0.1,
+          "initial_std": 0.2,
+          "evaluations": [
+            {
+              "stage": "stage-b",
+              "variant": "lr3e5_head01",
+              "train_seed": 33,
+              "height": 0.3,
+              "exit_code": 0,
+              "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_33/evaluation_201.json",
+              "output_sha256": "6948fb0009b1e453a4e5e2f7b2313a432bf6c3ef0cbcd0d4337029feacff2e4d",
+              "seed": 201,
+              "checkpoint_sha256": "1cd44c62f571daf3780a47bccd4fe5b9d4e1bca0610535fb1af45ad19ba7eb00",
+              "checkpoint_update": 80,
+              "vector_steps": 600,
+              "num_envs": 8,
+              "transitions": 4800,
+              "reward_mean": 0.025603138620693546,
+              "terminated_count": 0,
+              "truncated_count": 0,
+              "metrics": {
+                "height_abs_error": {
+                  "mean": 0.0682029530685395,
+                  "rms": 0.06861672023440574,
+                  "min": 0.0027386248111724854,
+                  "max": 0.07581712305545807,
+                  "count": 4800
+                },
+                "non_wheel_net_force": {
+                  "mean": 509.7573799379667,
+                  "rms": 538.6166269742763,
+                  "min": 0.0,
+                  "max": 3165.107177734375,
+                  "count": 4800
+                },
+                "planar_speed": {
+                  "mean": 0.02468819374810361,
+                  "rms": 0.06168936307359592,
+                  "min": 0.004391901195049286,
+                  "max": 0.4521085023880005,
+                  "count": 4800
+                },
+                "vx_abs_error": {
+                  "mean": 0.011225103465949359,
+                  "rms": 0.034084984542132636,
+                  "min": 7.888651452958584e-06,
+                  "max": 0.26642823219299316,
+                  "count": 4800
+                },
+                "wz_abs_error": {
+                  "mean": 0.041294889804630655,
+                  "rms": 0.11643948494528995,
+                  "min": 6.3963234424591064e-06,
+                  "max": 0.9349421858787537,
+                  "count": 4800
+                }
+              },
+              "policy": "deterministic_mean",
+              "elapsed_s": 73.89294445698033,
+              "action_clip": 100.0
+            }
+          ],
+          "optimization": {
+            "updates_observed": 80,
+            "actual_optimizer_steps": 640,
+            "planned_optimizer_steps": 640,
+            "early_stopped_updates": 0,
+            "first_update": {
+              "actor_loss": -0.001107443356886506,
+              "value_loss": 0.019231581827625632,
+              "entropy": -1.1431540697813034,
+              "kl": 0.0018063955358229578,
+              "clip_fraction": 0.00994873046875,
+              "loss": 0.02383990923408419,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 1.7572637647390366,
+              "optimizer_steps": 8,
+              "planned_optimizer_steps": 8,
+              "sample_count": 32768,
+              "early_stopped": false,
+              "stop_kl": 0.0,
+              "initial_mean_abs": 0.04666945928548334,
+              "initial_std_mean": 0.20000000298023224,
+              "initial_std_min": 0.20000000298023224,
+              "initial_std_max": 0.20000000298023224,
+              "first_step_kl": 0.0002371696931183855,
+              "first_step_mean_kl": 0.00023716427473824596,
+              "first_step_std_kl": 5.41838013953783e-09,
+              "first_step_mean_change_rms": 0.0017782111097801214,
+              "first_step_normalized_mean_change_rms": 0.008891055416413557,
+              "final_kl": 0.005206767955588712,
+              "final_mean_kl": 0.005206677194112323,
+              "final_std_kl": 9.07614763886048e-08,
+              "final_mean_change_rms": 0.00833218381339036,
+              "final_std_mean": 0.1999893213311831
+            },
+            "last_update": {
+              "actor_loss": -0.0005403423856478184,
+              "value_loss": 0.0033411017211619765,
+              "entropy": -1.129219427704811,
+              "kl": 0.0007970581755216699,
+              "clip_fraction": 0.000244140625,
+              "loss": 0.008446856285445392,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 1.563643790781498,
+              "optimizer_steps": 8,
+              "planned_optimizer_steps": 8,
+              "sample_count": 32768,
+              "early_stopped": false,
+              "stop_kl": 0.0,
+              "initial_mean_abs": 0.3824136993700904,
+              "initial_std_mean": 0.20045769959688187,
+              "initial_std_min": 0.20020078122615814,
+              "initial_std_max": 0.20063777267932892,
+              "first_step_kl": 4.632548427451721e-05,
+              "first_step_mean_kl": 4.6324952649754396e-05,
+              "first_step_std_kl": 5.316247628164652e-10,
+              "first_step_mean_change_rms": 0.0007875077172177043,
+              "first_step_normalized_mean_change_rms": 0.003929576085091341,
+              "final_kl": 0.00300834188783606,
+              "final_mean_kl": 0.0030083095776443276,
+              "final_std_kl": 3.231019173268298e-08,
+              "final_mean_change_rms": 0.006345419742013647,
+              "final_std_mean": 0.20046334713697433
+            },
+            "metrics_sha256": "3a5053e68eaa64b79ec6cf3a4d540b1cbdf0d18c01a824d91542d49ed78931cd",
+            "step_utilization": 1.0
+          },
+          "historical_same_seed_comparison": {
+            "shared_logged_updates": 80,
+            "old_metrics_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-20260914T071345Z/stage-b/jobs/lr3e5_head01/seed_33/train/metrics.jsonl",
+            "old_metrics_sha256": "43596718ecce61390602a1c71cc105768004e026ba3a3a84bf718b408efec800",
+            "optimization_rows_exactly_equal": true,
+            "collection_reward_means_exactly_equal": true,
+            "interpretation": "Read-only descriptive comparison; old rows are never used as new-run completion evidence."
+          },
+          "train_process": {
+            "argv": [
+              "/home/kaiser/robot-rl-sim60/env/bin/python",
+              "-m",
+              "examples._isaaclab_process",
+              "train",
+              "--config",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/configs/lr3e5_head01.json",
+              "--run-dir",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_33/train",
+              "--seed",
+              "33",
+              "--env-factory",
+              "examples.isaaclab_task:make_env",
+              "--device",
+              "cuda:0",
+              "--action-clip",
+              "100.0",
+              "--updates",
+              "80",
+              "--rollout-steps",
+              "32",
+              "--max-seconds",
+              "1200",
+              "--checkpoint-interval",
+              "80",
+              "--diagnostics"
+            ],
+            "log_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_33/train.log",
+            "started_unix_s": 1789378713.946997,
+            "exit_code": 0,
+            "status": "completed",
+            "exit_evidence": "stock _process polled and reaped real SDK worker; nonzero returns raise",
+            "elapsed_s": 347.0487721560057
+          },
+          "training": {
+            "updates_completed": 80,
+            "collected_transitions": 1310720,
+            "elapsed_s": 345.15665113402065,
+            "collection_elapsed_s": 214.15857166811475
+          },
+          "checkpoint": {
+            "path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_33/train/checkpoints/checkpoint_000080.pt",
+            "sha256": "1cd44c62f571daf3780a47bccd4fe5b9d4e1bca0610535fb1af45ad19ba7eb00",
+            "update": 80
+          },
+          "environment_identity": {
+            "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+            "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+            "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+            "usd_seed_sha256": null,
+            "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+            "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+          },
+          "sampled_training_rss_peak_mib": 4725.3125
+        },
+        {
+          "stage": "stage-b",
+          "variant": "lr3e5_head01",
+          "train_seed": 44,
+          "status": "completed",
+          "result": {
+            "job": "lr3e5_head01/seed_44",
+            "plan_sha256": "cfd7e503d88d4bbafeb23ffa4c68a1af1e9ff96baadd81e14c3f2965a6d824e7",
+            "device": "cuda:0",
+            "status": "completed"
+          },
+          "config_sha256": "6f920c832268add0dcf2be8d854ec232ed03fce672d91dd45b0344a33e383748",
+          "learning_rate": 3e-05,
+          "mean_init_scale": 0.1,
+          "initial_std": 0.2,
+          "evaluations": [
+            {
+              "stage": "stage-b",
+              "variant": "lr3e5_head01",
+              "train_seed": 44,
+              "height": 0.3,
+              "exit_code": 0,
+              "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_44/evaluation_201.json",
+              "output_sha256": "753e1875c511f3dad118226e02fdab3648602b063732f8027ea17c286d5aec8a",
+              "seed": 201,
+              "checkpoint_sha256": "4b2f060ee2e7839150dcb23536c28621517b9d6110e6af8dde21163be25f4e09",
+              "checkpoint_update": 80,
+              "vector_steps": 600,
+              "num_envs": 8,
+              "transitions": 4800,
+              "reward_mean": 0.02671124013858692,
+              "terminated_count": 0,
+              "truncated_count": 0,
+              "metrics": {
+                "height_abs_error": {
+                  "mean": 0.08638127986031274,
+                  "rms": 0.08703355537737947,
+                  "min": 0.0020840466022491455,
+                  "max": 0.09173914790153503,
+                  "count": 4800
+                },
+                "non_wheel_net_force": {
+                  "mean": 31.12024002035459,
+                  "rms": 47.22897491649522,
+                  "min": 0.0,
+                  "max": 618.5587158203125,
+                  "count": 4800
+                },
+                "planar_speed": {
+                  "mean": 0.016957260440412937,
+                  "rms": 0.05916796715532436,
+                  "min": 0.00046196457697078586,
+                  "max": 0.3873552083969116,
+                  "count": 4800
+                },
+                "vx_abs_error": {
+                  "mean": 0.010439552292239114,
+                  "rms": 0.04070990655615001,
+                  "min": 1.5144098142627627e-05,
+                  "max": 0.35762161016464233,
+                  "count": 4800
+                },
+                "wz_abs_error": {
+                  "mean": 0.03741554539956269,
+                  "rms": 0.1422265177829617,
+                  "min": 0.00017631053924560547,
+                  "max": 1.233350157737732,
+                  "count": 4800
+                }
+              },
+              "policy": "deterministic_mean",
+              "elapsed_s": 70.53075164399343,
+              "action_clip": 100.0
+            }
+          ],
+          "optimization": {
+            "updates_observed": 80,
+            "actual_optimizer_steps": 640,
+            "planned_optimizer_steps": 640,
+            "early_stopped_updates": 0,
+            "first_update": {
+              "actor_loss": -0.001170518808066845,
+              "value_loss": 0.016677914769388735,
+              "entropy": -1.142848864197731,
+              "kl": 0.002270978886372177,
+              "clip_fraction": 0.01324462890625,
+              "loss": 0.021221640694420785,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 1.5153412520885468,
+              "optimizer_steps": 8,
+              "planned_optimizer_steps": 8,
+              "sample_count": 32768,
+              "early_stopped": false,
+              "stop_kl": 0.0,
+              "initial_mean_abs": 0.05065316802702331,
+              "initial_std_mean": 0.20000000298023224,
+              "initial_std_min": 0.20000000298023224,
+              "initial_std_max": 0.20000000298023224,
+              "first_step_kl": 0.0003275991973313389,
+              "first_step_mean_kl": 0.00032759381510572645,
+              "first_step_std_kl": 5.382225612438898e-09,
+              "first_step_mean_change_rms": 0.0020900189756921633,
+              "first_step_normalized_mean_change_rms": 0.01045009472274227,
+              "final_kl": 0.0045729429913567215,
+              "final_mean_kl": 0.004572894624081038,
+              "final_std_kl": 4.836727568342708e-08,
+              "final_mean_change_rms": 0.0078083793145944606,
+              "final_std_mean": 0.20000059902668
+            },
+            "last_update": {
+              "actor_loss": -0.0009662025840952992,
+              "value_loss": 0.003377041866770014,
+              "entropy": -1.1280102580785751,
+              "kl": 0.0012229546055095852,
+              "clip_fraction": 0.002838134765625,
+              "loss": 0.008050890523009002,
+              "auxiliary_loss": 0.0,
+              "auxiliary_coef": 0.0,
+              "grad_norm": 1.492852434515953,
+              "optimizer_steps": 8,
+              "planned_optimizer_steps": 8,
+              "sample_count": 32768,
+              "early_stopped": false,
+              "stop_kl": 0.0,
+              "initial_mean_abs": 0.33400474120712076,
+              "initial_std_mean": 0.20049643764893213,
+              "initial_std_min": 0.20021146535873413,
+              "initial_std_max": 0.2008681297302246,
+              "first_step_kl": 7.316177952326251e-05,
+              "first_step_mean_kl": 7.316122715983108e-05,
+              "first_step_std_kl": 5.523634314359509e-10,
+              "first_step_mean_change_rms": 0.0009906621608813007,
+              "first_step_normalized_mean_change_rms": 0.004938353272790426,
+              "final_kl": 0.004610801705246047,
+              "final_mean_kl": 0.004610757796591369,
+              "final_std_kl": 4.390865467758905e-08,
+              "final_mean_change_rms": 0.007862824283000539,
+              "final_std_mean": 0.20050691564877826
+            },
+            "metrics_sha256": "247cbd19e2ab01d0d7a495a444fc17f83a8788fcc4e2925df97442259a9ec27d",
+            "step_utilization": 1.0
+          },
+          "historical_same_seed_comparison": {
+            "shared_logged_updates": 80,
+            "old_metrics_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-20260914T071345Z/stage-b/jobs/lr3e5_head01/seed_44/train/metrics.jsonl",
+            "old_metrics_sha256": "c3d7bcd422d268dfb76d306098fad5b3032c0d36775bc269d5fa8d307cd9b001",
+            "optimization_rows_exactly_equal": true,
+            "collection_reward_means_exactly_equal": true,
+            "interpretation": "Read-only descriptive comparison; old rows are never used as new-run completion evidence."
+          },
+          "train_process": {
+            "argv": [
+              "/home/kaiser/robot-rl-sim60/env/bin/python",
+              "-m",
+              "examples._isaaclab_process",
+              "train",
+              "--config",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/configs/lr3e5_head01.json",
+              "--run-dir",
+              "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_44/train",
+              "--seed",
+              "44",
+              "--env-factory",
+              "examples.isaaclab_task:make_env",
+              "--device",
+              "cuda:0",
+              "--action-clip",
+              "100.0",
+              "--updates",
+              "80",
+              "--rollout-steps",
+              "32",
+              "--max-seconds",
+              "1200",
+              "--checkpoint-interval",
+              "80",
+              "--diagnostics"
+            ],
+            "log_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_44/train.log",
+            "started_unix_s": 1789378717.565768,
+            "exit_code": 0,
+            "status": "completed",
+            "exit_evidence": "stock _process polled and reaped real SDK worker; nonzero returns raise",
+            "elapsed_s": 346.98902589900536
+          },
+          "training": {
+            "updates_completed": 80,
+            "collected_transitions": 1310720,
+            "elapsed_s": 345.6119996420166,
+            "collection_elapsed_s": 213.752997549891
+          },
+          "checkpoint": {
+            "path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/stage-b/jobs/lr3e5_head01/seed_44/train/checkpoints/checkpoint_000080.pt",
+            "sha256": "4b2f060ee2e7839150dcb23536c28621517b9d6110e6af8dde21163be25f4e09",
+            "update": 80
+          },
+          "environment_identity": {
+            "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+            "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+            "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+            "usd_seed_sha256": null,
+            "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+            "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+          },
+          "sampled_training_rss_peak_mib": 4739.1953125
+        }
+      ],
+      "fairness_checks": {
+        "sensitivity": {
+          "partial": false,
+          "training_transition_counts": [
+            1310720
+          ],
+          "evaluation_transition_counts": [
+            4800
+          ],
+          "comparison_available": true,
+          "reasons": [],
+          "scope": "within-group configuration and sample-budget checks, not a quality ranking"
+        }
+      }
+    }
+  },
+  "height_evaluation": {
+    "plan": {
+      "plan_sha256": "f0d381314894ba12d6bed2ef26e528317c143bcb7c5cc96f2ec6330fbed0870c",
+      "stage_b_plan_sha256": "cfd7e503d88d4bbafeb23ffa4c68a1af1e9ff96baadd81e14c3f2965a6d824e7",
+      "package_source_sha256": "f182eaeb41a9f4a6bed0c6aff6aca9be01f9364cc4c707b7848a071f4516c209",
+      "max_parallel": 2,
+      "job_timeout_seconds": 240,
+      "frozen_unix_s": 1789379138.7183287
+    },
+    "execution": {
+      "exit_code": 0,
+      "abort_reason": null,
+      "elapsed_s": 340.15170012699673,
+      "samples": 326,
+      "max_workers": 2,
+      "memory_available_min_mib": 7035.93359375,
+      "gpu_memory_peak_mib": 9986,
+      "gpu_util_mean_percent": 75.61042944785277
+    },
+    "jobs": [
+      {
+        "variant": "baseline",
+        "train_seed": 22,
+        "height": 0.28,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 56.86252236700966,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "baseline",
+          "train_seed": 22,
+          "height": 0.28,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/baseline-seed22-h28/evaluation_201.json",
+          "output_sha256": "d89e05a25fcaecd0451a4711a80b4131db149af3348dd27c4e3ec8b01412839f",
+          "seed": 201,
+          "checkpoint_sha256": "359a0a1d2ea15dbba5914e8a2344f5c1458a6c37c3e92503728ff18e1cdf61fc",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.029036925105610862,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.07912717427437505,
+              "rms": 0.07955420265137439,
+              "min": 0.002666771411895752,
+              "max": 0.08491981029510498,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 108.85044492840767,
+              "rms": 133.4835575341276,
+              "min": 0.0,
+              "max": 1368.3848876953125,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.01742383125112004,
+              "rms": 0.049130566195967555,
+              "min": 0.0036800717934966087,
+              "max": 0.37404918670654297,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.01388693140210004,
+              "rms": 0.04838779435948754,
+              "min": 1.3221986591815948e-05,
+              "max": 0.37397438287734985,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.013314411890423799,
+              "rms": 0.06588715836026614,
+              "min": 3.2670795917510986e-06,
+              "max": 0.7938035130500793,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 54.152979257982224,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "baseline",
+        "train_seed": 22,
+        "height": 0.32,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 56.61160861098324,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "baseline",
+          "train_seed": 22,
+          "height": 0.32,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/baseline-seed22-h32/evaluation_201.json",
+          "output_sha256": "9b60aa879ce76a8b6fc92d90863313cec599fdd180c5180ee3de6ece10f45f8d",
+          "seed": 201,
+          "checkpoint_sha256": "359a0a1d2ea15dbba5914e8a2344f5c1458a6c37c3e92503728ff18e1cdf61fc",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.029199124185640055,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.11882340452323358,
+              "rms": 0.11949731773178408,
+              "min": 0.0010831058025360107,
+              "max": 0.12571115791797638,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 111.36922535339991,
+              "rms": 137.01895866507925,
+              "min": 0.0,
+              "max": 1444.5316162109375,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.02235572511572779,
+              "rms": 0.052589428521537196,
+              "min": 0.004188078921288252,
+              "max": 0.3719829320907593,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.0176703685921143,
+              "rms": 0.05115487986098787,
+              "min": 9.711729944683611e-06,
+              "max": 0.3718858063220978,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.022415697042003253,
+              "rms": 0.07823627072201514,
+              "min": 8.695904398337007e-06,
+              "max": 1.238063097000122,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 54.04592672397848,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "baseline",
+        "train_seed": 33,
+        "height": 0.28,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 57.611447769013466,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "baseline",
+          "train_seed": 33,
+          "height": 0.28,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/baseline-seed33-h28/evaluation_201.json",
+          "output_sha256": "300234a10c7498271191fc9d7c1bf162859cdcb03e38c13331c19a66f25c9bf6",
+          "seed": 201,
+          "checkpoint_sha256": "9a89b6ff97bb16c0556b110672f86876d7874cf6de70e4d13a177cbfd307bb48",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.014858878030014845,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.041321728499606254,
+              "rms": 0.041479226771818666,
+              "min": 0.0010856091976165771,
+              "max": 0.041885629296302795,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 782.135417175293,
+              "rms": 797.0359120677033,
+              "min": 0.0,
+              "max": 2984.880859375,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.1847023592198578,
+              "rms": 0.18609111108594603,
+              "min": 0.013104614801704884,
+              "max": 0.37957727909088135,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.16783874320487183,
+              "rms": 0.1689584225171164,
+              "min": 0.008537299931049347,
+              "max": 0.3771977126598358,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.9869731113951032,
+              "rms": 0.9931037180705268,
+              "min": 0.07269321382045746,
+              "max": 1.9068942070007324,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 55.08928436000133,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "baseline",
+        "train_seed": 33,
+        "height": 0.32,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 56.65938334801467,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "baseline",
+          "train_seed": 33,
+          "height": 0.32,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/baseline-seed33-h32/evaluation_201.json",
+          "output_sha256": "5aa088fe2da251c12055911c74fc011a2886b2286c44765fc1e09a407381049f",
+          "seed": 201,
+          "checkpoint_sha256": "9a89b6ff97bb16c0556b110672f86876d7874cf6de70e4d13a177cbfd307bb48",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.012080476130746925,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.08280497301680347,
+              "rms": 0.0831947666098098,
+              "min": 0.0018706321716308594,
+              "max": 0.08397768437862396,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 721.9602901649475,
+              "rms": 745.8221045699038,
+              "min": 0.0,
+              "max": 3310.39697265625,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.20084067188746607,
+              "rms": 0.20345704884818677,
+              "min": 0.049257297068834305,
+              "max": 0.514578104019165,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.1762720950700653,
+              "rms": 0.1773230736848438,
+              "min": 0.0486646369099617,
+              "max": 0.33961692452430725,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 1.0544435452682956,
+              "rms": 1.064178523946847,
+              "min": 0.002797923982143402,
+              "max": 1.874342679977417,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 54.16430605400819,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "baseline",
+        "train_seed": 44,
+        "height": 0.28,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 56.85754928100505,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "baseline",
+          "train_seed": 44,
+          "height": 0.28,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/baseline-seed44-h28/evaluation_201.json",
+          "output_sha256": "c3632b27c1b98cf0953ed92a216d3390fa9943577c107db565be9f94826f7655",
+          "seed": 201,
+          "checkpoint_sha256": "b3c07b7c1402d00d8a270a256d88af31ba21e4acdd2756f2cddbc48b674fbd05",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.02739555796860562,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.07373964480745296,
+              "rms": 0.07412717126464512,
+              "min": 0.0012204647064208984,
+              "max": 0.07670243084430695,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 47.73177328189214,
+              "rms": 54.0063308037128,
+              "min": 0.0,
+              "max": 360.9959411621094,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.010883651847799077,
+              "rms": 0.04354032705341895,
+              "min": 5.2401857828954235e-05,
+              "max": 0.4015620946884155,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.009482475440443068,
+              "rms": 0.0399435001116097,
+              "min": 4.6333298087120056e-08,
+              "max": 0.3655201494693756,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.016052319430529375,
+              "rms": 0.04757549081726554,
+              "min": 9.928829967975616e-06,
+              "max": 0.39095523953437805,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 54.29808683300507,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "baseline",
+        "train_seed": 44,
+        "height": 0.32,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 56.657047726999735,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "baseline",
+          "train_seed": 44,
+          "height": 0.32,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/baseline-seed44-h32/evaluation_201.json",
+          "output_sha256": "6730068aaf2dc3fc885714da7923f67e8259281c6eefb2046aeaf84016f128aa",
+          "seed": 201,
+          "checkpoint_sha256": "b3c07b7c1402d00d8a270a256d88af31ba21e4acdd2756f2cddbc48b674fbd05",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.02773503972265947,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.1119338328205049,
+              "rms": 0.11266855970610637,
+              "min": 7.128715515136719e-05,
+              "max": 0.11671850085258484,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 44.48477430661519,
+              "rms": 65.13844080944168,
+              "min": 0.0,
+              "max": 829.4935913085938,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.014118917173996881,
+              "rms": 0.051897576606201146,
+              "min": 5.4987143812468275e-05,
+              "max": 0.39302340149879456,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.011372034046448789,
+              "rms": 0.042413490078137904,
+              "min": 1.4500838005915284e-06,
+              "max": 0.35887157917022705,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.015302521493861907,
+              "rms": 0.05399515089838856,
+              "min": 1.1331983841955662e-05,
+              "max": 0.5423949956893921,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 54.0933751789853,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "lr3e5_head01",
+        "train_seed": 22,
+        "height": 0.28,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 56.505087243014714,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "lr3e5_head01",
+          "train_seed": 22,
+          "height": 0.28,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/lr3e5_head01-seed22-h28/evaluation_201.json",
+          "output_sha256": "df2f9ca0fbf2dadf81a23e57c69033df31a67ad18c07c0dfad532de3848f01cb",
+          "seed": 201,
+          "checkpoint_sha256": "bbc7fa9940d4d4133f2bddecfd172b94cf4ed8f9ee38581ed9a0a6a5f86f3c71",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.027372327717409158,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.04301798743195832,
+              "rms": 0.04318911108658859,
+              "min": 0.00351521372795105,
+              "max": 0.05197992920875549,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 775.443461980025,
+              "rms": 802.7452739078165,
+              "min": 0.0,
+              "max": 3187.749267578125,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.03087661724848052,
+              "rms": 0.07309390226164042,
+              "min": 0.007659816183149815,
+              "max": 0.4705326557159424,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.016163023611510046,
+              "rms": 0.046388123952889805,
+              "min": 2.0352075807750225e-05,
+              "max": 0.24466253817081451,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.04891998497053767,
+              "rms": 0.10408473824170054,
+              "min": 2.2098422050476074e-05,
+              "max": 0.7664923667907715,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 53.8962864119967,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "lr3e5_head01",
+        "train_seed": 22,
+        "height": 0.32,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 56.50526305101812,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "lr3e5_head01",
+          "train_seed": 22,
+          "height": 0.32,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/lr3e5_head01-seed22-h32/evaluation_201.json",
+          "output_sha256": "483d54fa6c215e4d39654229b64b74ac5eb1405ff6c79dab8a8110628a02742f",
+          "seed": 201,
+          "checkpoint_sha256": "bbc7fa9940d4d4133f2bddecfd172b94cf4ed8f9ee38581ed9a0a6a5f86f3c71",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.02480048001530425,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.08272109860243897,
+              "rms": 0.08315299665997783,
+              "min": 0.0009128749370574951,
+              "max": 0.0922299474477768,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 782.4591291979949,
+              "rms": 810.6167821413178,
+              "min": 0.0,
+              "max": 3221.25244140625,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.0313087987989032,
+              "rms": 0.07504077290636245,
+              "min": 0.006546569988131523,
+              "max": 0.4774256646633148,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.016557404100300724,
+              "rms": 0.04828375348094876,
+              "min": 2.1369662135839462e-05,
+              "max": 0.256888747215271,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.05120372207221711,
+              "rms": 0.1172775951670873,
+              "min": 0.00014347489923238754,
+              "max": 1.0991826057434082,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 53.87552061700262,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "lr3e5_head01",
+        "train_seed": 33,
+        "height": 0.28,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 55.953893164987676,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "lr3e5_head01",
+          "train_seed": 33,
+          "height": 0.28,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/lr3e5_head01-seed33-h28/evaluation_201.json",
+          "output_sha256": "f3c8102f10b2ef4e253493fce85767607dff3eec7b21f3a58e8e4f32e86e306d",
+          "seed": 201,
+          "checkpoint_sha256": "1cd44c62f571daf3780a47bccd4fe5b9d4e1bca0610535fb1af45ad19ba7eb00",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.026850705427544502,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.04864372532193859,
+              "rms": 0.04888077828641209,
+              "min": 0.0017840564250946045,
+              "max": 0.05589964985847473,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 505.12036636988324,
+              "rms": 534.1871157542281,
+              "min": 0.0,
+              "max": 3166.36767578125,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.0246805317941471,
+              "rms": 0.06165136163826027,
+              "min": 0.004186972975730896,
+              "max": 0.4520556926727295,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.011292142232596234,
+              "rms": 0.03414302888364721,
+              "min": 6.395857781171799e-07,
+              "max": 0.2672741711139679,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.04108048443831649,
+              "rms": 0.11583232818525299,
+              "min": 1.2862496078014374e-05,
+              "max": 0.9315444827079773,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 53.37524321197998,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "lr3e5_head01",
+        "train_seed": 33,
+        "height": 0.32,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 56.254646237997804,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "lr3e5_head01",
+          "train_seed": 33,
+          "height": 0.32,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/lr3e5_head01-seed33-h32/evaluation_201.json",
+          "output_sha256": "8f071257cb2ade05c6bc97fd50e2bb2322b8178840b279b88360d72660278d0b",
+          "seed": 201,
+          "checkpoint_sha256": "1cd44c62f571daf3780a47bccd4fe5b9d4e1bca0610535fb1af45ad19ba7eb00",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.02541368369963796,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.08802847406206031,
+              "rms": 0.08850089866779394,
+              "min": 0.0012007653713226318,
+              "max": 0.09601375460624695,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 519.9128382396698,
+              "rms": 548.0842047272315,
+              "min": 0.0,
+              "max": 3150.140625,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.024800207996643925,
+              "rms": 0.06216782056756372,
+              "min": 0.0042583816684782505,
+              "max": 0.45479723811149597,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.011381015571520645,
+              "rms": 0.03468529853467829,
+              "min": 1.3639568351209164e-05,
+              "max": 0.2666744291782379,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.04060875676147286,
+              "rms": 0.11449336982710437,
+              "min": 3.043562173843384e-06,
+              "max": 0.9537689685821533,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 53.65547169599449,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "lr3e5_head01",
+        "train_seed": 44,
+        "height": 0.28,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 55.500378349999664,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "lr3e5_head01",
+          "train_seed": 44,
+          "height": 0.28,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/lr3e5_head01-seed44-h28/evaluation_201.json",
+          "output_sha256": "b0ead2bd78108d3b3b81640dff363a658b66ea802c67e8f59204591f8b0695ba",
+          "seed": 201,
+          "checkpoint_sha256": "4b2f060ee2e7839150dcb23536c28621517b9d6110e6af8dde21163be25f4e09",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.02679499999775241,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.06687457891801993,
+              "rms": 0.06728716256965768,
+              "min": 0.0028745830059051514,
+              "max": 0.07178300619125366,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 30.93331909974416,
+              "rms": 47.773696168861136,
+              "min": 0.0,
+              "max": 630.4560546875,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.017143835284332453,
+              "rms": 0.059763557835124693,
+              "min": 0.0004612070042639971,
+              "max": 0.38286715745925903,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.010690476988039942,
+              "rms": 0.04162199680444643,
+              "min": 2.5654444471001625e-06,
+              "max": 0.3545107841491699,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.03686240416296641,
+              "rms": 0.14130370894504113,
+              "min": 2.4260487407445908e-05,
+              "max": 1.233091115951538,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 52.98515573999612,
+          "action_clip": 100.0
+        }
+      },
+      {
+        "variant": "lr3e5_head01",
+        "train_seed": 44,
+        "height": 0.32,
+        "status": "completed",
+        "error": null,
+        "elapsed_s": 56.35274452800513,
+        "evaluation": {
+          "stage": "stage-b",
+          "variant": "lr3e5_head01",
+          "train_seed": 44,
+          "height": 0.32,
+          "exit_code": 0,
+          "output_path": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-recheck-20260914T0920/height-evaluation/lr3e5_head01-seed44-h32/evaluation_201.json",
+          "output_sha256": "99e0d3c7bf9509c84ef18ef43841a899c8ac7d41933d721cfbfcba04b2512e4e",
+          "seed": 201,
+          "checkpoint_sha256": "4b2f060ee2e7839150dcb23536c28621517b9d6110e6af8dde21163be25f4e09",
+          "checkpoint_update": 80,
+          "vector_steps": 600,
+          "num_envs": 8,
+          "transitions": 4800,
+          "reward_mean": 0.026626178629424735,
+          "terminated_count": 0,
+          "truncated_count": 0,
+          "metrics": {
+            "height_abs_error": {
+              "mean": 0.10612108972854913,
+              "rms": 0.1068462398207023,
+              "min": 0.0008093118667602539,
+              "max": 0.11193336546421051,
+              "count": 4800
+            },
+            "non_wheel_net_force": {
+              "mean": 30.821692481835683,
+              "rms": 46.7902985561485,
+              "min": 0.0,
+              "max": 611.5165405273438,
+              "count": 4800
+            },
+            "planar_speed": {
+              "mean": 0.017227468708697416,
+              "rms": 0.059970034468902464,
+              "min": 0.0005049988976679742,
+              "max": 0.3874834179878235,
+              "count": 4800
+            },
+            "vx_abs_error": {
+              "mean": 0.010729930944797465,
+              "rms": 0.04166075432811747,
+              "min": 1.0712305083870888e-05,
+              "max": 0.3578345775604248,
+              "count": 4800
+            },
+            "wz_abs_error": {
+              "mean": 0.03618779209391505,
+              "rms": 0.14447281006234838,
+              "min": 0.0002883775159716606,
+              "max": 1.2916229963302612,
+              "count": 4800
+            }
+          },
+          "policy": "deterministic_mean",
+          "elapsed_s": 53.75478518102318,
+          "action_clip": 100.0
+        }
+      }
+    ]
+  },
+  "physical_by_height": [
+    {
+      "stage": "stage-a",
+      "variant": "std_01",
+      "height": 0.3,
+      "n_training_seeds": 1,
+      "metrics": {
+        "height_abs_error": {
+          "n": 1,
+          "mean": 0.10705899049527944,
+          "sample_std": null
+        },
+        "non_wheel_net_force": {
+          "n": 1,
+          "mean": 54.026668735345204,
+          "sample_std": null
+        },
+        "planar_speed": {
+          "n": 1,
+          "mean": 0.23322395473951474,
+          "sample_std": null
+        },
+        "vx_abs_error": {
+          "n": 1,
+          "mean": 0.22280327646217,
+          "sample_std": null
+        },
+        "wz_abs_error": {
+          "n": 1,
+          "mean": 0.25258073296397926,
+          "sample_std": null
+        }
+      }
+    },
+    {
+      "stage": "stage-b",
+      "variant": "baseline",
+      "height": 0.28,
+      "n_training_seeds": 3,
+      "metrics": {
+        "height_abs_error": {
+          "n": 3,
+          "mean": 0.06472951586047809,
+          "sample_std": 0.02044993276976924
+        },
+        "non_wheel_net_force": {
+          "n": 3,
+          "mean": 312.9058784618643,
+          "sample_std": 407.5121384779495
+        },
+        "planar_speed": {
+          "n": 3,
+          "mean": 0.07100328077292564,
+          "sample_std": 0.09852057559930379
+        },
+        "vx_abs_error": {
+          "n": 3,
+          "mean": 0.06373605001580498,
+          "sample_std": 0.09018246977651634
+        },
+        "wz_abs_error": {
+          "n": 3,
+          "mean": 0.3387799475720188,
+          "sample_std": 0.5613534156435316
+        }
+      }
+    },
+    {
+      "stage": "stage-b",
+      "variant": "baseline",
+      "height": 0.3,
+      "n_training_seeds": 3,
+      "metrics": {
+        "height_abs_error": {
+          "n": 3,
+          "mean": 0.08428843805773391,
+          "sample_std": 0.02016253325862544
+        },
+        "non_wheel_net_force": {
+          "n": 3,
+          "mean": 312.471975339916,
+          "sample_std": 409.9890328165939
+        },
+        "planar_speed": {
+          "n": 3,
+          "mean": 0.07183024311968766,
+          "sample_std": 0.09459927952549636
+        },
+        "vx_abs_error": {
+          "n": 3,
+          "mean": 0.06401253368204265,
+          "sample_std": 0.08636139801580484
+        },
+        "wz_abs_error": {
+          "n": 3,
+          "mean": 0.32908188972167407,
+          "sample_std": 0.538604340579044
+        }
+      }
+    },
+    {
+      "stage": "stage-b",
+      "variant": "baseline",
+      "height": 0.32,
+      "n_training_seeds": 3,
+      "metrics": {
+        "height_abs_error": {
+          "n": 3,
+          "mean": 0.10452073678684731,
+          "sample_std": 0.019119292524803884
+        },
+        "non_wheel_net_force": {
+          "n": 3,
+          "mean": 292.60476327498753,
+          "sample_std": 373.3336427395391
+        },
+        "planar_speed": {
+          "n": 3,
+          "mean": 0.07910510472573025,
+          "sample_std": 0.10550650446967409
+        },
+        "vx_abs_error": {
+          "n": 3,
+          "mean": 0.06843816590287613,
+          "sample_std": 0.09344000462456142
+        },
+        "wz_abs_error": {
+          "n": 3,
+          "mean": 0.3640539212680536,
+          "sample_std": 0.5979055310097
+        }
+      }
+    },
+    {
+      "stage": "stage-b",
+      "variant": "lr3e5_head01",
+      "height": 0.28,
+      "n_training_seeds": 3,
+      "metrics": {
+        "height_abs_error": {
+          "n": 3,
+          "mean": 0.05284543055730561,
+          "sample_std": 0.012470965660159995
+        },
+        "non_wheel_net_force": {
+          "n": 3,
+          "mean": 437.1657158165508,
+          "sample_std": 376.8782483929965
+        },
+        "planar_speed": {
+          "n": 3,
+          "mean": 0.024233661442320024,
+          "sample_std": 0.006877288342960047
+        },
+        "vx_abs_error": {
+          "n": 3,
+          "mean": 0.012715214277382075,
+          "sample_std": 0.0030010068593726543
+        },
+        "wz_abs_error": {
+          "n": 3,
+          "mean": 0.04228762452394019,
+          "sample_std": 0.0061187583807924125
+        }
+      }
+    },
+    {
+      "stage": "stage-b",
+      "variant": "lr3e5_head01",
+      "height": 0.3,
+      "n_training_seeds": 3,
+      "metrics": {
+        "height_abs_error": {
+          "n": 3,
+          "mean": 0.07243997875911494,
+          "sample_std": 0.012379120007942102
+        },
+        "non_wheel_net_force": {
+          "n": 3,
+          "mean": 440.15376935256853,
+          "sample_std": 379.0552469396518
+        },
+        "planar_speed": {
+          "n": 3,
+          "mean": 0.024189453172445308,
+          "sample_std": 0.006996167944569668
+        },
+        "vx_abs_error": {
+          "n": 3,
+          "mean": 0.012607608552065509,
+          "sample_std": 0.003099860813827838
+        },
+        "wz_abs_error": {
+          "n": 3,
+          "mean": 0.04248671803294403,
+          "sample_std": 0.005760313628481922
+        }
+      }
+    },
+    {
+      "stage": "stage-b",
+      "variant": "lr3e5_head01",
+      "height": 0.32,
+      "n_training_seeds": 3,
+      "metrics": {
+        "height_abs_error": {
+          "n": 3,
+          "mean": 0.0922902207976828,
+          "sample_std": 0.012268323443097279
+        },
+        "non_wheel_net_force": {
+          "n": 3,
+          "mean": 444.3978866398335,
+          "sample_std": 381.466368117366
+        },
+        "planar_speed": {
+          "n": 3,
+          "mean": 0.02444549183474818,
+          "sample_std": 0.007047363474659601
+        },
+        "vx_abs_error": {
+          "n": 3,
+          "mean": 0.012889450205539612,
+          "sample_std": 0.0031931790003629184
+        },
+        "wz_abs_error": {
+          "n": 3,
+          "mean": 0.04266675697586834,
+          "sample_std": 0.007716609484751478
+        }
+      }
+    }
+  ],
+  "paired_stage_b": [
+    {
+      "height": 0.28,
+      "direction": "candidate_minus_baseline",
+      "n_pairs": 3,
+      "pairs": [
+        {
+          "train_seed": 22,
+          "metrics": {
+            "height_abs_error": -0.03610918684241673,
+            "non_wheel_net_force": 666.5930170516173,
+            "planar_speed": 0.01345278599736048,
+            "vx_abs_error": 0.0022760922094100054,
+            "wz_abs_error": 0.035605573080113875
+          }
+        },
+        {
+          "train_seed": 33,
+          "metrics": {
+            "height_abs_error": 0.007321996822332338,
+            "non_wheel_net_force": -277.01505080540977,
+            "planar_speed": -0.1600218274257107,
+            "vx_abs_error": -0.1565466009722756,
+            "wz_abs_error": -0.9458926269567868
+          }
+        },
+        {
+          "train_seed": 44,
+          "metrics": {
+            "height_abs_error": -0.006865065889433031,
+            "non_wheel_net_force": -16.798454182147978,
+            "planar_speed": 0.006260183436533376,
+            "vx_abs_error": 0.0012080015475968743,
+            "wz_abs_error": 0.020810084732437038
+          }
+        }
+      ],
+      "metrics": {
+        "height_abs_error": {
+          "n": 3,
+          "mean": -0.011884085303172474,
+          "sample_std": 0.022146328037327353
+        },
+        "non_wheel_net_force": {
+          "n": 3,
+          "mean": 124.25983735468651,
+          "sample_std": 487.3624191909814
+        },
+        "planar_speed": {
+          "n": 3,
+          "mean": -0.04676961933060561,
+          "sample_std": 0.09814520040079516
+        },
+        "vx_abs_error": {
+          "n": 3,
+          "mean": -0.05102083573842291,
+          "sample_std": 0.0913895538371761
+        },
+        "wz_abs_error": {
+          "n": 3,
+          "mean": -0.2964923230480786,
+          "sample_std": 0.562445813084606
+        }
+      }
+    },
+    {
+      "height": 0.3,
+      "direction": "candidate_minus_baseline",
+      "n_pairs": 3,
+      "pairs": [
+        {
+          "train_seed": 22,
+          "metrics": {
+            "height_abs_error": -0.03617242082953452,
+            "non_wheel_net_force": 671.7726213649909,
+            "planar_speed": 0.009328437530930385,
+            "vx_abs_error": -0.0007433462553944996,
+            "wz_abs_error": 0.02887866221942507
+          }
+        },
+        {
+          "train_seed": 33,
+          "metrics": {
+            "height_abs_error": 0.00691595871311923,
+            "non_wheel_net_force": -274.7428200475375,
+            "planar_speed": -0.1562617158535674,
+            "vx_abs_error": -0.15245933069603781,
+            "wz_abs_error": -0.9097104358185364
+          }
+        },
+        {
+          "train_seed": 44,
+          "metrics": {
+            "height_abs_error": -0.006288915779441587,
+            "non_wheel_net_force": -13.98441927949587,
+            "planar_speed": 0.004010908480909922,
+            "vx_abs_error": -0.0010120984384991514,
+            "wz_abs_error": 0.021046258532921153
+          }
+        }
+      ],
+      "metrics": {
+        "height_abs_error": {
+          "n": 3,
+          "mean": -0.01184845929861896,
+          "sample_std": 0.02207563149740378
+        },
+        "non_wheel_net_force": {
+          "n": 3,
+          "mean": 127.68179401265249,
+          "sample_std": 488.90168459465417
+        },
+        "planar_speed": {
+          "n": 3,
+          "mean": -0.047640789947242364,
+          "sample_std": 0.09410604755997336
+        },
+        "vx_abs_error": {
+          "n": 3,
+          "mean": -0.05140492512997716,
+          "sample_std": 0.08751578554847339
+        },
+        "wz_abs_error": {
+          "n": 3,
+          "mean": -0.28659517168873005,
+          "sample_std": 0.5396478582655043
+        }
+      }
+    },
+    {
+      "height": 0.32,
+      "direction": "candidate_minus_baseline",
+      "n_pairs": 3,
+      "pairs": [
+        {
+          "train_seed": 22,
+          "metrics": {
+            "height_abs_error": -0.03610230592079461,
+            "non_wheel_net_force": 671.089903844595,
+            "planar_speed": 0.008953073683175411,
+            "vx_abs_error": -0.001112964491813577,
+            "wz_abs_error": 0.028788025030213854
+          }
+        },
+        {
+          "train_seed": 33,
+          "metrics": {
+            "height_abs_error": 0.005223501045256845,
+            "non_wheel_net_force": -202.04745192527776,
+            "planar_speed": -0.17604046389082215,
+            "vx_abs_error": -0.16489107949854465,
+            "wz_abs_error": -1.0138347885068228
+          }
+        },
+        {
+          "train_seed": 44,
+          "metrics": {
+            "height_abs_error": -0.0058127430919557715,
+            "non_wheel_net_force": -13.66308182477951,
+            "planar_speed": 0.003108551534700535,
+            "vx_abs_error": -0.0006421031016513243,
+            "wz_abs_error": 0.020885270600053144
+          }
+        }
+      ],
+      "metrics": {
+        "height_abs_error": {
+          "n": 3,
+          "mean": -0.012230515989164512,
+          "sample_std": 0.021397346495978117
+        },
+        "non_wheel_net_force": {
+          "n": 3,
+          "mean": 151.7931233648459,
+          "sample_std": 459.48234719846954
+        },
+        "planar_speed": {
+          "n": 3,
+          "mean": -0.05465961289098207,
+          "sample_std": 0.10515951146648618
+        },
+        "vx_abs_error": {
+          "n": 3,
+          "mean": -0.05554871569733651,
+          "sample_std": 0.09469355743047675
+        },
+        "wz_abs_error": {
+          "n": 3,
+          "mean": -0.3213871642921853,
+          "sample_std": 0.5996902513733801
+        }
+      }
+    }
+  ],
+  "old_results_unchanged": true,
+  "interpretation": [
+    "Same training seeds repeated under a new source are not additional independent seeds.",
+    "A std_01 is a new-source supplementary run, not a successful completion of the old A plan.",
+    "All six B jobs are new-source runs; no mixed-source seed completion.",
+    "Each evaluation is only 6 seconds per environment including startup; net force has no ground-pair identity."
+  ],
+  "orchestration_files_sha256": {
+    "recheck_heights.py": "2b9f0dbcf5e8c495f430a3e4b9e074e0baf968648ad4281820fab1613225f2b2",
+    "recheck_jobs.py": "22fa47435245007dcf8a3fe475710d02fe04ef266d1b3c0b3f53f5a1b85ad9d8",
+    "recheck_master.sh": "26c9eaf010c5cd6f2e59dff969cf6c5cdb54ed7b3e1d119885eaff7ff7a8bf02",
+    "recheck_offline.py": "69488bb3dc98abc5d34680a84f8aedee393f4aeaef6ac53a2bc7dae99b1f737c",
+    "recheck_prepare.py": "67f7516b9d80f3de7811d38ce1c49b1ea327e894ae445e85952f9106e3febb08",
+    "recheck_progress.py": "6f47b0d1a4c799e1ff03bca971a9a636ee7d36957960c751567bd4cccfbcc568",
+    "recheck_summarize.py": "90a3b2eea10f7d0369003730cb940f2e0605033c307e7355c45194d51acce8b0",
+    "recheck_watch.py": "ded833696acd1e9326d79e727e95fd50a2d3b2324ddead8e1ed4a71f480a1491"
+  },
+  "totals": {
+    "completed_training_jobs": 7,
+    "expected_training_jobs": 7,
+    "completed_evaluations": 19,
+    "expected_evaluations": 19,
+    "training_transitions": 8519680,
+    "failed_collected_transitions": 0,
+    "actual_optimizer_steps": 2250,
+    "planned_optimizer_steps": 4160,
+    "evaluation_transitions": 91200
+  },
+  "complete": true,
+  "stage_b_comparison_available": true
+}

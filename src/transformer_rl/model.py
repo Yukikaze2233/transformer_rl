@@ -95,6 +95,14 @@ class GaussianActor(nn.Module):
         frame_scale[-1] = 1 / config.time_scale_s
         self.register_buffer("frame_scale", frame_scale)
 
+    def _scale_initial_mean_head(self, head: nn.Linear) -> None:
+        # Preserve default initialization, RNG consumption and parameter identity/order.
+        # This is initialization only: loaded or learned weights need no runtime gain.
+        if self.config.mean_init_scale != 1.0:
+            with torch.no_grad():
+                head.weight.mul_(self.config.mean_init_scale)
+                head.bias.mul_(self.config.mean_init_scale)
+
     def _validate_history(self, history: HistoryBatch) -> None:
         if not isinstance(history, HistoryBatch):
             raise TypeError("history must be a HistoryBatch")
@@ -211,6 +219,13 @@ class GaussianActor(nn.Module):
             if transformer and config.residual_type == "gated" else None,
             "auxiliary_indices": list(config.auxiliary_indices),
             "auxiliary_source": "query representation" if config.auxiliary_indices else None,
+            "mean_initialization": {
+                "scale": config.mean_init_scale,
+                "target": "action mean output layer weight and bias only",
+                "stored_in_weights": True,
+                "runtime_gain": False,
+                "semantics": "initialization factor already incorporated in weights; do not reapply",
+            },
             "parameter_count": sum(p.numel() for p in self.parameters()),
             "parameter_count_scope": "training actor including Gaussian std and optional auxiliary head",
             "comparison": "parameter counts and compute differ across architectures",
@@ -283,6 +298,7 @@ class TimeAwareActor(GaussianActor):
         self._register_frame_scale()
         if config.auxiliary_indices:
             self.auxiliary_head = nn.Linear(config.d_model, len(config.auxiliary_indices))
+        self._scale_initial_mean_head(self.mean_head)
 
     def time_features_tensors(
         self, times: torch.Tensor, valid: torch.Tensor, now: torch.Tensor
@@ -397,6 +413,7 @@ class HistoryMLPActor(_WindowActor):
             width = hidden
         layers.append(nn.Linear(width, config.action_dim))
         self.network = nn.Sequential(*layers)
+        self._scale_initial_mean_head(self.network[-1])
 
     def forward_tensors(self, frames, times, valid, command, now):
         features, _ = self._window_features(frames, times, valid, now)
@@ -414,6 +431,7 @@ class WindowGRUActor(_WindowActor):
         super().__init__(config)
         self.cell = nn.GRUCell(config.frame_dim + 2, config.gru_hidden)
         self.mean_head = nn.Linear(config.gru_hidden + config.command_dim, config.action_dim)
+        self._scale_initial_mean_head(self.mean_head)
 
     def forward_tensors(self, frames, times, valid, command, now):
         features, valid = self._window_features(frames, times, valid, now)

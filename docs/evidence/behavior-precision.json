@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-14",
+  "conclusion": "For the captured std=0.1 seed=11 first rollout, batch-shape-dependent FP32 mean evaluation differences explain the original behavior gate rejection; stored history/actions/moments and model state are unchanged.",
+  "scope": {
+    "source_root": "/home/kaiser/robot-rl-sim60/transformer-sensitivity-20260914T071345Z",
+    "frozen_source_all_verified": true,
+    "config_relative_path": "stage-a/configs/std_01.json",
+    "config_sha256": "3d0a4abeb127a1b9a68823ea280c0517af0682a99d1a7e30e5832852f6709288",
+    "seed": 11,
+    "initial_std": 0.1,
+    "steps": 32,
+    "num_envs": 512,
+    "transitions": 16384,
+    "action_clip": 100.0,
+    "optimizer_steps": 0,
+    "real_collect_calls": 1,
+    "baseline_seed44_update52_reproduced": false
+  },
+  "backend": {
+    "torch": "2.11.0+cu128",
+    "cuda": "12.8",
+    "cudnn": 91900,
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "matmul_allow_tf32": false,
+    "cudnn_allow_tf32": true,
+    "float32_matmul_precision": "highest",
+    "deterministic_algorithms": false,
+    "cudnn_benchmark": true,
+    "autocast_cuda": false,
+    "offline_replay_backend_identical": true
+  },
+  "dtypes": {
+    "model_parameters": "float32",
+    "history.frames": "float32",
+    "history.times": "float64",
+    "history.valid": "bool",
+    "history.command": "float32",
+    "history.now": "float64",
+    "raw_action": "float32",
+    "old_mean": "float32",
+    "old_std": "float32",
+    "old_log_prob": "float32"
+  },
+  "integrity": {
+    "model_state_before_vs_after_collect_bitwise_equal": true,
+    "collector_version_guard_completed": true,
+    "model_state_after_replay_bitwise_equal": true,
+    "act_input_vs_rollout_history_equal": {
+      "frames": true, "times": true, "valid": true, "command": true, "now": true
+    },
+    "act_output_vs_rollout_equal": {
+      "raw_action": true, "old_mean": true, "old_std": true, "old_log_prob": true
+    },
+    "history_after_replay_equal": true,
+    "payload_weights_only_cpu_readable": true,
+    "stored_moments_logp_recompute_fp32_max_abs": 0.0,
+    "stored_moments_logp_recompute_fp64_vs_stored": {
+      "max_abs": 1.681330488167987e-6,
+      "rms": 5.544156349251183e-7
+    }
+  },
+  "original_gate": {
+    "passed": false,
+    "rtol": 1e-5,
+    "atol": 1e-5,
+    "error": "old_log_prob mismatch before first optimizer step (max absolute error 1.23978e-05); check behavior policy statistics, weights, full history snapshots and raw_action",
+    "error_max_scope": "First rejected 4096-row chunk, not whole rollout and not necessarily the failing row"
+  },
+  "gpu_fp32_batch512": {
+    "mean_std_logp_bitwise_equal_to_collection": true,
+    "repeat_after_4096_bitwise_equal": true,
+    "mean_max_abs_delta": 0.0,
+    "std_max_abs_delta": 0.0,
+    "logp_max_abs_delta": 0.0,
+    "analytic_kl64_mean": 0.0,
+    "analytic_kl64_max": 0.0,
+    "gate_failure_count": 0
+  },
+  "gpu_fp32_batch4096": {
+    "mean_delta": {
+      "max_abs": 5.066394805908203e-7,
+      "mean_abs": 8.044733353547902e-8,
+      "rms": 1.0661126347069446e-7,
+      "nonzero": 78709,
+      "total_elements": 98304,
+      "abs_quantiles": {
+        "p50": 5.960464477539063e-8,
+        "p90": 1.7881393432617188e-7,
+        "p99": 2.682209014892578e-7,
+        "p999": 3.5762786865234375e-7
+      }
+    },
+    "std_max_abs_delta": 0.0,
+    "logp_delta": {
+      "max_abs": 1.6808509826660156e-5,
+      "mean_abs": 1.9713988876901567e-6,
+      "rms": 2.5996843326983196e-6,
+      "nonzero": 14924,
+      "abs_quantiles": {
+        "p50": 1.430511474609375e-6,
+        "p90": 4.291534423828125e-6,
+        "p99": 7.62939453125e-6,
+        "p999": 1.0683178901672386e-5
+      }
+    },
+    "analytic_kl64": {
+      "mean": 3.409788348025736e-12,
+      "max": 2.2049028611943343e-11
+    },
+    "gate_failure_count": 1,
+    "max_tolerance_ratio": 1.0638767264759497,
+    "grad_vs_no_grad_mean_std_logp_bitwise_equal": true,
+    "inference_vs_no_grad_mean_std_logp_bitwise_equal": true,
+    "mean_delta_in_old_local_ulp": {
+      "max_abs": 98304.0,
+      "p50": 2.0,
+      "p90": 18.0,
+      "p99": 160.0,
+      "p999": 1536.0,
+      "definition": "abs(delta_mean) / abs(nextafter(old_mean,+inf)-old_mean); local ULP grows misleadingly large near zero"
+    },
+    "mean_shift_logp64": {
+      "max_abs": 1.6905218265477193e-5,
+      "rms": 2.5823584217082935e-6
+    },
+    "fp32_logp_delta_minus_moments_logp_delta64": {
+      "max_abs": 1.690633476325587e-6,
+      "rms": 3.3240981069942464e-7
+    },
+    "mean_shift_formula_residual64_max_abs": 3.1597052143510825e-15,
+    "near_zero_bins": [
+      {"abs_old_logp_range": [0, 0.01], "n": 3, "failures": 0, "max_abs_delta": 2.86102294921875e-6},
+      {"abs_old_logp_range": [0.01, 0.1], "n": 25, "failures": 1, "max_abs_delta": 1.1324882507324219e-5},
+      {"abs_old_logp_range": [0.1, 1], "n": 261, "failures": 0, "max_abs_delta": 1.1920928955078125e-5},
+      {"abs_old_logp_range": [1, 5], "n": 5652, "failures": 0, "max_abs_delta": 1.6808509826660156e-5},
+      {"abs_old_logp_range": [5, 100], "n": 10443, "failures": 0, "max_abs_delta": 1.0967254638671875e-5}
+    ]
+  },
+  "failure_sample": {
+    "index": 171,
+    "step_zero_based": 0,
+    "env_zero_based": 171,
+    "old_logp": -0.06449198722839355,
+    "new_logp": -0.06448066234588623,
+    "logp_delta": 1.1324882507324219e-5,
+    "tolerance": 1.0644919872283937e-5,
+    "mean_delta": [1.1920928955078125e-7, -1.7881393432617188e-7, 2.682209014892578e-7, -5.960464477539063e-8, 1.341104507446289e-7, 1.1920928955078125e-7],
+    "old_mean": [-0.7406644821166992, -0.03685767948627472, -0.2536098062992096, -0.1410384476184845, -0.21607869863510132, -0.5765541791915894],
+    "new_mean": [-0.7406643629074097, -0.036857858300209045, -0.2536095380783081, -0.14103850722312927, -0.21607856452465057, -0.5765540599822998],
+    "old_std_all_actions": 0.10000000149011612,
+    "std_delta_all_actions": 0.0,
+    "raw_action": [-0.7457045316696167, -0.13429173827171326, -0.14104396104812622, -0.31770750880241394, -0.013861551880836487, -0.3063064217567444],
+    "mean_shift_logp64": 1.1687995123136083e-5,
+    "analytic_kl64": 7.693845331357874e-12
+  },
+  "additional_replays": {
+    "gpu_fp32_batch256_no_grad": {
+      "mean_max_abs_delta": 5.960464477539062e-7,
+      "std_max_abs_delta": 0.0,
+      "logp_max_abs_delta": 1.52587890625e-5,
+      "analytic_kl64_mean": 4.324337192389358e-12,
+      "gate_failure_count": 0
+    },
+    "gpu_fp32_batch1024_no_grad": {
+      "mean_max_abs_delta": 3.5762786865234375e-7,
+      "std_max_abs_delta": 0.0,
+      "logp_max_abs_delta": 9.298324584960938e-6,
+      "analytic_kl64_mean": 1.0589756232144e-12,
+      "gate_failure_count": 0
+    },
+    "gpu_fp64_batch512_no_grad": {
+      "mean_max_abs_delta": 6.723007688336224e-7,
+      "std_max_abs_delta": 4.687659732605098e-9,
+      "logp_max_abs_delta": 2.073982902395244e-5,
+      "analytic_kl64_mean": 3.4674689960253065e-12,
+      "gate_failure_count_against_stored_fp32": 2,
+      "note": "Same saved FP32 weights promoted to FP64; exp(log_std) rounding also changes. Reference only, not a replacement behavior distribution."
+    }
+  },
+  "mean_error_to_gpu_fp64_reference": {
+    "fp32_batch512": {"max_abs": 6.723007688336224e-7, "rms": 1.0730461751841267e-7},
+    "fp32_batch4096": {"max_abs": 5.141750065718043e-7, "rms": 1.0640657431266642e-7}
+  },
+  "artifacts": {
+    "remote_directory": "/home/kaiser/robot-rl-sim60/behavior-precision-20260914",
+    "payload": {"name": "payload.pt", "bytes": 74329203, "sha256": "9add976532474297239e560dd42c8f6d92434641fdbcbd8466ed28c2b8155d2d"},
+    "replays": {"name": "replays.pt", "sha256": "9cbc8015d64acef0b5b656a3e72b270b23c6737dfc51c46d0258cd411c933a83"},
+    "full_analysis": {"name": "analysis.json", "sha256": "657c1b1791e1720ae54fef7a21f809e08447a921b94ee385c466f273e4f66ff2"},
+    "capture_script_sha256": "13ea084cd1414357c31ee56398caa722fdd1c7bdb9a47cd62e32c7acc6430435",
+    "replay_script_sha256": "d9cb7f4cd9445a28daeff3c2b54b5daad6c8ad8b4e6011833c21aeea6149f143"
+  },
+  "execution": {
+    "collection_exit_code": 1,
+    "collection_failure": "After payload save/read: stat().st_size() called an int. Original payload preserved; no second collect.",
+    "sdk_owner": "examples._isaaclab_process.main",
+    "environment_close_and_sdk_finally_executed": true,
+    "replay_exit_code": 0,
+    "summary_exit_code": 0,
+    "worker_timeout_s": 480,
+    "session_timeout_s": 530,
+    "replay_timeout_s": 180,
+    "summary_timeout_s": 30,
+    "gpu_replay_analysis_elapsed_s": 2.921361536020413,
+    "collection_resource_samples": 46,
+    "collection_min_mem_available_mib": 10466,
+    "collection_peak_gpu_total_used_mib": 9111,
+    "resource_scope": "Collection only; whole-GPU usage includes existing Windows processes. Offline replay peak was not sampled.",
+    "new_tmux_sessions_ended": true
+  },
+  "limits": [
+    "Original stage-A failed rollout was not saved then; the matching first-chunk error is a reproduction, not a tensor identity comparison to that lost rollout.",
+    "No reproduction of stage-B seed44 update52; do not retroactively accept either historical failed training.",
+    "No kernel-level profiling; evidence establishes batch-shape-dependent output rounding without identifying a particular CUDA kernel.",
+    "No core gate/PPO/tolerance changes and no optimizer updates."
+  ]
+}

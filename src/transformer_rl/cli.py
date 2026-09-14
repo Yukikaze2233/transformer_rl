@@ -116,6 +116,7 @@ def _train(args, model_config: ModelConfig, ppo_config: PPOConfig, environment: 
         "environment": environment,
         "action_clip": args.action_clip,
         "seed": args.seed,
+        "diagnostics": args.diagnostics,
         "source": _source_identity(),
         "package_version": __version__,
         "python": platform.python_version(),
@@ -182,7 +183,8 @@ def _train(args, model_config: ModelConfig, ppo_config: PPOConfig, environment: 
                     if batch is None or budget.stopped():
                         break
                     update_in_progress = True
-                    learned = trainer.update(batch)
+                    learned = (trainer.update(batch, diagnostics=True) if args.diagnostics
+                               else trainer.update(batch))
                     update_in_progress = False
                     update += 1
                     row = {"update": update, "collection": collector.last_metrics,
@@ -247,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
     train.add_argument("--action-clip", type=_positive_seconds, default=None)
     train.add_argument("--device", default="cpu")
     train.add_argument("--seed", type=int, default=0)
+    train.add_argument("--diagnostics", action="store_true",
+                       help="Measure full-rollout distribution changes after optimization steps")
     train.add_argument("--resume", type=Path)
     export = subparsers.add_parser("export", help="Export and verify deterministic ONNX policy")
     export.add_argument("--checkpoint", type=Path, required=True)

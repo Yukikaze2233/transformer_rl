@@ -10,6 +10,9 @@ jobs:
       MKL_NUM_THREADS: "2"
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Checkpoint migration tests compare against the actual historical model.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

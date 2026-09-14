@@ -1,5 +1,13 @@
 # 实现验证记录
 
+## 敏感性、数值修复和命名场景
+
+新增初始化因子、可选整rollout优化诊断、schema 1/2迁移、敏感性实验和命名评估场景后，完整本机检查为 **805 passed，0 failed，0 skipped，34.69秒**。CI显式获取Git历史，用真实旧实现验证checkpoint兼容性。
+
+真实Kaiser数值复现表明，batch512与4096的均值差约5e-7、KL64约3.4e-12，能在std=0.1时产生约1.7e-5的logp差。修复将moment接近性与各自Gaussian概率自洽分开，原容差、PPO loss和ratio分母保持不变。旧payload离线GPU验收、伪造数据拒绝测试，以及修复后的7项训练/19项评估均通过。见[数值证据](BEHAVIOR_PRECISION.md)、[公平复验](KAISER_SENSITIVITY_RECHECK.md)。
+
+命名场景逐场景统计，不把不同高度当作不同随机seed；默认仅评估最终checkpoint。首档6模型×3训练seed的学习曲线规格已写入配置，后续真实长训进度单独记录，不能把单元测试或80次更新称为收敛。
+
 ## 多架构与Kaiser后续验证
 
 2026-09-14增加六变体、辅助学习、检查点迁移、实验编排和独立评估后，本机全仓检查为**532 passed，0 failed，0 skipped，15.86秒**，包含额外SDK进程所有权及worker_module调度回归。默认网络旧检查点的参数顺序、state keys、策略输出与下一次Adam更新已用原实现精确核对。当前包源码SHA `afc83b7a6346b9dd724cb13217fa6f78bbf64297668a66bcf2cb654ac535adf4` 与Kaiser有效pilot一致。

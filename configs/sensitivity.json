@@ -1,0 +1,17 @@
+{
+  "base_config": "control.json",
+  "environment_factory": null,
+  "seeds": [11],
+  "variants": [
+    {"name": "baseline", "model": {}, "ppo": {}, "group": "sensitivity"},
+    {"name": "lr_3e5", "model": {}, "ppo": {"learning_rate": 0.00003}, "group": "sensitivity"},
+    {"name": "lr_1e5", "model": {}, "ppo": {"learning_rate": 0.00001}, "group": "sensitivity"},
+    {"name": "init_scale_01", "model": {"mean_init_scale": 0.1}, "ppo": {}, "group": "sensitivity"},
+    {"name": "init_scale_001", "model": {"mean_init_scale": 0.01}, "ppo": {}, "group": "sensitivity"},
+    {"name": "std_01", "model": {"initial_std": 0.1}, "ppo": {}, "group": "sensitivity"},
+    {"name": "std_04", "model": {"initial_std": 0.4}, "ppo": {}, "group": "sensitivity"}
+  ],
+  "training": {"updates": 1000, "rollout_steps": 48, "max_seconds": 3600, "checkpoint_interval": 100, "action_clip": null, "diagnostics": true},
+  "execution": {"devices": ["cuda:0"], "max_parallel": 1, "job_timeout_seconds": 4200},
+  "evaluation": {"steps": 2000, "seeds": [101, 102, 103], "environment": {}}
+}

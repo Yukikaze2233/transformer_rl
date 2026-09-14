@@ -1,0 +1,36 @@
+{
+  "base_config": "optimized_control.json",
+  "environment_factory": null,
+  "seeds": [1011, 1022, 1033],
+  "variants": [
+    {"name": "time_attention", "model": {}, "ppo": {}, "group": "architecture"},
+    {"name": "index_attention", "model": {"time_encoding": "index"}, "ppo": {}, "group": "architecture"},
+    {"name": "gated_attention", "model": {"residual_type": "gated"}, "ppo": {}, "group": "architecture"},
+    {"name": "supervised_attention", "model": {"auxiliary_indices": [25, 26, 27]}, "ppo": {"auxiliary_coef": 0.1}, "group": "supervision"},
+    {"name": "history_mlp", "model": {"actor_type": "mlp"}, "ppo": {}, "group": "architecture"},
+    {"name": "history_gru", "model": {"actor_type": "gru"}, "ppo": {}, "group": "architecture"}
+  ],
+  "training": {
+    "updates": 977,
+    "rollout_steps": 32,
+    "max_seconds": 7200,
+    "checkpoint_interval": 100,
+    "action_clip": null,
+    "diagnostics": false
+  },
+  "execution": {"devices": ["cuda:0"], "max_parallel": 2, "job_timeout_seconds": 10800},
+  "evaluation": {
+    "steps": 2000,
+    "seeds": [301],
+    "environment": {},
+    "scenarios": [
+      {"name": "stand_low", "environment": {"fixed_command": [0, 0, 0.28]}},
+      {"name": "stand_mid", "environment": {"fixed_command": [0, 0, 0.30]}},
+      {"name": "stand_high", "environment": {"fixed_command": [0, 0, 0.32]}},
+      {"name": "forward", "environment": {"fixed_command": [0.5, 0, 0.30]}},
+      {"name": "reverse", "environment": {"fixed_command": [-0.5, 0, 0.30]}},
+      {"name": "turn_left", "environment": {"fixed_command": [0, 1, 0.30]}},
+      {"name": "turn_right", "environment": {"fixed_command": [0, -1, 0.30]}}
+    ]
+  }
+}

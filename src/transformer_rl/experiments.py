@@ -23,6 +23,15 @@ from .config import ModelConfig, PPOConfig, config_dict
 
 _ACTOR_FIELDS = {"actor_type", "time_encoding", "residual_type", "baseline_hidden",
                  "gru_hidden", "d_model", "num_layers", "num_heads", "ffn_dim"}
+_SENSITIVITY_FIELDS = {"model": {"mean_init_scale", "initial_std"},
+                       "ppo": {"learning_rate"}}
+_OPTIMIZER_DIAGNOSTICS = (
+    "initial_mean_abs", "initial_std_mean", "initial_std_min", "initial_std_max",
+    "first_step_kl", "first_step_mean_kl", "first_step_std_kl",
+    "first_step_mean_change_rms", "first_step_normalized_mean_change_rms",
+    "final_kl", "final_mean_kl", "final_std_kl", "final_mean_change_rms", "final_std_mean",
+    "kl", "stop_kl", "optimizer_steps", "planned_optimizer_steps",
+)
 _TERMINATION_GRACE_SECONDS = 3.0
 
 
@@ -108,7 +117,7 @@ def _validate_spec(spec):
         if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", name) or name in names:
             raise ValueError("variant names must be unique safe identifiers")
         names.add(name)
-        if variant["group"] not in ("architecture", "supervision"):
+        if variant["group"] not in ("architecture", "supervision", "sensitivity"):
             raise ValueError("unknown comparison group")
         if not all(isinstance(variant[k], dict) for k in ("model", "ppo")):
             raise ValueError("variant overrides must be objects")
@@ -117,13 +126,16 @@ def _validate_spec(spec):
         ("execution", {"devices", "max_parallel", "job_timeout_seconds"}),
         ("evaluation", {"steps", "seeds", "environment"}),
     ):
-        optional = {"worker_module"} if section == "execution" else set()
+        optional = {"execution": {"worker_module"}, "training": {"diagnostics"},
+                    "evaluation": {"scenarios"}}.get(section, set())
         if (not isinstance(spec[section], dict) or not keys <= set(spec[section])
                 or set(spec[section]) - keys - optional):
             raise ValueError(f"invalid {section} shape")
     for key in ("updates", "rollout_steps", "checkpoint_interval"):
         _positive(spec["training"][key], key, True)
     _positive(spec["training"]["max_seconds"], "max_seconds")
+    if type(spec["training"].get("diagnostics", False)) is not bool:
+        raise ValueError("training.diagnostics must be boolean")
     if spec["training"]["action_clip"] is not None:
         _positive(spec["training"]["action_clip"], "action_clip")
     execution = spec["execution"]
@@ -140,6 +152,21 @@ def _validate_spec(spec):
     _seeds(spec["evaluation"]["seeds"])
     if not isinstance(spec["evaluation"]["environment"], dict):
         raise ValueError("evaluation.environment must be an object")
+    if "scenarios" in spec["evaluation"]:
+        scenarios = spec["evaluation"]["scenarios"]
+        if not isinstance(scenarios, list) or not scenarios:
+            raise ValueError("evaluation.scenarios must be a nonempty list")
+        names = set()
+        for scenario in scenarios:
+            if not isinstance(scenario, dict) or set(scenario) != {"name", "environment"}:
+                raise ValueError("scenario requires exactly name and environment; steps are uniform")
+            name = scenario["name"]
+            if (not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", name)
+                    or name in names):
+                raise ValueError("scenario names must be unique safe identifiers")
+            names.add(name)
+            if not isinstance(scenario["environment"], dict):
+                raise ValueError("scenario.environment must be an object")
 
 
 def _configuration(base, variant, evaluation=None):
@@ -147,25 +174,34 @@ def _configuration(base, variant, evaluation=None):
         raise ValueError("unknown base config section")
     configs = []
     for key, cls in (("model", ModelConfig), ("ppo", PPOConfig)):
-        values = {**base.get(key, {}), **variant[key]}
+        section = base.get(key, {})
+        if not isinstance(section, dict):
+            raise ValueError(f"base {key} must be an object")
+        values = {**section, **variant[key]}
         if set(values) - {f.name for f in fields(cls)}:
             raise ValueError(f"unknown {key} fields; ensure configuration implementation is available")
         defaults = cls()
         allowed = set(_ACTOR_FIELDS) if key == "model" else set()
         if variant["group"] == "supervision":
             allowed.add("auxiliary_indices" if key == "model" else "auxiliary_coef")
-        for name, value in variant[key].items():
-            reference = base.get(key, {}).get(name, getattr(defaults, name))
-            if name not in allowed and _encoded(value) != _encoded(reference):
-                raise ValueError(f"fair comparison forbids changing {key}.{name}")
+        elif variant["group"] == "sensitivity":
+            allowed = _SENSITIVITY_FIELDS[key]
+        reference_values = dict(section)
         for field in fields(cls):
-            if field.name in values and isinstance(getattr(defaults, field.name), tuple):
-                values[field.name] = tuple(values[field.name])
-        configs.append(cls(**values))
+            if isinstance(getattr(defaults, field.name), tuple):
+                for candidate in (reference_values, values):
+                    if field.name in candidate:
+                        candidate[field.name] = tuple(candidate[field.name])
+        reference, configured = cls(**reference_values), cls(**values)
+        for name in variant[key]:
+            if name not in allowed and getattr(configured, name) != getattr(reference, name):
+                raise ValueError(f"fair comparison forbids changing {key}.{name}")
+        configs.append(configured)
     if variant["group"] == "architecture" and getattr(configs[0], "auxiliary_indices", ()):
         raise ValueError("architecture group must not contain auxiliary supervision heads")
     if getattr(configs[1], "auxiliary_coef", 0) > 0:
-        if not getattr(configs[0], "auxiliary_indices", ()) or variant["group"] != "supervision":
+        if (not getattr(configs[0], "auxiliary_indices", ())
+                or variant["group"] not in ("supervision", "sensitivity")):
             raise ValueError("auxiliary supervision requires targets and supervision group")
     environment = base.get("environment", {})
     if not isinstance(environment, dict):
@@ -173,11 +209,33 @@ def _configuration(base, variant, evaluation=None):
     return json.loads(_encoded(config_dict(*configs, {**environment, **(evaluation or {})})))
 
 
+def _evaluation_configs(spec, variant):
+    """Resolve shared scenario overrides without changing legacy config routes."""
+    evaluation = spec["evaluation"]
+    if "scenarios" not in evaluation:
+        return {None: (f"configs/{variant}.evaluation.json", evaluation["environment"])}
+    return {scene["name"]: (f"configs/{variant}.evaluation.{scene['name']}.json",
+                            {**evaluation["environment"], **scene["environment"]})
+            for scene in evaluation["scenarios"]}
+
+
+def _plan_configs(base, spec):
+    configs = {}
+    for variant in spec["variants"]:
+        configs[f"configs/{variant['name']}.json"] = _configuration(base, variant)
+        for route, environment in _evaluation_configs(spec, variant["name"]).values():
+            configs[route] = _configuration(base, variant, environment)
+    return configs
+
+
 def _jobs(spec):
     return [{"id": f"{v['name']}/seed_{seed}", "variant": v["name"],
              "group": v["group"], "seed": seed,
              "config": f"configs/{v['name']}.json",
-             "eval_config": f"configs/{v['name']}.evaluation.json",
+             **({"eval_configs": {name: route for name, (route, _) in
+                                  _evaluation_configs(spec, v["name"]).items()}}
+                if "scenarios" in spec["evaluation"] else
+                {"eval_config": f"configs/{v['name']}.evaluation.json"}),
              "directory": f"jobs/{v['name']}/seed_{seed}"}
             for v in spec["variants"] for seed in spec["seeds"]]
 
@@ -187,12 +245,7 @@ def plan(spec_path, root):
     spec = _read(spec_path)
     _validate_spec(spec)
     base = _read(spec_path.parent / spec["base_config"])
-    configs = {}
-    for variant in spec["variants"]:
-        name = variant["name"]
-        configs[f"configs/{name}.json"] = _configuration(base, variant)
-        configs[f"configs/{name}.evaluation.json"] = _configuration(
-            base, variant, spec["evaluation"]["environment"])
+    configs = _plan_configs(base, spec)
     manifest = {"spec": spec, "spec_sha256": _digest(spec), "base_config": base,
                 "source": source_identity(), "jobs": _jobs(spec),
                 "configs": {k: _digest(v) for k, v in configs.items()}}
@@ -224,11 +277,8 @@ def validate_plan(root, check_source=False):
     _validate_spec(spec)
     if _digest(spec) != manifest["spec_sha256"] or manifest["jobs"] != _jobs(spec):
         raise ValueError("spec hash or job routes mismatch")
-    expected = {}
-    for variant in spec["variants"]:
-        for suffix, environment in (("", None), (".evaluation", spec["evaluation"]["environment"])):
-            route = f"configs/{variant['name']}{suffix}.json"
-            expected[route] = _digest(_configuration(manifest["base_config"], variant, environment))
+    expected = {route: _digest(config) for route, config in
+                _plan_configs(manifest["base_config"], spec).items()}
     if manifest["configs"] != expected:
         raise ValueError("config manifest mismatch")
     for route, digest in expected.items():
@@ -300,6 +350,14 @@ def _checkpoint(directory, spec):
     return path, last["sha256"]
 
 
+def _evaluation_route(scenario, seed):
+    return f"evaluation_{scenario}_{seed}.json" if scenario is not None else f"evaluation_{seed}.json"
+
+
+def _evaluation_prefix(scenario):
+    return f"scenarios.{scenario}." if scenario is not None else ""
+
+
 def _report(path, digest, seed, spec, environment):
     report = _read(path)
     expected = {"checkpoint_sha256": digest, "seed": seed,
@@ -352,19 +410,23 @@ def _run_job(root, manifest, job, device, stop, runner):
                  "--seed", str(job["seed"]), *common]
         for key in ("updates", "rollout_steps", "max_seconds", "checkpoint_interval"):
             train += ["--" + key.replace("_", "-"), str(spec["training"][key])]
+        if spec["training"].get("diagnostics", False):
+            train.append("--diagnostics")
         runner(train, directory / "train.log", deadline, stop)
         if manifest["source"] != source_identity():
             raise ValueError("package source changed during execution")
         checkpoint, digest = _checkpoint(directory, spec)
-        environment = _read(_inside(root, job["eval_config"]))["environment"]
-        for seed in spec["evaluation"]["seeds"]:
-            output = _inside(directory, f"evaluation_{seed}.json")
-            argv = [sys.executable, "-m", worker, "evaluate", "--checkpoint",
-                    str(checkpoint), "--config", str(_inside(root, job["eval_config"])),
-                    "--steps", str(spec["evaluation"]["steps"]), "--seed", str(seed),
-                    "--output", str(output), *common]
-            runner(argv, directory / f"evaluation_{seed}.log", deadline, stop)
-            _report(output, digest, seed, spec, environment)
+        for scenario, (route, _) in _evaluation_configs(spec, job["variant"]).items():
+            config = _inside(root, route)
+            environment = _read(config)["environment"]
+            for seed in spec["evaluation"]["seeds"]:
+                output = _inside(directory, _evaluation_route(scenario, seed))
+                argv = [sys.executable, "-m", worker, "evaluate", "--checkpoint",
+                        str(checkpoint), "--config", str(config),
+                        "--steps", str(spec["evaluation"]["steps"]), "--seed", str(seed),
+                        "--output", str(output), *common]
+                runner(argv, output.with_suffix(".log"), deadline, stop)
+                _report(output, digest, seed, spec, environment)
         if manifest["source"] != source_identity():
             raise ValueError("package source changed during execution")
         result["status"] = "completed"
@@ -436,17 +498,117 @@ def _statistics(values):
             "std": statistics.stdev(values) if len(values) > 1 else None}
 
 
+def _training_diagnostics(path):
+    """Describe available log rows without making them evaluation evidence."""
+    result = {}
+    updates = []
+    invalid_rows = 0
+    with path.open() as stream:
+        for line in stream:
+            try:
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    raise ValueError("metric row must be an object")
+            except ValueError:
+                invalid_rows += 1
+                continue
+            collection = record.get("collection", {})
+            reward = collection.get("reward_mean") if isinstance(collection, dict) else None
+            if type(reward) in (int, float) and math.isfinite(reward):
+                result["training_reward_diagnostic"] = reward
+            optimization = record.get("optimization")
+            if isinstance(optimization, dict):
+                updates.append(optimization)
+    if not updates:
+        return result
+    diagnostic = {"updates_observed": len(updates), "invalid_metric_rows": invalid_rows}
+    for label, update in (("first_update", updates[0]), ("last_update", updates[-1])):
+        for key in _OPTIMIZER_DIAGNOSTICS:
+            value = update.get(key)
+            diagnostic[f"{label}.{key}"] = (
+                value if type(value) in (int, float) and math.isfinite(value) else None)
+    for key in ("optimizer_steps", "planned_optimizer_steps"):
+        counts = [update.get(key) for update in updates]
+        diagnostic[key] = (sum(counts) if all(type(n) is int and n >= 0 for n in counts)
+                           else None)
+    actual, planned = diagnostic["optimizer_steps"], diagnostic["planned_optimizer_steps"]
+    valid_budget = all(
+        type(update.get("optimizer_steps")) is int
+        and type(update.get("planned_optimizer_steps")) is int
+        and 0 <= update["optimizer_steps"] <= update["planned_optimizer_steps"]
+        for update in updates)
+    diagnostic["optimizer_step_utilization"] = (
+        actual / planned if valid_budget and planned else None)
+    early_stops = [update.get("early_stopped") for update in updates]
+    diagnostic["early_stopped_fraction"] = (
+        sum(early_stops) / len(updates) if all(type(v) is bool for v in early_stops) else None)
+    result["optimizer_diagnostics"] = diagnostic
+    return result
+
+
+def _summarize_evaluations(root, directory, spec, job):
+    """Aggregate a final checkpoint only after all its scenario/seed reports validate."""
+    means, transitions = {}, {}
+    physical_metrics_available = True
+    _, digest = _checkpoint(directory, spec)
+    for scenario, (route, _) in _evaluation_configs(spec, job["variant"]).items():
+        environment = _read(_inside(root, route))["environment"]
+        reports = [_report(_inside(directory, _evaluation_route(scenario, seed)),
+                           digest, seed, spec, environment)
+                   for seed in spec["evaluation"]["seeds"]]
+        keys = set(reports[0]["metrics"])
+        if any(set(r["metrics"]) != keys for r in reports):
+            raise ValueError("evaluation metric sets differ across seeds")
+        prefix = _evaluation_prefix(scenario)
+        counts = {str(r["seed"]): r["transitions"] for r in reports}
+        if scenario is None:
+            transitions = counts
+        else:
+            transitions[prefix.rstrip(".")] = counts
+        for key in ("reward_mean", "terminated_count", "truncated_count", "transitions"):
+            means[prefix + key] = statistics.mean(r[key] for r in reports)
+        for key in sorted(keys):
+            for stat in ("mean", "rms", "min", "max"):
+                means[f"{prefix}metrics.{key}.{stat}"] = statistics.mean(
+                    r["metrics"][key][stat] for r in reports)
+        physical_metrics_available = physical_metrics_available and bool(keys)
+    return {"evaluation_transitions": transitions, "evaluation_seed_means": means,
+            "physical_metrics_available": physical_metrics_available}
+
+
+def _scenario_budget_checks(spec, seeds, partial):
+    """Compare final-checkpoint sample counts within each scenario, never pool tasks."""
+    checks = {}
+    for scenario in spec["evaluation"]["scenarios"]:
+        key = _evaluation_prefix(scenario["name"]).rstrip(".")
+        counts = sorted({count for seed in seeds
+                         for count in seed["evaluation_transitions"][key].values()})
+        checks[key] = {"partial": partial, "evaluation_transition_counts": counts,
+                       "evaluation_budget_consistent": len(counts) == 1,
+                       "comparison_available": not partial and len(counts) == 1}
+    return checks
+
+
 def summarize(root):
     root = Path(root).resolve()
     manifest = validate_plan(root)
     spec = manifest["spec"]
+    # Resolve omitted values through the same canonical dataclasses as planning.
+    base = _configuration(manifest["base_config"],
+                          {"model": {}, "ppo": {}, "group": "supervision"})
     variants = []
     for variant in spec["variants"]:
+        config = _read(_inside(root, f"configs/{variant['name']}.json"))
+        changes = {f"{section}.{key}": {"base": base[section][key], "value": value}
+                   for section in ("model", "ppo") for key, value in config[section].items()
+                   if value != base[section][key]}
         row = {"variant": variant["name"], "group": variant["group"],
+               "factor_changes": changes, "single_factor": len(changes) == 1,
                "requested": len(spec["seeds"]), "completed": 0, "failed": 0,
                "timedout": 0, "missing": 0, "seeds": []}
         values = {}
         diagnostics = []
+        optimizer_diagnostics = {}
         for job in (j for j in manifest["jobs"] if j["variant"] == variant["name"]):
             directory = _inside(root, job["directory"])
             item = {"seed": job["seed"], "status": "missing"}
@@ -459,43 +621,32 @@ def summarize(root):
                     raise ValueError("invalid result status")
                 item["status"] = status
                 if status == "completed":
-                    _, digest = _checkpoint(directory, spec)
+                    evaluation = _summarize_evaluations(root, directory, spec, job)
                     item["training_transitions"] = _read(
                         _inside(directory, "train/completion.json"))["collected_transitions"]
-                    environment = _read(_inside(root, job["eval_config"]))["environment"]
-                    reports = [_report(_inside(directory, f"evaluation_{seed}.json"), digest, seed, spec, environment)
-                               for seed in spec["evaluation"]["seeds"]]
-                    keys = set(reports[0]["metrics"])
-                    if any(set(r["metrics"]) != keys for r in reports):
-                        raise ValueError("evaluation metric sets differ across seeds")
-                    item["evaluation_transitions"] = {str(r["seed"]): r["transitions"] for r in reports}
-                    means = {key: statistics.mean(r[key] for r in reports)
-                             for key in ("reward_mean", "terminated_count", "truncated_count", "transitions")}
-                    for key in sorted(keys):
-                        for stat in ("mean", "rms", "min", "max"):
-                            means[f"metrics.{key}.{stat}"] = statistics.mean(r["metrics"][key][stat] for r in reports)
-                    item["evaluation_seed_means"] = means
-                    item["physical_metrics_available"] = bool(keys)
-                    for key, value in means.items():
+                    item.update(evaluation)
+                    for key, value in evaluation["evaluation_seed_means"].items():
                         values.setdefault(key, []).append(value)
             except FileNotFoundError as error:
                 item.update(status="missing", error=str(error))
             except (ValueError, KeyError, TypeError) as error:
                 item.update(status="failed", error=str(error))
+            if "scenarios" in spec["evaluation"]:
+                item["partial"] = item["status"] != "completed"
             metrics_path = _inside(directory, "train/metrics.jsonl")
             if metrics_path.is_file():
-                try:
-                    last = json.loads(metrics_path.read_text().splitlines()[-1])
-                    reward = last["collection"]["reward_mean"]
-                    if type(reward) in (int, float) and math.isfinite(reward):
-                        item["training_reward_diagnostic"] = reward
-                        diagnostics.append(reward)
-                except (ValueError, KeyError, IndexError, TypeError):
-                    pass
+                item.update(_training_diagnostics(metrics_path))
+                if "training_reward_diagnostic" in item:
+                    diagnostics.append(item["training_reward_diagnostic"])
+                for key, value in item.get("optimizer_diagnostics", {}).items():
+                    available = optimizer_diagnostics.setdefault(key, [])
+                    if value is not None:
+                        available.append(value)
             row[item["status"]] += 1
             row["seeds"].append(item)
         row["evaluation"] = {k: _statistics(v) for k, v in values.items()}
         row["training_reward_diagnostic"] = _statistics(diagnostics)
+        row["optimizer_diagnostics"] = {k: _statistics(v) for k, v in optimizer_diagnostics.items()}
         row["evaluation_complete"] = row["completed"] == row["requested"]
         row["partial"] = not row["evaluation_complete"]
         row["physical_metrics_complete"] = row["evaluation_complete"] and all(
@@ -506,35 +657,61 @@ def summarize(root):
         members = [v for v in variants if v["group"] == group]
         seeds = [s for v in members for s in v["seeds"] if s["status"] == "completed"]
         train_counts = sorted({s["training_transitions"] for s in seeds})
-        eval_counts = sorted({count for s in seeds for count in s["evaluation_transitions"].values()})
         partial = any(v["partial"] for v in members)
+        scenario_checks = None
+        if "scenarios" in spec["evaluation"]:
+            scenario_checks = _scenario_budget_checks(spec, seeds, partial)
+            eval_counts = {key: check["evaluation_transition_counts"]
+                           for key, check in scenario_checks.items()}
+            evaluation_budget_consistent = all(
+                check["evaluation_budget_consistent"] for check in scenario_checks.values())
+        else:
+            eval_counts = sorted({count for s in seeds for count in s["evaluation_transitions"].values()})
+            evaluation_budget_consistent = len(eval_counts) == 1
         reasons = []
         if partial:
             reasons.append("partial: not all requested training seeds have complete evaluation")
         if len(train_counts) != 1:
             reasons.append("training sample budget unavailable or inconsistent")
-        if len(eval_counts) != 1:
+        if not evaluation_budget_consistent:
             reasons.append("evaluation sample budget unavailable or inconsistent")
         check = {"partial": partial, "training_transition_counts": train_counts,
-                 "evaluation_transition_counts": eval_counts,
-                 "comparison_available": not reasons, "reasons": reasons,
+                  "evaluation_transition_counts": eval_counts,
+                  "comparison_available": not reasons, "reasons": reasons,
                  "scope": "within-group configuration and sample-budget checks, not a quality ranking"}
+        if scenario_checks is not None:
+            for scenario_check in scenario_checks.values():
+                scenario_check["comparison_available"] = (
+                    scenario_check["comparison_available"] and len(train_counts) == 1)
+            check["scenarios"] = scenario_checks
         fairness_checks[group] = check
         for row in members:
             row["comparison_available"] = check["comparison_available"]
             row["comparison_reasons"] = reasons
             row["training_budget_consistent"] = len(train_counts) == 1
-            row["evaluation_budget_consistent"] = len(eval_counts) == 1
+            row["evaluation_budget_consistent"] = evaluation_budget_consistent
     summary = {"plan_sha256": manifest["plan_sha256"], "variants": variants,
                "fairness_checks": fairness_checks,
                "interpretation": "Descriptive available-seed statistics only; no winner or physical-success claim. "
-               "Missing seeds remain explicit. Sample std uses independent training seeds, not frames."}
+                "Missing seeds remain explicit. Sample std uses independent training seeds, not frames. "
+                "factor_changes compares canonical values to base; zero changes is baseline, one is single-factor, "
+                "and combinations do not establish single-factor effects. Optimizer diagnostics describe available "
+                "logged updates, including incomplete jobs; lower KL alone is not better (zero LR can mean no learning). "
+                 "Formal comparisons require at least 3 (preferably 5) independent training seeds and sufficient transitions."}
+    if "scenarios" in spec["evaluation"]:
+        summary["evaluation_scenarios"] = spec["evaluation"]["scenarios"]
+        summary["interpretation"] += (
+            " Only the final checkpoint is evaluated, with each scenario aggregated separately:"
+            " evaluation-seed means, then training-seed statistics."
+            " Missing any final-checkpoint scenario/evaluation seed excludes that training seed from all evaluation aggregates."
+            " Scenario metrics use scenarios.NAME.")
     # Reports are derived artifacts and may be refreshed; execution artifacts are exclusive.
     for route in ("summary.json", "summary.csv"):
         if (root / route).is_symlink():
             raise ValueError("summary output must not be a symlink")
     (root / "summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
     row_columns = ["variant", "group", "requested", "completed", "failed", "timedout", "missing",
+                   "factor_changes", "single_factor",
                    "evaluation_complete", "physical_metrics_complete", "partial", "comparison_available",
                    "training_budget_consistent", "evaluation_budget_consistent", "comparison_reasons"]
     columns = [*row_columns, "metric", "n", "mean", "std"]
@@ -542,9 +719,11 @@ def summarize(root):
         writer = csv.DictWriter(stream, fieldnames=columns)
         writer.writeheader()
         for row in variants:
-            metrics = {**row["evaluation"], "training_reward_diagnostic": row["training_reward_diagnostic"]}
+            metrics = {**row["evaluation"], "training_reward_diagnostic": row["training_reward_diagnostic"],
+                       **{f"optimizer_diagnostics.{k}": v for k, v in row["optimizer_diagnostics"].items()}}
             for key, stats in metrics.items():
                 writer.writerow({**{k: row[k] for k in row_columns},
                                  "comparison_reasons": "; ".join(row["comparison_reasons"]),
+                                 "factor_changes": json.dumps(row["factor_changes"], sort_keys=True),
                                  "metric": key, **stats})
     return summary

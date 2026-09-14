@@ -2,6 +2,14 @@
 
 **独立的时间感知 Transformer 控制研究仓库。** Actor 以因果注意力编码本体观测、历史指令与真实时间信息，再通过当前命令 query 输出连续动作。采集、PPO、控制时序和模型导出采用独立接口；不依赖 RSL-RL。
 
+## 优化敏感性与足量训练
+
+已完成学习率、均值输出头初始化和探索std的真实敏感性研究，并在三个新训练seed上复验。候选配方为`learning_rate=3e-5 / mean_init_scale=0.1 / initial_std=0.2`：三个seed均用满8步/update的优化预算，原baseline仅约14–16%。这说明优化节奏改善，**不等于高度/接触表现已经通过**。
+
+同时复现并修复了batch512与4096间的FP32舍入差被log-prob放大、误触发一致性检查的问题；没有放宽原moment容差或改变PPO ratio。详情见[数值证据](docs/BEHAVIOR_PRECISION.md)和[完整复验](docs/KAISER_SENSITIVITY_RECHECK.md)。
+
+[足量训练设计](docs/TRAINING_EVALUATION_PLAN.md)按16M→64M→128M transitions渐进推进，区分调参seed与最终确认seed。[学习曲线规格](configs/learning_curves.json)第一档为6模型×3训练seed，每项在512环境下采16,007,168样本，最终checkpoint评估7个命名场景。仅最终checkpoint自动评估，中间checkpoint用于恢复/后续分析。
+
 ## 多架构对照
 
 现支持六种配置变体，统一历史信息、环境与样本预算，分别保存优化器和产物：

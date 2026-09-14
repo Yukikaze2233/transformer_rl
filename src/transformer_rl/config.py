@@ -28,6 +28,7 @@ class ModelConfig:
     auxiliary_indices: tuple[int, ...] = ()
     baseline_hidden: tuple[int, ...] = (128, 64)
     gru_hidden: int = 64
+    mean_init_scale: float = 1.0
 
     @property
     def frame_dim(self) -> int:
@@ -69,6 +70,9 @@ class ModelConfig:
         if any(type(v) not in (float, int) or not math.isfinite(v) or v <= 0
                for v in (self.time_scale_s, self.initial_std)):
             raise ValueError("time_scale_s and initial_std must be finite and positive")
+        if (type(self.mean_init_scale) not in (float, int)
+            or not math.isfinite(self.mean_init_scale) or self.mean_init_scale < 0):
+            raise ValueError("mean_init_scale must be finite and nonnegative")
 
 
 @dataclass(frozen=True)

@@ -261,7 +261,9 @@ def export_policy(checkpoint_path: str | Path, output_path: str | Path) -> dict:
         "output": {
             "name": "mean", "dtype": "float32", "shape": ["batch", config.action_dim],
             "semantics": (
-                "deterministic raw Gaussian mean; no tanh, clipping or actuator conversion"
+                "deterministic raw Gaussian mean; no tanh, clipping or actuator conversion; "
+                "mean_init_scale is initialization-only, already incorporated in weights, "
+                "not a runtime gain"
             ),
         },
         "frame_feature_layout": _frame_layout(config),

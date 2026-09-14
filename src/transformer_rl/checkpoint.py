@@ -19,12 +19,13 @@ from .ppo import PPOTrainer
 
 
 _FORMAT = "transformer_rl.checkpoint"
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _V2_MODEL_DEFAULTS = {
     "actor_type": "transformer", "time_encoding": "elapsed", "residual_type": "add",
     "auxiliary_indices": [], "baseline_hidden": [128, 64], "gru_hidden": 64,
 }
 _V2_PPO_DEFAULTS = {"auxiliary_coef": 0.0}
+_V3_MODEL_DEFAULTS = {"mean_init_scale": 1.0}
 _DTYPES = {
     "float16": torch.float16,
     "bfloat16": torch.bfloat16,
@@ -278,29 +279,32 @@ def _validated_components(
     if type(payload) is not dict:
         raise ValueError("checkpoint requires exactly the declared top-level keys")
     if "schema_version" in payload and (
-        type(payload["schema_version"]) is not int or payload["schema_version"] not in (1, 2)
+        type(payload["schema_version"]) is not int or payload["schema_version"] not in (1, 2, 3)
     ):
         raise ValueError("unsupported checkpoint schema_version")
     expected_keys = _PAYLOAD_KEYS | (
-        {"source_schema_version"} if payload.get("schema_version") == 2 else set()
+        {"source_schema_version"} if payload.get("schema_version") in (2, 3) else set()
     )
     if set(payload) != expected_keys:
         raise ValueError("checkpoint requires exactly the declared top-level keys")
     if payload["format"] != _FORMAT:
         raise ValueError("unrecognized checkpoint format")
     source_schema = payload.get("source_schema_version", payload["schema_version"])
-    if type(source_schema) is not int or source_schema not in (1, 2):
+    schema = payload["schema_version"]
+    if type(source_schema) is not int or not 1 <= source_schema <= schema:
         raise ValueError("unsupported source_schema_version")
-    if payload["schema_version"] == 1:
+    if schema < _SCHEMA_VERSION:
         payload = dict(payload)
         for key, cls, additions in (
-            ("model_config", ModelConfig, _V2_MODEL_DEFAULTS),
-            ("ppo_config", PPOConfig, _V2_PPO_DEFAULTS),
+            ("model_config", ModelConfig, {
+                **(_V2_MODEL_DEFAULTS if schema == 1 else {}), **_V3_MODEL_DEFAULTS,
+            }),
+            ("ppo_config", PPOConfig, _V2_PPO_DEFAULTS if schema == 1 else {}),
         ):
             original = payload[key]
             legacy_keys = {field.name for field in fields(cls)} - additions.keys()
             if type(original) is not dict or set(original) != legacy_keys:
-                raise ValueError(f"schema 1 {key} requires exactly its original keys")
+                raise ValueError(f"schema {schema} {key} requires exactly its original keys")
             payload[key] = {**original, **additions}
         payload["schema_version"] = _SCHEMA_VERSION
     if type(payload["update"]) is not int or payload["update"] < 0:
@@ -357,7 +361,7 @@ def save_checkpoint(
     payload = {
         "format": _FORMAT,
         "schema_version": _SCHEMA_VERSION,
-        "source_schema_version": getattr(model, "checkpoint_source_schema_version", 2),
+        "source_schema_version": getattr(model, "checkpoint_source_schema_version", _SCHEMA_VERSION),
         "model_config": _config_payload(model.config),
         "ppo_config": _config_payload(trainer.config),
         "model_dtype": dtype_name,

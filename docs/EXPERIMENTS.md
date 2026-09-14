@@ -135,10 +135,102 @@ training_reward_diagnostic 仅为每个 seed 最后一次更新的收益诊断�
 没有环境提供的物理指标时 physical_metrics_complete=false；该字段只说明报告齐全，不是 physical success。
 物理成功仍需环境定义的阈值与任务语义。不同分组、环境、预算和评估协议不混合排名。
 
+### 命名评估场景
+
+`evaluation` 保留必填的 `steps / seeds / environment`，可选非空 `scenarios` 列表：
+
+```json
+{
+  "steps": 2000,
+  "seeds": [301, 302],
+  "environment": {},
+  "scenarios": [
+    {"name": "stand_low", "environment": {"fixed_command": [0, 0, 0.28]}},
+    {"name": "stand_high", "environment": {"fixed_command": [0, 0, 0.32]}}
+  ]
+}
+```
+
+每项恰含 `name` 与 `environment`；名称必须匹配 `[a-z][a-z0-9_]*` 且全局唯一，
+environment 必须为对象。所有 variants 共享同一场景列表、`evaluation.steps` 和 eval seeds；
+不支持逐场景 steps/seeds。高度与运动命令通过显式场景配置区分，seed 只控制随机性，不能用不同 seed 冒充不同高度。
+合并顺序是 **base.environment → evaluation.environment → scenario.environment**，后者按顶层键覆盖前者，
+不做嵌套深合并。model/PPO 始终与该 variant 的训练配置一致，独立冻结为
+`configs/VARIANT.evaluation.SCENARIO.json`，job 的 `eval_configs` 映射记录场景路由。
+所有文件继续纳入 config/spec/plan SHA、源码校验和 root 路径包含关系校验。
+
+**未提供 scenarios 时，原 spec、job/配置布局、plan 结构和最终 checkpoint 单点评估行为保持兼容。**
+显式 `scenarios: []` 或 `null` 是错误，不等价于省略。
+
+启用 scenarios 后，每个 variant × training seed 只训练一次；完整训练结束后，
+仅对**最终 checkpoint** 执行全部 scenario × eval seeds，验证其最终 update、路径和 SHA。
+中间 checkpoint 继续按 `checkpoint_interval` 保存，用于恢复或后续分析，不自动评估。
+每次评估仍通过既有 CLI 的
+`--config MERGED_EVAL_CONFIG`、真实 `--seed` 独立启动进程，外部任务 identity 继续由 evaluator 从 checkpoint 校验。
+
+```text
+ROOT/configs/VARIANT.evaluation.SCENARIO.json
+ROOT/jobs/VARIANT/seed_TRAINSEED/evaluation_SCENARIO_EVALSEED.{json,log}
+```
+
+最终 checkpoint 报告位于 job 根目录。
+同一个 job 的 timeout 包含一次训练以及最终 checkpoint 的**全部 scenario × eval seed** 的进程启动、评估和清理。
+
+summary 的 `evaluation_scenarios` 保留场景定义。
+JSON 的逐训练 seed `evaluation_seed_means` 和 variant `evaluation`、CSV 的 `metric` 使用
+`scenarios.stand_low.reward_mean`、`scenarios.stand_low.metrics.tracking_error.rms` 等场景键。
+
+最终 checkpoint 的每个场景内先等权均值 eval seeds，再跨独立 training seeds 计算 mean、样本 std；
+不跨场景混池。逐训练 seed 的 `evaluation_transitions` 以相同场景前缀分组，组内记录各 eval seed 的实际 transitions。
+沿用完整训练 seed 的保守纳入规则：最终 checkpoint 缺任一场景或 eval seed 的报告，
+该 training seed 的全部评估统计均不纳入聚合，状态为 missing/failed 等并显式 `partial=true`；
+variant 和 group 也为 partial，不能宣布全场景 evaluation_complete 或 comparison_available。
+中间 checkpoint 没有评估报告不影响完整性，也不进入汇总或样本预算检查。
+缺少物理指标同样不能宣布 physical_metrics_complete。
+
+`fairness_checks.GROUP.scenarios` 按最终 checkpoint 的场景单独检查所有完整 variant/training/eval seeds 的实际样本预算，
+并结合共同训练预算和完整性决定场景比较是否可用；group 只有全部场景检查通过才可比较。
+不同场景的 transitions 不混在同一预算集合中，但所有场景的向量步数严格统一为 `evaluation.steps`。
+某一场景样本预算不一致只使其场景预算检查失败，并阻断 group 总体比较；其他场景的预算检查仍单独展示。
+
+### 第一档 16M 学习趋势规格
+
+`configs/learning_curves.json` 使用 `configs/optimized_control.json`，六变体与 `comparison.json` 相同，
+训练 seeds 改为 **1011、1022、1033**。共同模型保持 d64、2 layers、4 heads、history16；
+共同初始化为 `mean_init_scale=0.1 / initial_std=0.2`，PPO 为
+`learning_rate=3e-5 / epochs=2 / num_minibatches=4 / target_kl=0.01`，其余继承 control 配方。
+该配方应用于所有模型，属于**同配方架构比较**，不是每个模型各自最优超参的比较；
+带辅助监督的变体仍单列 supervision 组。
+
+- `updates=977 / rollout_steps=32`：实际训练 `num_envs=512` 时，每个训练 seed 收集
+  **16,007,168 transitions**。完成率与预算以实际 completion 为准。
+- `max_seconds=7200 / checkpoint_interval=100 / diagnostics=false`；
+  `job_timeout_seconds=10800 / max_parallel=2`，默认两个 slot 共用 `cuda:0`。
+- `environment_factory=null`，只可 plan。Kaiser 部署需在新规格／base 中填写经验证的工厂、训练环境参数，
+  并在共同 `evaluation.environment` 填写实际 mode 与评估环境数 8 等设置，再冻结新 root。
+- `evaluation.steps=2000 / seeds=[301] / environment={}`，以下七场景均显式设置 `environment.fixed_command`：
+
+| 场景 | fixed_command |
+| --- | --- |
+| stand_low | [0, 0, 0.28] |
+| stand_mid | [0, 0, 0.30] |
+| stand_high | [0, 0, 0.32] |
+| forward | [0.5, 0, 0.30] |
+| reverse | [-0.5, 0, 0.30] |
+| turn_left | [0, 1, 0.30] |
+| turn_right | [0, -1, 0.30] |
+
+每个 job 保存 100、200、…、900、977 共十个 checkpoint，仅评估 update 977 的最终 checkpoint。
+七场景各使用唯一 eval seed 301，每 job **7 次独立评估**，全规格为 **18 次训练、126 次评估**。
+10800 秒 job timeout 包括一次训练与这 7 次评估的进程启动、评估和清理开销；并发上限保持 2。
+在实际 policy interval=0.01s 时，每个场景为 20s 固定命令任务；2000 steps 本身不证明真实时长，
+向量环境中的重置也不构成连续存活证据。三个站立高度不能拼接为连续 60s，
+这些场景不代表推扰或延迟覆盖。**初始 16M 档用于观察学习趋势，不据此最终选赢家。**
+
 ## 定向验证
 
 ```bash
-python -m pytest tests/test_experiments.py -q
+python -m pytest tests/test_experiments.py tests/test_scenario_experiments.py tests/test_sensitivity_experiments.py -q
 ```
 
 测试内部 runner 替换 CLI 执行载荷为短生命周期 fake Python subprocess，保留 argv/产物协议。

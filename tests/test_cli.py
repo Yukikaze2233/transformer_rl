@@ -118,6 +118,28 @@ def test_explicit_orchestration_publishes_after_each_update(orchestration):
     assert [update for update, _ in state.saved] == [1, 2]
     assert events == ["factory", "reset", "collect", "update", "save", "collect", "update", "save", "close"]
     assert len((directory / "metrics.jsonl").read_text().splitlines()) == 2
+    assert json.loads((directory / "run.json").read_text())["metadata"]["diagnostics"] is False
+    assert all(metadata["diagnostics"] is False for _, metadata in state.saved)
+
+
+def test_diagnostics_keyword_and_metadata_are_opt_in(orchestration, monkeypatch):
+    from transformer_rl import ppo
+
+    args, directory, state, events = orchestration
+    calls = []
+
+    def update(self, batch, *, diagnostics):
+        calls.append(diagnostics)
+        events.append("update")
+        return {"optimizer_steps": 0, "first_step_kl": None, "final_kl": 0.0}
+
+    monkeypatch.setattr(ppo.PPOTrainer, "update", update)
+    assert cli.main([*args, "--diagnostics"]) == 0
+    assert calls == [True, True]
+    assert json.loads((directory / "run.json").read_text())["metadata"]["diagnostics"] is True
+    assert all(metadata["diagnostics"] is True for _, metadata in state.saved)
+    rows = [json.loads(line) for line in (directory / "metrics.jsonl").read_text().splitlines()]
+    assert all(row["optimization"]["first_step_kl"] is None for row in rows)
 
 
 def test_signal_boundary_saves_without_optimization(orchestration):

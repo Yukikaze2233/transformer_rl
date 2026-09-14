@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
+from torch.distributions import Normal
 
 from .config import PPOConfig
 from .storage import PPOBatch
@@ -26,6 +27,10 @@ class PPOTrainer:
     are excluded from these aggregates and reported through ``stop_kl``.
     ``auxiliary_loss`` is the unscaled MSE over configured critic target columns,
     sample-weighted like other losses; it is zero when ``auxiliary_coef`` is zero.
+    Optional diagnostics compare the entire rollout to its stored behavior moments,
+    after the first optimizer step and after the update (including KL early stops).
+    KL terms sum over actions then average endpoints; moment means and change RMS
+    average all endpoint/action entries. Normalized change uses the old std.
     """
 
     def __init__(self, model: ActorCritic, config: PPOConfig):
@@ -66,8 +71,9 @@ class PPOTrainer:
             minibatch = batch.index(indices)
             evaluation = self.model.actor.evaluate(minibatch.history, minibatch.raw_action)
             self._validate_evaluation(evaluation, minibatch)
-            # Equal density at one sampled action does not establish equal distributions.
-            for name in ("log_prob", "mean", "std"):
+            # Compare distributions before checking each density against its own moments.
+            # Cross-batch-shape mean roundoff can be amplified by Gaussian log_prob.
+            for name in ("mean", "std"):
                 current = getattr(evaluation, name)
                 old = getattr(minibatch, f"old_{name}")
                 if not torch.allclose(current, old, rtol=1e-5, atol=1e-5):
@@ -75,6 +81,20 @@ class PPOTrainer:
                     raise ValueError(
                         f"old_{name} mismatch before first optimizer step (max absolute error {error:.6g}); "
                         "check behavior policy statistics, weights, full history snapshots and raw_action"
+                    )
+            for name, mean, std, log_prob in (
+                ("old_log_prob", minibatch.old_mean, minibatch.old_std, minibatch.old_log_prob),
+                ("current_log_prob", evaluation.mean, evaluation.std, evaluation.log_prob),
+            ):
+                # Reproduce the original density arithmetic, rather than an FP64 reference.
+                distribution = Normal(mean.to(log_prob.dtype), std.to(log_prob.dtype), validate_args=False)
+                reconstructed = distribution.log_prob(minibatch.raw_action.to(log_prob.dtype)).sum(-1)
+                self._require_finite(f"reconstructed {name}", reconstructed)
+                if not torch.allclose(reconstructed, log_prob, rtol=1e-5, atol=1e-5):
+                    error = (reconstructed - log_prob).abs().max().item()
+                    raise ValueError(
+                        f"{name} mismatch before first optimizer step (max absolute error {error:.6g}); "
+                        "log_prob must match its own Gaussian mean/std and raw_action"
                     )
 
     @staticmethod
@@ -100,14 +120,59 @@ class PPOTrainer:
         self._require_finite("auxiliary loss", loss)
         return loss
 
+    @torch.no_grad()
+    def _initial_diagnostics(self, batch: PPOBatch, chunks: int) -> dict[str, float]:
+        # Stored behavior moments are the fixed reference, not a minibatch average.
+        totals = torch.zeros(2, dtype=torch.float64, device=batch.raw_action.device)
+        std_min = torch.full((), float("inf"), dtype=torch.float64, device=totals.device)
+        std_max = torch.zeros_like(std_min)
+        for indices in torch.tensor_split(torch.arange(len(batch), device=totals.device), chunks):
+            old_mean = batch.old_mean[indices].double()
+            old_std = batch.old_std[indices].double()
+            totals += torch.stack((old_mean.abs().sum(), old_std.sum()))
+            std_min = torch.minimum(std_min, old_std.min())
+            std_max = torch.maximum(std_max, old_std.max())
+        mean_abs, std_mean = (totals / batch.old_mean.numel()).tolist()
+        return {"initial_mean_abs": mean_abs, "initial_std_mean": std_mean,
+                "initial_std_min": std_min.item(), "initial_std_max": std_max.item()}
+
+    @torch.no_grad()
+    def _distribution_diagnostics(self, batch: PPOBatch, chunks: int) -> dict[str, float]:
+        # eval-mode evaluation does not sample actions or change optimizer/gradient state.
+        totals = torch.zeros(5, dtype=torch.float64, device=batch.raw_action.device)
+        for indices in torch.tensor_split(torch.arange(len(batch), device=totals.device), chunks):
+            minibatch = batch.index(indices)
+            evaluation = self.model.actor.evaluate(minibatch.history, minibatch.raw_action)
+            self._validate_evaluation(evaluation, minibatch)
+            old_std, new_std = minibatch.old_std.double(), evaluation.std.double()
+            difference = evaluation.mean.double() - minibatch.old_mean.double()
+            mean_kl = 0.5 * (difference / new_std).square()
+            log_ratio = old_std.log() - new_std.log()
+            # expm1 avoids subtracting nearly equal variances for small std changes.
+            std_kl = 0.5 * torch.expm1(2.0 * log_ratio) - log_ratio
+            totals += torch.stack((mean_kl.sum(), std_kl.sum(), difference.square().sum(),
+                                   (difference / old_std).square().sum(), new_std.sum()))
+        self._require_finite("distribution diagnostics", totals)
+        mean_kl, std_kl = (totals[:2] / len(batch)).tolist()
+        mean_rms, normalized_rms = (totals[2:4] / batch.old_mean.numel()).sqrt().tolist()
+        return {"kl": mean_kl + std_kl, "mean_kl": mean_kl, "std_kl": std_kl,
+                "mean_change_rms": mean_rms, "normalized_mean_change_rms": normalized_rms,
+                "std_mean": (totals[4] / batch.old_mean.numel()).item()}
+
     @torch.enable_grad()
-    def update(self, batch: PPOBatch) -> dict[str, float | int | bool]:
+    def update(self, batch: PPOBatch, *, diagnostics: bool = False) -> dict[str, float | int | bool | None]:
         self.model.eval()  # Deterministic dropout behavior; this does not disable autograd.
         self.optimizer.zero_grad(set_to_none=True)
         batch.validate()
         batch = self._detached_batch(batch)
         chunks = min(self.config.num_minibatches, len(batch))
         self._check_old_log_prob(batch, chunks)
+        diagnostic_metrics = {}
+        first_step_fields = ("kl", "mean_kl", "std_kl", "mean_change_rms",
+                             "normalized_mean_change_rms")
+        if diagnostics:
+            diagnostic_metrics = self._initial_diagnostics(batch, chunks)
+            diagnostic_metrics.update({f"first_step_{name}": None for name in first_step_fields})
         if self.config.normalize_advantage:
             advantages = batch.advantages
             advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
@@ -194,6 +259,10 @@ class PPOTrainer:
                     self.optimizer.zero_grad(set_to_none=True)
                     raise
                 self.optimizer.step()
+                if diagnostics and optimizer_steps == 0:
+                    first_step = self._distribution_diagnostics(batch, chunks)
+                    diagnostic_metrics.update({f"first_step_{name}": first_step[name]
+                                               for name in first_step_fields})
                 count = len(minibatch)
                 for name, metric in dict(actor_loss=actor_loss, value_loss=value_loss,
                                          entropy=entropy, kl=kl, clip_fraction=clip_fraction,
@@ -205,12 +274,18 @@ class PPOTrainer:
             if early_stopped:
                 break
         self.optimizer.zero_grad(set_to_none=True)
+        if diagnostics:
+            final = self._distribution_diagnostics(batch, chunks)
+            diagnostic_metrics.update({f"final_{name}": final[name]
+                                       for name in ("kl", "mean_kl", "std_kl", "mean_change_rms", "std_mean")})
         return {
             **{name: total / sample_count if sample_count else 0.0 for name, total in totals.items()},
             "auxiliary_coef": self.config.auxiliary_coef,
             "grad_norm": grad_norm_sum / optimizer_steps if optimizer_steps else 0.0,
             "optimizer_steps": optimizer_steps,
+            "planned_optimizer_steps": self.config.epochs * chunks,
             "sample_count": sample_count,
             "early_stopped": early_stopped,
             "stop_kl": stop_kl,
+            **diagnostic_metrics,
         }

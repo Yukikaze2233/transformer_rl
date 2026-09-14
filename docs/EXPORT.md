@@ -20,7 +20,7 @@ model, trainer, update, metadata = load_checkpoint(
 
 ### 格式与校验
 
-- 格式标识为 `transformer_rl.checkpoint`，新文件内部`schema_version=2`，文件名不要求带版本号。旧schema 1仅按精确旧字段集合显式补默认值迁移；`source_schema_version`保留来源格式，原metadata保留。
+- 格式标识为 `transformer_rl.checkpoint`，新文件内部`schema_version=3`，文件名不要求带版本号。旧schema 1/2按各自精确字段集合显式迁移，补`mean_init_scale=1.0`等对应默认值；`source_schema_version`保留来源格式，原metadata保留。
 - 保存完整 `ModelConfig`、`PPOConfig`、模型 dtype、actor/critic weights 与 buffers、Adam 状态、累计 update 和 JSON metadata。
 - metadata 必须为字符串键 JSON object；嵌套值仅接受 object、list、string、有限 number、boolean、null。tuple、tensor、非字符串键及循环引用被拒绝。
 - 读取显式使用 `torch.load(..., weights_only=True, map_location="cpu")`，不回退到非受限 pickle。
