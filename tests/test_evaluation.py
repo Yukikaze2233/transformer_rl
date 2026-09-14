@@ -83,6 +83,11 @@ def test_deterministic_evaluation_metrics_and_partial_reset(checkpoint, monkeypa
     assert result["done_count"] == 2
     assert result["metrics"]["tracking_error"] == pytest.approx(
         {"mean": 3.0, "rms": math.sqrt(70 / 6), "min": 1.0, "max": 6.0, "count": 6})
+    assert result["stability"]["available"] is False
+    assert result["stability"]["signals"] == {}
+    assert result["stability"]["protocol"]["settle_steps"] == 200
+    assert result["stability"]["protocol"]["min_steady_samples"] == 200
+    assert result["stability"]["protocol"]["centering"] == "per_environment_episode"
     torch.testing.assert_close(env.actions[2][0], env.actions[0][0])
     assert env.closed and env.seed == 101
 
@@ -113,3 +118,118 @@ def test_task_identity_change_rejected_before_reset(checkpoint):
     with pytest.raises(ValueError, match="identity"):
         evaluate_policy(path, lambda **_: env, {}, 3, 101, "cpu")
     assert env.closed and not env.actions
+
+
+class SignalEvaluation(ScriptedEvaluation):
+    def step(self, action):
+        # The physical clock is independent of observation/actor-event time.
+        physical_time = 100 + (self.events + 1) / 100
+        result = super().step(action)
+        t = len(self.actions)
+        return replace(result, info={
+            **result.info,
+            "evaluation_signals": {"error": torch.tensor([float(t), 10.0 * t])},
+            "evaluation_signal_time": physical_time,
+        })
+
+
+def test_stability_pre_reset_failure_and_partial_episode_integration(checkpoint):
+    path, config = checkpoint
+    env = SignalEvaluation(config)
+    result = evaluate_policy(path, lambda **_: env, {}, 5, 101, "cpu",
+                             settle_steps=1, min_steady_samples=2)
+    signal = result["stability"]["signals"]["error"]
+    # Usable segments are env1's terminated [20,30] and env0's partial [4,5].
+    assert result["stability"]["available"] is True
+    assert signal["mean"] == 14.75
+    assert signal["within_episode_std"] == pytest.approx(math.sqrt(50.5 / 4))
+    assert signal["derivative_rms"] == pytest.approx(math.sqrt((100**2 + 1000**2) / 2))
+    assert signal["max_abs"] == 30
+    assert signal["count"] == 4 and signal["segments"] == 2
+    assert signal["completed_segments"] == signal["partial_segments"] == 1
+    assert signal["short_segments"] == signal["short_count"] == 2
+    assert signal["total_count"] == 10 and signal["settled_count"] == 4
+    assert result["terminated_count"] == result["truncated_count"] == 1
+    assert result["done_count"] == 2
+    assert result["reward_mean"] == 2
+    assert result["metrics"]["tracking_error"] == pytest.approx({
+        "mean": 4.5, "rms": math.sqrt(275 / 10), "min": 1, "max": 10, "count": 10})
+    assert env.closed
+
+
+def test_all_short_stability_preserves_whole_interval_metrics(checkpoint):
+    path, config = checkpoint
+    env = SignalEvaluation(config)
+    result = evaluate_policy(path, lambda **_: env, {}, 3, 101, "cpu")
+    assert result["stability"]["available"] is False
+    signal = result["stability"]["signals"]["error"]
+    assert signal["mean"] is signal["within_episode_std"] is signal["derivative_rms"] is None
+    assert signal["max_abs"] is None
+    assert signal["short_segments"] == 3 and signal["total_count"] == 6
+    assert signal["count"] == signal["segments"] == 0
+    assert result["metrics"]["tracking_error"]["count"] == 6
+    assert result["done_count"] == 2
+    assert env.closed
+
+
+@pytest.mark.parametrize("failure,error", [
+    ("names", ValueError), ("missing_signals", ValueError), ("missing_time", ValueError),
+    ("nonfinite", FloatingPointError), ("time_nonfinite", FloatingPointError),
+    ("time_dtype", TypeError), ("time_shape", ValueError), ("signal_shape", ValueError),
+    ("signal_dtype", TypeError), ("signal_mapping", ValueError),
+    ("duplicate_time", ValueError), ("reset_observation_time", ValueError),
+])
+def test_invalid_signal_reports_fail_and_close(checkpoint, failure, error):
+    path, config = checkpoint
+    env = SignalEvaluation(config)
+    step = env.step
+    previous_time = None
+
+    def invalid_step(action):
+        nonlocal previous_time
+        result = step(action)
+        info = result.info
+        if len(env.actions) == 2:
+            if failure == "names":
+                info["evaluation_signals"] = {"changed": torch.zeros(2)}
+            elif failure == "missing_signals":
+                del info["evaluation_signals"]
+                del info["evaluation_signal_time"]
+            elif failure == "missing_time":
+                del info["evaluation_signal_time"]
+            elif failure == "nonfinite":
+                info["evaluation_signals"]["error"][0] = float("nan")
+            elif failure == "time_nonfinite":
+                info["evaluation_signal_time"][0] = float("inf")
+            elif failure == "time_dtype":
+                info["evaluation_signal_time"] = info["evaluation_signal_time"].float()
+            elif failure == "time_shape":
+                info["evaluation_signal_time"] = torch.zeros(1, dtype=torch.float64)
+            elif failure == "signal_shape":
+                info["evaluation_signals"]["error"] = torch.zeros(2, 1)
+            elif failure == "signal_dtype":
+                info["evaluation_signals"]["error"] = torch.zeros(2, dtype=torch.int64)
+            elif failure == "signal_mapping":
+                info["evaluation_signals"] = []
+            elif failure == "duplicate_time":
+                info["evaluation_signal_time"] = previous_time
+            elif failure == "reset_observation_time":
+                info["evaluation_signal_time"] = result.observation.timestamp
+        previous_time = info.get("evaluation_signal_time")
+        return result
+
+    env.step = invalid_step
+    with pytest.raises(error):
+        evaluate_policy(path, lambda **_: env, {}, 3, 101, "cpu")
+    assert env.closed
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"settle_steps": -1}, {"settle_steps": True}, {"settle_steps": 1.5},
+    {"min_steady_samples": 0}, {"min_steady_samples": False}, {"min_steady_samples": 1.5},
+])
+def test_invalid_stability_options_fail_before_environment_creation(checkpoint, kwargs):
+    path, _ = checkpoint
+    with pytest.raises(ValueError):
+        evaluate_policy(path, lambda **_: pytest.fail("invalid protocol created environment"),
+                        {}, 3, 101, "cpu", **kwargs)

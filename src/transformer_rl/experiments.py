@@ -21,7 +21,7 @@ import time
 from .config import ModelConfig, PPOConfig, config_dict
 
 
-_ACTOR_FIELDS = {"actor_type", "time_encoding", "residual_type", "baseline_hidden",
+_ACTOR_FIELDS = {"actor_type", "time_encoding", "readout_type", "residual_type", "baseline_hidden",
                  "gru_hidden", "d_model", "num_layers", "num_heads", "ffn_dim"}
 _SENSITIVITY_FIELDS = {"model": {"mean_init_scale", "initial_std"},
                        "ppo": {"learning_rate"}}
@@ -33,6 +33,13 @@ _OPTIMIZER_DIAGNOSTICS = (
     "kl", "stop_kl", "optimizer_steps", "planned_optimizer_steps",
 )
 _TERMINATION_GRACE_SECONDS = 3.0
+_STABILITY_WINDOWS = ("settle_steps", "min_steady_samples")
+_STABILITY_STATS = ("mean", "within_episode_std", "derivative_rms", "max_abs")
+_STABILITY_COUNTS = (
+    "count", "segments", "short_count", "short_segments", "total_count", "settled_count",
+    "derivative_count", "completed_segments", "partial_segments",
+    "short_completed_segments", "short_partial_segments",
+)
 
 
 def _encoded(value):
@@ -95,6 +102,15 @@ def _seeds(values):
         raise ValueError("seeds must be unique nonnegative integers")
 
 
+def _stability_protocol(evaluation):
+    # Resolve omitted windows from the core; its defaults are bound by source_identity.
+    from .stability import EpisodeSignalStatistics
+
+    return EpisodeSignalStatistics(
+        1, **{key: evaluation[key] for key in _STABILITY_WINDOWS if key in evaluation}
+    ).report()["protocol"]
+
+
 def _validate_spec(spec):
     expected = {"base_config", "environment_factory", "seeds", "variants",
                 "training", "execution", "evaluation"}
@@ -127,7 +143,7 @@ def _validate_spec(spec):
         ("evaluation", {"steps", "seeds", "environment"}),
     ):
         optional = {"execution": {"worker_module"}, "training": {"diagnostics"},
-                    "evaluation": {"scenarios"}}.get(section, set())
+                    "evaluation": {"scenarios", *_STABILITY_WINDOWS}}.get(section, set())
         if (not isinstance(spec[section], dict) or not keys <= set(spec[section])
                 or set(spec[section]) - keys - optional):
             raise ValueError(f"invalid {section} shape")
@@ -149,6 +165,7 @@ def _validate_spec(spec):
                    for d in execution["devices"])):
         raise ValueError("devices must be a nonempty list of cpu/cuda devices")
     _positive(spec["evaluation"]["steps"], "evaluation.steps", True)
+    _stability_protocol(spec["evaluation"])
     _seeds(spec["evaluation"]["seeds"])
     if not isinstance(spec["evaluation"]["environment"], dict):
         raise ValueError("evaluation.environment must be an object")
@@ -358,6 +375,55 @@ def _evaluation_prefix(scenario):
     return f"scenarios.{scenario}." if scenario is not None else ""
 
 
+def _validate_stability(stability, evaluation, transitions):
+    if (not isinstance(stability, dict) or type(stability.get("available")) is not bool
+            or not isinstance(stability.get("signals"), dict)):
+        raise ValueError("invalid stability report shape")
+    protocol = stability.get("protocol")
+    if (not isinstance(protocol, dict)
+            or any(type(protocol.get(k)) is not int for k in _STABILITY_WINDOWS)
+            or protocol != _stability_protocol(evaluation)):
+        raise ValueError("stability protocol mismatch")
+    for name, signal in stability["signals"].items():
+        if not isinstance(name, str) or not name or not isinstance(signal, dict):
+            raise ValueError("invalid stability signal")
+        if any(type(signal.get(k)) is not int or signal[k] < 0 for k in _STABILITY_COUNTS):
+            raise ValueError("invalid stability count")
+        count, segments = signal["count"], signal["segments"]
+        if (bool(count) != bool(segments)
+                or count < segments * protocol["min_steady_samples"]
+                or signal["derivative_count"] != count - segments
+                or segments != signal["completed_segments"] + signal["partial_segments"]
+                or signal["short_segments"] != (
+                    signal["short_completed_segments"] + signal["short_partial_segments"])
+                or signal["short_count"] > signal["short_segments"] * (protocol["min_steady_samples"] - 1)
+                or signal["total_count"] != signal["settled_count"] + signal["short_count"] + count
+                or signal["total_count"] != transitions
+                or segments + signal["short_segments"] > transitions
+                or signal["settled_count"] > (
+                    segments + signal["short_segments"]) * protocol["settle_steps"]):
+            raise ValueError("inconsistent stability counts")
+        for key in (*_STABILITY_STATS, "episode_mean_min", "episode_mean_max", "episode_mean_std"):
+            if key not in signal:
+                raise ValueError(f"missing stability statistic: {key}")
+            value = signal[key]
+            available = signal["derivative_count"] > 0 if key == "derivative_rms" else count > 0
+            if ((not available and value is not None)
+                    or (available and (type(value) not in (int, float) or not math.isfinite(value)))
+                    or (value is not None and key in (
+                        "within_episode_std", "derivative_rms", "max_abs", "episode_mean_std") and value < 0)):
+                raise ValueError(f"invalid stability finite-or-null statistic: {key}")
+        if count:
+            tolerance = 1e-7 * max(1, signal["max_abs"])
+            if (abs(signal["mean"]) > signal["max_abs"] + tolerance
+                    or signal["within_episode_std"] > signal["max_abs"] + tolerance
+                    or not signal["episode_mean_min"] - tolerance <= signal["mean"] <= (
+                        signal["episode_mean_max"] + tolerance)):
+                raise ValueError("inconsistent stability statistics")
+    if stability["available"] != any(s["count"] > 0 for s in stability["signals"].values()):
+        raise ValueError("stability availability contradicts counts")
+
+
 def _report(path, digest, seed, spec, environment):
     report = _read(path)
     expected = {"checkpoint_sha256": digest, "seed": seed,
@@ -376,6 +442,11 @@ def _report(path, digest, seed, spec, environment):
     _positive(report["transitions"], "transitions", True)
     if any(report[k] > report["transitions"] for k in ("terminated_count", "truncated_count")):
         raise ValueError("evaluation termination count exceeds transitions")
+    if "done_count" in report:
+        done = report["done_count"]
+        if (type(done) is not int or not max(report["terminated_count"], report["truncated_count"])
+                <= done <= min(report["transitions"], report["terminated_count"] + report["truncated_count"])):
+            raise ValueError("invalid evaluation done_count")
     metrics = report.get("metrics")
     if not isinstance(metrics, dict):
         raise ValueError("evaluation metrics must be an object")
@@ -390,6 +461,9 @@ def _report(path, digest, seed, spec, environment):
                 or metric["mean"] > metric["max"] + tolerance or metric["rms"] < 0
                 or metric["count"] > report["transitions"]):
             raise ValueError("inconsistent evaluation metric statistics")
+    if "stability" in report:
+        _validate_stability(report["stability"], spec["evaluation"], report["transitions"])
+    report["stability_missing"] = "stability" not in report
     return report
 
 
@@ -425,6 +499,9 @@ def _run_job(root, manifest, job, device, stop, runner):
                         str(checkpoint), "--config", str(config),
                         "--steps", str(spec["evaluation"]["steps"]), "--seed", str(seed),
                         "--output", str(output), *common]
+                for key in _STABILITY_WINDOWS:
+                    if key in spec["evaluation"]:
+                        argv += ["--" + key.replace("_", "-"), str(spec["evaluation"][key])]
                 runner(argv, output.with_suffix(".log"), deadline, stop)
                 _report(output, digest, seed, spec, environment)
         if manifest["source"] != source_identity():
@@ -546,9 +623,68 @@ def _training_diagnostics(path):
     return result
 
 
+def _stability_seed_means(reports, prefix):
+    """Keep missing runs explicit while describing the available subset equally."""
+    means, coverage = {}, {}
+
+    def record(available):
+        return {"requested_eval_runs": len(reports), "available_eval_runs": sum(available),
+                "transitions": sum(r["transitions"] for r in reports),
+                "missing_eval_seeds": [r["seed"] for r, ok in zip(reports, available) if not ok]}
+
+    blocks = [r.get("stability", {}) for r in reports]
+    scope = record([b.get("available", False) for b in blocks])
+    scope["missing_report_eval_seeds"] = [r["seed"] for r in reports if "stability" not in r]
+    coverage[prefix + "stability"] = scope
+    names = sorted({name for block in blocks for name in block.get("signals", {})})
+    for name in names:
+        signals = [b.get("signals", {}).get(name, {}) for b in blocks]
+        counts = {key: sum(s.get(key, 0) for s in signals) for key in _STABILITY_COUNTS}
+        # The denominator includes reports without this signal; no missing value is a zero measurement.
+        counts["transitions"] = sum(r["transitions"] for r in reports)
+        counts["sample_coverage"] = counts["count"] / counts["transitions"]
+        for stat in _STABILITY_STATS:
+            key = f"{prefix}stability.{name}.{stat}"
+            values = [s.get(stat) for s in signals]
+            means[key] = _statistics([v for v in values if v is not None])["mean"]
+            coverage[key] = {**record([v is not None for v in values]), **counts}
+    return means, coverage
+
+
+def _stability_training_coverage(spec, seeds):
+    """Summarize metric coverage without treating eval runs as independent train seeds."""
+    keys = {_evaluation_prefix(scene) + "stability"
+            for scene in _evaluation_configs(spec, spec["variants"][0]["name"])}
+    keys.update(key for seed in seeds for key in seed.get("stability_coverage", {}))
+    result = {}
+    for key in sorted(keys):
+        scope_key = ".".join(key.split(".")[:3]) if key.startswith("scenarios.") else "stability"
+        entries = [s.get("stability_coverage", {}).get(key, {
+            "transitions": s.get("stability_coverage", {}).get(scope_key, {}).get("transitions", 0)
+        }) for s in seeds]
+        available = [e.get("available_eval_runs", 0) for e in entries]
+        requested = len(seeds) * len(spec["evaluation"]["seeds"])
+        result[key] = {
+            "requested_training_seeds": len(seeds),
+            "available_training_seeds": sum(n > 0 for n in available),
+            "missing_training_seeds": [s["seed"] for s, n in zip(seeds, available) if not n],
+            "incomplete_training_seeds": [s["seed"] for s, n in zip(seeds, available)
+                                          if n != len(spec["evaluation"]["seeds"])],
+            "requested_eval_runs": requested, "available_eval_runs": sum(available),
+            "missing_eval_runs": requested - sum(available),
+            "complete": sum(available) == requested,
+        }
+        if any("count" in e for e in entries):
+            counts = {k: sum(e.get(k, 0) for e in entries) for k in (*_STABILITY_COUNTS, "transitions")}
+            result[key].update(counts, sample_coverage=(
+                counts["count"] / counts["transitions"] if counts["transitions"] else None))
+    return result
+
+
 def _summarize_evaluations(root, directory, spec, job):
     """Aggregate a final checkpoint only after all its scenario/seed reports validate."""
     means, transitions = {}, {}
+    stability_coverage = {}
     physical_metrics_available = True
     _, digest = _checkpoint(directory, spec)
     for scenario, (route, _) in _evaluation_configs(spec, job["variant"]).items():
@@ -572,8 +708,14 @@ def _summarize_evaluations(root, directory, spec, job):
                 means[f"{prefix}metrics.{key}.{stat}"] = statistics.mean(
                     r["metrics"][key][stat] for r in reports)
         physical_metrics_available = physical_metrics_available and bool(keys)
+        stability_means, coverage = _stability_seed_means(reports, prefix)
+        means.update(stability_means)
+        stability_coverage.update(coverage)
     return {"evaluation_transitions": transitions, "evaluation_seed_means": means,
-            "physical_metrics_available": physical_metrics_available}
+            "physical_metrics_available": physical_metrics_available,
+            "stability_protocol": _stability_protocol(spec["evaluation"]),
+            "stability_coverage": stability_coverage,
+            "stability_complete": all(not c["missing_eval_seeds"] for c in stability_coverage.values())}
 
 
 def _scenario_budget_checks(spec, seeds, partial):
@@ -626,7 +768,9 @@ def summarize(root):
                         _inside(directory, "train/completion.json"))["collected_transitions"]
                     item.update(evaluation)
                     for key, value in evaluation["evaluation_seed_means"].items():
-                        values.setdefault(key, []).append(value)
+                        available = values.setdefault(key, [])
+                        if value is not None:
+                            available.append(value)
             except FileNotFoundError as error:
                 item.update(status="missing", error=str(error))
             except (ValueError, KeyError, TypeError) as error:
@@ -651,6 +795,8 @@ def summarize(root):
         row["partial"] = not row["evaluation_complete"]
         row["physical_metrics_complete"] = row["evaluation_complete"] and all(
             s.get("physical_metrics_available", False) for s in row["seeds"])
+        row["stability_coverage"] = _stability_training_coverage(spec, row["seeds"])
+        row["stability_complete"] = all(c["complete"] for c in row["stability_coverage"].values())
         variants.append(row)
     fairness_checks = {}
     for group in sorted({v["group"] for v in variants}):
@@ -679,10 +825,22 @@ def summarize(root):
                   "evaluation_transition_counts": eval_counts,
                   "comparison_available": not reasons, "reasons": reasons,
                  "scope": "within-group configuration and sample-budget checks, not a quality ranking"}
+        stability_keys = [set(v["stability_coverage"]) for v in members]
+        check["stability_complete"] = all(v["stability_complete"] for v in members)
+        check["stability_comparison_available"] = (
+            check["comparison_available"] and check["stability_complete"]
+            and all(keys == stability_keys[0] for keys in stability_keys))
         if scenario_checks is not None:
-            for scenario_check in scenario_checks.values():
+            for scenario_key, scenario_check in scenario_checks.items():
                 scenario_check["comparison_available"] = (
                     scenario_check["comparison_available"] and len(train_counts) == 1)
+                scene_keys = [{k for k in keys if k.startswith(scenario_key + ".stability")}
+                              for keys in stability_keys]
+                scenario_check["stability_complete"] = all(
+                    v["stability_coverage"][k]["complete"] for v, keys in zip(members, scene_keys) for k in keys)
+                scenario_check["stability_comparison_available"] = (
+                    scenario_check["comparison_available"] and scenario_check["stability_complete"]
+                    and all(keys == scene_keys[0] for keys in scene_keys))
             check["scenarios"] = scenario_checks
         fairness_checks[group] = check
         for row in members:
@@ -690,10 +848,15 @@ def summarize(root):
             row["comparison_reasons"] = reasons
             row["training_budget_consistent"] = len(train_counts) == 1
             row["evaluation_budget_consistent"] = evaluation_budget_consistent
+            row["stability_comparison_available"] = check["stability_comparison_available"]
     summary = {"plan_sha256": manifest["plan_sha256"], "variants": variants,
+               "stability_protocol": _stability_protocol(spec["evaluation"]),
                "fairness_checks": fairness_checks,
                "interpretation": "Descriptive available-seed statistics only; no winner or physical-success claim. "
-                "Missing seeds remain explicit. Sample std uses independent training seeds, not frames. "
+                 "Missing seeds remain explicit. Sample std uses independent training seeds, not frames. "
+                 "Stability uses available eval-run means then training-seed statistics; nulls are never zero. "
+                 "Coverage counts include eligible partial and failure episodes. Low jitter, including zero jitter "
+                 "with large bias, is not standing success; consult bias/max_abs, full-interval metrics and terminations. "
                 "factor_changes compares canonical values to base; zero changes is baseline, one is single-factor, "
                 "and combinations do not establish single-factor effects. Optimizer diagnostics describe available "
                 "logged updates, including incomplete jobs; lower KL alone is not better (zero LR can mean no learning). "
@@ -713,17 +876,22 @@ def summarize(root):
     row_columns = ["variant", "group", "requested", "completed", "failed", "timedout", "missing",
                    "factor_changes", "single_factor",
                    "evaluation_complete", "physical_metrics_complete", "partial", "comparison_available",
+                   "stability_complete", "stability_comparison_available",
                    "training_budget_consistent", "evaluation_budget_consistent", "comparison_reasons"]
-    columns = [*row_columns, "metric", "n", "mean", "std"]
+    columns = [*row_columns, "metric", "n", "mean", "std", "stability_coverage"]
     with (root / "summary.csv").open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=columns)
         writer.writeheader()
         for row in variants:
             metrics = {**row["evaluation"], "training_reward_diagnostic": row["training_reward_diagnostic"],
                        **{f"optimizer_diagnostics.{k}": v for k, v in row["optimizer_diagnostics"].items()}}
+            for key in row["stability_coverage"]:
+                metrics.setdefault(key, _statistics([]))
             for key, stats in metrics.items():
                 writer.writerow({**{k: row[k] for k in row_columns},
                                  "comparison_reasons": "; ".join(row["comparison_reasons"]),
                                  "factor_changes": json.dumps(row["factor_changes"], sort_keys=True),
+                                 "stability_coverage": json.dumps(row["stability_coverage"][key], sort_keys=True)
+                                 if key in row["stability_coverage"] else "",
                                  "metric": key, **stats})
     return summary

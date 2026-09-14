@@ -1,0 +1,133 @@
+{
+  "record_type": "learning_curves_prerun_stop_archive",
+  "status": "stopped_by_user",
+  "disposition": "archived_prerun_excluded_from_midnight_formal_experiment",
+  "reason": "formal_training_must_not_start_before_2026-09-15T00:00:00+08:00",
+  "validated_at": "2026-09-14T11:36:15.792471+00:00",
+  "study": "/home/kaiser/robot-rl-sim60/learning-curves-16m-20260914T1912Z",
+  "tmux": "kaiser-learning-curves-16m-20260914",
+  "source": {
+    "commit": "e0f97a6719f19f20324323873dbe22ffd65a6e47",
+    "dirty": false,
+    "package_sha256": "65e6449703a75046e3fe26f8c79ce839e1bb8bad96bfc0038d1f0b75b6426a27",
+    "plan_sha256": "967bfdccc5027ad95f7377835df40401ef5b00a3ea7804271f92880b398d8a47",
+    "spec_sha256": "09ecd6afbd1a003af1b6b65676a47f232f3a3950aef161481652f49f1da30bb9"
+  },
+  "signals": [
+    {"pid": 673098, "start_ticks": "16970053", "signal": "SIGSTOP", "timestamp": "2026-09-14T11:33:46.688497+00:00"},
+    {"pid": 673104, "start_ticks": "16970058", "signal": "SIGTERM", "timestamp": "2026-09-14T11:33:46.688764+00:00"},
+    {"pid": 673103, "start_ticks": "16970058", "signal": "SIGTERM", "timestamp": "2026-09-14T11:33:46.688771+00:00"},
+    {"pid": 673098, "start_ticks": "16970053", "signal": "SIGKILL", "timestamp": "2026-09-14T11:34:22.521803+00:00"}
+  ],
+  "signal_identity_validation": "pidfd plus /proc start_ticks and exact module/root argv; all scheduler threads confirmed stopped before worker SIGTERM",
+  "scheduler_ever_resumed": false,
+  "workers": [
+    {
+      "job": "time_attention/seed_1011",
+      "pid": 673104,
+      "exit_code": 0,
+      "exit_confirmed_at": "2026-09-14T11:34:22.521240+00:00",
+      "completion_status": "stopped",
+      "stop_reason": "SIGTERM",
+      "completion_mtime": "2026-09-14T11:33:47.510792+00:00",
+      "update": 460,
+      "optimizer_steps": 3680,
+      "adam_step": 3680,
+      "checkpoint_relative_to_study": "run/jobs/time_attention/seed_1011/train/checkpoints/checkpoint_000460.pt",
+      "checkpoint_mtime": "2026-09-14T11:33:47.494792+00:00",
+      "checkpoint_sha256": "a0fb76e88a10606f92fc31c0eb91e99e9489aefbf3e96736c7cdca71bfc296b8",
+      "collected_transitions": 7539200,
+      "optimized_rollout_transitions": 7536640,
+      "discarded_unoptimized_transitions": 2560,
+      "discarded_unoptimized_vector_steps": 5
+    },
+    {
+      "job": "time_attention/seed_1022",
+      "pid": 673103,
+      "exit_code": 0,
+      "exit_confirmed_at": "2026-09-14T11:34:22.521297+00:00",
+      "completion_status": "stopped",
+      "stop_reason": "SIGTERM",
+      "completion_mtime": "2026-09-14T11:33:47.630791+00:00",
+      "update": 465,
+      "optimizer_steps": 3720,
+      "adam_step": 3720,
+      "checkpoint_relative_to_study": "run/jobs/time_attention/seed_1022/train/checkpoints/checkpoint_000465.pt",
+      "checkpoint_mtime": "2026-09-14T11:33:47.618791+00:00",
+      "checkpoint_sha256": "cbbff610e64e8409e717bf6d20ff5b17822cda5c3fa3909a3381d3943be93b0c",
+      "collected_transitions": 7618560,
+      "optimized_rollout_transitions": 7618560,
+      "discarded_unoptimized_transitions": 0,
+      "discarded_unoptimized_vector_steps": 0
+    }
+  ],
+  "checkpoint_validation": {
+    "loader": "transformer_rl.checkpoint.load_checkpoint(device=cpu)",
+    "weights_only": true,
+    "schema_version": 3,
+    "model_optimizer_finiteness_and_state_validated": true,
+    "update_and_adam_steps_match_metrics": true,
+    "metadata_source_matches_frozen_clean_commit": true,
+    "metadata_environment_identity_matches": true,
+    "action_clip": 100.0,
+    "diagnostics": false,
+    "all_final_and_prior_checkpoint_sha256_verified": true,
+    "environment_identity": {
+      "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+      "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+      "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+      "usd_seed_sha256": null,
+      "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+      "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+    },
+    "lossless_unoptimized_rollout_preservation_claimed": false,
+    "collector_or_environment_state_saved": false
+  },
+  "queue": {
+    "stopped_training_jobs": 2,
+    "completed_experiment_jobs": 0,
+    "never_started_jobs": [
+      "time_attention/seed_1033",
+      "index_attention/seed_1011", "index_attention/seed_1022", "index_attention/seed_1033",
+      "gated_attention/seed_1011", "gated_attention/seed_1022", "gated_attention/seed_1033",
+      "supervised_attention/seed_1011", "supervised_attention/seed_1022", "supervised_attention/seed_1033",
+      "history_mlp/seed_1011", "history_mlp/seed_1022", "history_mlp/seed_1033",
+      "history_gru/seed_1011", "history_gru/seed_1022", "history_gru/seed_1033"
+    ],
+    "all_16_queued_job_directories_absent": true,
+    "evaluation_processes_started": 0
+  },
+  "terminal_receipts": {
+    "scheduler_exit_code": -9,
+    "scheduler_exit_reason": "intentional_SIGKILL_while_stopped_after_workers_exited",
+    "monitor_status": "failed",
+    "monitor_exit_code": 1,
+    "monitor_receipt_timestamp": "2026-09-14T11:34:25.521849+00:00",
+    "monitor_original_abort_reason": null,
+    "summarize_exit_code": 0,
+    "master_status": "failed",
+    "master_exit_code": 1,
+    "master_receipt_timestamp": "2026-09-14T11:34:25.557942+00:00"
+  },
+  "resource_release": {
+    "owned_pids_absent": [673092, 673096, 673097, 673098, 673103, 673104],
+    "tmux_session_absent": true,
+    "owned_worker_rss_mib": 0,
+    "before": {"timestamp": "2026-09-14T11:33:45.254503+00:00", "gpu_memory_mib": 12068, "gpu_util_percent": 90, "memory_available_mib": 6359.5703125},
+    "after": {"timestamp": "2026-09-14T11:36:15.792471+00:00", "gpu_memory_mib": 3527, "gpu_util_percent": 24, "memory_available_mib": 13869.77734375},
+    "gpu_scope": "whole_machine_including_unrelated_applications"
+  },
+  "preservation": {
+    "startup_evidence_unchanged": true,
+    "remote_startup_evidence_sha256": "aba53a5b755e90107a296d7109dc85aac06d6c016502cd726ecb8c1e1b5efa9d",
+    "prior_study_files_deleted": false,
+    "remote_stop_receipts": ["stop-request.json", "stop-drain.json", "stop-validation.json"]
+  },
+  "future_execution": {
+    "not_before": "2026-09-15T00:00:00+08:00",
+    "timer_created": false,
+    "restart_or_resume_performed": false,
+    "formal_experiment_requires_new_final_source_spec_and_root": true,
+    "prerun_excluded_from_formal_training_seeds_and_budget": true
+  }
+}

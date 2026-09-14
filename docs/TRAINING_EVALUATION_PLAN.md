@@ -29,7 +29,7 @@ mean_init_scale仅乘初始化时的动作均值头weight/bias，不改变hidden
 
 先冻结各架构的优化配方及选择规则，再比较共同的环境任务与样本预算。
 
-当前首档规格为`configs/learning_curves.json`：六种网络、三个新的训练seeds1011/1022/1033，512环境×32 rollout×977 updates，每项16,007,168 transitions、全组288,129,024 transitions；共同采用LR3e-5、mean_init_scale0.1、std0.2、2 epochs/4 minibatches，关闭额外诊断前向。该共同配方是结构对照的工作基线，不宣称它是MLP/GRU等各架构各自最优的超参。
+当前首档规格为`configs/learning_curves.json`：七种网络（加入标准last-token读出）、三个新的训练seeds1011/1022/1033，512环境×32 rollout×977 updates，每项16,007,168 transitions、全组336,150,528 transitions；共同采用LR3e-5、mean_init_scale0.1、std0.2、2 epochs/4 minibatches，关闭额外诊断前向。该共同配方是结构对照的工作基线，不宣称它是MLP/GRU等各架构各自最优的超参。
 
 最终checkpoint分别评估低/中/高站立、前进、后退、左右旋转七个命名场景；每场景2000步、eval seed301，统计按场景独立保留。20s左右的任务timeout仍可能reset，不能冒称连续60s站立。中间checkpoint每100 updates保存，但不自动对每个checkpoint启动全场景评估，避免把阶段评估预算放大十倍。
 

@@ -1,0 +1,197 @@
+{
+  "record_type": "learning_curves_first_tier_start_observation",
+  "status": "running",
+  "started_at": "2026-09-14T11:09:27.427025+00:00",
+  "observed_at": "2026-09-14T11:16:39.671512+00:00",
+  "checkpoint_probe_started_at": "2026-09-14T11:16:45.376542+00:00",
+  "elapsed_seconds": 432.24547619599616,
+  "host": "kaiser@192.168.64.234:2222",
+  "tmux": "kaiser-learning-curves-16m-20260914",
+  "snapshot": "/home/kaiser/robot-rl-sim60/transformer-learning-curves",
+  "study": "/home/kaiser/robot-rl-sim60/learning-curves-16m-20260914T1912Z",
+  "runroot": "/home/kaiser/robot-rl-sim60/learning-curves-16m-20260914T1912Z/run",
+  "spec_path": "/home/kaiser/robot-rl-sim60/learning-curves-16m-20260914T1912Z/derived-spec.json",
+  "runtime": "/home/kaiser/robot-rl-sim60/bin/sim60-runtime.sh",
+  "source": {
+    "git_origin": "https://github.com/Yukikaze2233/transformer_rl.git",
+    "commit": "e0f97a6719f19f20324323873dbe22ffd65a6e47",
+    "git_clean": true,
+    "package_path": "/home/kaiser/robot-rl-sim60/transformer-learning-curves/src/transformer_rl/__init__.py",
+    "package_sha256": "65e6449703a75046e3fe26f8c79ce839e1bb8bad96bfc0038d1f0b75b6426a27",
+    "spec_canonical_sha256": "09ecd6afbd1a003af1b6b65676a47f232f3a3950aef161481652f49f1da30bb9",
+    "plan_sha256": "967bfdccc5027ad95f7377835df40401ef5b00a3ea7804271f92880b398d8a47",
+    "artifact_file_sha256": {
+      "derived-spec.json": "ca2317f529bf075837448f94b86d1da9f5af72632d8d1e6f236b27fabfe371ad",
+      "derived-base.json": "03e69001cf53e4f6697eab531a1fba6755e3e7b3363da65c5c3c5e211296967b",
+      "freeze.json": "d571cdc5b8539559d12d7165e7d4eedf3124a5431be353cfafc4350ed827732c",
+      "learning_prepare.py": "1c3f0bfdd9672d0fbd5f92e51677850d20966e7c0ed6b689765725f38a653868",
+      "learning_monitor.py": "fef47da5340df056e5812428881dc276b6af5c59bb9d38ec9818c53dfc252294",
+      "learning_master.sh": "87ff1a042e7cbae9c03bfd36ff8ff52af47f1df7e31b2a6ebb6cc5dae934a198"
+    }
+  },
+  "training": {
+    "variants": ["time_attention", "index_attention", "gated_attention", "supervised_attention", "history_mlp", "history_gru"],
+    "seeds": [1011, 1022, 1033],
+    "model": {"d_model": 64, "num_layers": 2, "num_heads": 4, "history_length": 16, "mean_init_scale": 0.1, "initial_std": 0.2},
+    "ppo": {"learning_rate": 0.00003, "epochs": 2, "num_minibatches": 4, "target_kl": 0.01},
+    "num_envs": 512,
+    "rollout_steps": 32,
+    "updates": 977,
+    "samples_per_job": 16007168,
+    "jobs": 18,
+    "samples_total_requested": 288129024,
+    "diagnostics": false,
+    "action_clip": 100.0,
+    "checkpoint_interval": 100,
+    "max_seconds": 7200
+  },
+  "environment": {
+    "factory": "examples.isaaclab_task:make_env",
+    "worker_module": "examples._isaaclab_process",
+    "task_root": "/home/kaiser/robot-rl-sim60/v40-live-snapshot03",
+    "contract": "contracts/own_v40_v2.json",
+    "mode": "train",
+    "stage": "locomotion",
+    "policy_dt_seconds": 0.01,
+    "identity": {
+      "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+      "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+      "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+      "usd_seed_sha256": null,
+      "adapter_sha256": "85d7090e2ac320b15d76879690982cc8a7924c67c10578711bd487422d366569",
+      "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+    }
+  },
+  "evaluation": {
+    "environment": {"mode": "evaluation", "num_envs": 8},
+    "seeds": [301],
+    "steps_per_scenario": 2000,
+    "checkpoint_selection": "final_update_977_only",
+    "evaluations_per_job": 7,
+    "evaluations_total_requested": 126,
+    "transitions_per_scenario_expected": 16000,
+    "transitions_total_expected": 2016000,
+    "completed": 0,
+    "scenarios": [
+      {"name": "stand_low", "fixed_command": [0, 0, 0.28]},
+      {"name": "stand_mid", "fixed_command": [0, 0, 0.30]},
+      {"name": "stand_high", "fixed_command": [0, 0, 0.32]},
+      {"name": "forward", "fixed_command": [0.5, 0, 0.30]},
+      {"name": "reverse", "fixed_command": [-0.5, 0, 0.30]},
+      {"name": "turn_left", "fixed_command": [0, 1, 0.30]},
+      {"name": "turn_right", "fixed_command": [0, -1, 0.30]}
+    ]
+  },
+  "execution": {
+    "max_parallel": 2,
+    "devices": ["cuda:0"],
+    "job_timeout_seconds": 10800,
+    "outer_timeout_seconds": 108000,
+    "outer_kill_after_seconds": 120,
+    "monitor_interval_seconds_approx": 10,
+    "low_memory_threshold_mib": 1024,
+    "low_memory_sustained_seconds": 30,
+    "scheduler_pid": 673098,
+    "terminal_exit_code": null,
+    "automatic_summarize_on_exit": true,
+    "counts": {"running": 2, "completed": 0, "failed": 0, "timedout": 0, "queued": 16},
+    "queued_jobs": [
+      "time_attention/seed_1033",
+      "index_attention/seed_1011", "index_attention/seed_1022", "index_attention/seed_1033",
+      "gated_attention/seed_1011", "gated_attention/seed_1022", "gated_attention/seed_1033",
+      "supervised_attention/seed_1011", "supervised_attention/seed_1022", "supervised_attention/seed_1033",
+      "history_mlp/seed_1011", "history_mlp/seed_1022", "history_mlp/seed_1033",
+      "history_gru/seed_1011", "history_gru/seed_1022", "history_gru/seed_1033"
+    ]
+  },
+  "running_jobs": [
+    {
+      "job": "time_attention/seed_1011",
+      "pid": 673104,
+      "pgid": 673104,
+      "rss_kib": 4854604,
+      "updates": 110,
+      "new_optimizer_steps": 880,
+      "planned_optimizer_steps": 880,
+      "early_stopped_fraction": 0.0,
+      "collected_transitions": 1802240,
+      "training_elapsed_seconds": 429.27344228801667,
+      "samples_per_second_including_startup": 4198.349635593821,
+      "probe_last_10_updates_samples_per_second": 5642.083643246954,
+      "checkpoint_000100_sha256": "9471c0462eef96de414959dece17de7d5760aecafe54091ee35715e68eea9d4e"
+    },
+    {
+      "job": "time_attention/seed_1022",
+      "pid": 673103,
+      "pgid": 673103,
+      "rss_kib": 4821980,
+      "updates": 111,
+      "new_optimizer_steps": 888,
+      "planned_optimizer_steps": 888,
+      "early_stopped_fraction": 0.0,
+      "collected_transitions": 1818624,
+      "training_elapsed_seconds": 428.93443035997916,
+      "samples_per_second_including_startup": 4239.864816806003,
+      "probe_last_10_updates_samples_per_second": 5737.535886012371,
+      "checkpoint_000100_sha256": "ae251b512c6ba23befef90ddfe8f38737e751facecf4a49a16b12ded173a6568"
+    }
+  ],
+  "checkpoint_validation": {
+    "validated_jobs": ["time_attention/seed_1011", "time_attention/seed_1022"],
+    "relative_path_per_job": "train/checkpoints/checkpoint_000100.pt",
+    "loader": "transformer_rl.checkpoint.load_checkpoint(device=cpu)",
+    "weights_only": true,
+    "schema_version": 3,
+    "update": 100,
+    "collected_transitions_per_checkpoint": 1638400,
+    "adam_step_per_checkpoint": 800,
+    "source_commit_matches": true,
+    "source_dirty": false,
+    "environment_identity_matches": true,
+    "action_clip_and_diagnostics_match": true
+  },
+  "resources_mib": {
+    "gpu_memory_current": 11307,
+    "gpu_memory_peak": 12452,
+    "wsl_mem_available_current": 6372.88671875,
+    "wsl_mem_available_min": 6371.71484375,
+    "worker_rss_sum_peak": 9449.7890625,
+    "gpu_util_current_percent": 91,
+    "gpu_util_peak_percent": 95,
+    "max_workers": 2
+  },
+  "validation": {
+    "cli_help_plan_and_six_variant_inspects_passed": true,
+    "inspect_environment_started": false,
+    "frozen_configs": 48,
+    "plan_and_imported_package_source_validated": true,
+    "all_recorded_metrics_finite": true,
+    "fatal_training_log_matches": [],
+    "monitor_python_compile_and_master_bash_syntax_passed": true
+  },
+  "handoff_observation": {
+    "observed_at": "2026-09-14T11:21:11.030082+00:00",
+    "counts": {"running": 2, "completed": 0, "failed": 0, "timedout": 0, "queued": 16},
+    "jobs": [
+      {"job": "time_attention/seed_1011", "updates": 204, "new_optimizer_steps": 1632, "early_stopped_fraction": 0.0, "collected_transitions": 3342336, "samples_per_second_including_startup": 4764.859811546615},
+      {"job": "time_attention/seed_1022", "updates": 206, "new_optimizer_steps": 1648, "early_stopped_fraction": 0.0, "collected_transitions": 3375104, "samples_per_second_including_startup": 4821.907155726029}
+    ],
+    "total_recorded_transitions": 6717440,
+    "gpu_memory_peak_mib": 12452,
+    "gpu_util_peak_percent": 95,
+    "memory_available_min_mib": 6363.55859375,
+    "worker_rss_sum_peak_mib": 9461.0390625,
+    "frozen_artifact_checkpoint_hashes_and_48_configs_rechecked": true,
+    "original_monitor_sample_matches_start_evidence": true,
+    "terminal_receipt_exists": false
+  },
+  "interpretation": {
+    "tier": "16M_first_learning_curve_budget",
+    "architecture_winner_claimed": false,
+    "per_architecture_optimal_hyperparameters_claimed": false,
+    "nonzero_communication_delay_training": false,
+    "push_disturbance_training": false,
+    "continuous_60_second_standing_claimed": false,
+    "scope": "nominal locomotion training and seven fixed-command final-checkpoint evaluation scenarios"
+  }
+}

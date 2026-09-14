@@ -30,15 +30,61 @@ def encode_observation(config, raw, previous_issued_action, timestamp, policy_dt
     return VectorObservation(frame, timestamp.clone(), command, raw["critic"].clone())
 
 
-def physical_metrics(linear_velocity, angular_velocity, height, command, non_wheel_force):
-    """Owned PRE-reset SI diagnostics; net force does not identify contact pairs."""
-    return {name: value.detach().clone() for name, value in {
+CONTROL_SIGNAL_UNITS = {
+    "height_error": "m", "vx_error": "m/s", "wz_error": "rad/s",
+    "angular_velocity_x": "rad/s", "angular_velocity_y": "rad/s",
+    **{f"leg_target_{i}": "rad" for i in range(4)},
+    **{f"wheel_target_{i}": "rad/s" for i in range(2)},
+    **{f"effort_{i}": "Nm" for i in range(6)},
+}
+
+
+def control_signals(linear_velocity, angular_velocity, height, command,
+                    leg_targets=None, wheel_targets=None, torques=None) -> dict[str, torch.Tensor]:
+    """Owned, detached PRE-reset [N] snapshots in CONTROL_SIGNAL_UNITS.
+
+    Errors are signed measured-minus-command; command columns are vx, wz, height.
+    Angular velocities use true body COM axes. Target/effort columns preserve the
+    source arrays' order: leg_targets (4), wheel_targets (2), torques (6).
+    These are policy-boundary samples, with torques holding the last physics
+    substep's effort target, not a complete 200 Hz trace or hardware PID evidence.
+    Missing arrays in minimal fixtures are omitted, never fabricated.
+    """
+    values = {
+        "height_error": height - command[:, 2],
+        "vx_error": linear_velocity[:, 0] - command[:, 0],
+        "wz_error": angular_velocity[:, 2] - command[:, 1],
+        "angular_velocity_x": angular_velocity[:, 0],
+        "angular_velocity_y": angular_velocity[:, 1],
+    }
+    for prefix, array, width in (("leg_target", leg_targets, 4),
+                                 ("wheel_target", wheel_targets, 2),
+                                 ("effort", torques, 6)):
+        if array is not None:
+            values.update({f"{prefix}_{i}": array[:, i] for i in range(width)})
+    return {name: value.detach().clone() for name, value in values.items()}
+
+
+def physical_metrics(linear_velocity, angular_velocity, height, command, non_wheel_force,
+                     projected_gravity=None):
+    """Owned PRE-reset SI diagnostics; net force does not identify contact pairs.
+
+    base_height is in meters; tilt_angle is in radians from true projected gravity,
+    not the noisy actor observation. A zero gravity vector maps to pi/2.
+    """
+    values = {
         "vx_abs_error": (linear_velocity[:, 0] - command[:, 0]).abs(),
         "wz_abs_error": (angular_velocity[:, 2] - command[:, 1]).abs(),
         "height_abs_error": (height - command[:, 2]).abs(),
         "planar_speed": torch.linalg.vector_norm(linear_velocity[:, :2], dim=-1),
         "non_wheel_net_force": non_wheel_force,
-    }.items()}
+        "base_height": height,
+    }
+    if projected_gravity is not None:
+        norm = torch.linalg.vector_norm(projected_gravity, dim=-1)
+        cosine = -projected_gravity[:, 2] / norm.clamp_min(torch.finfo(norm.dtype).tiny)
+        values["tilt_angle"] = torch.acos(cosine.clamp(-1.0, 1.0))
+    return {name: value.detach().clone() for name, value in values.items()}
 
 
 class IsaacLabTaskAdapter:
@@ -57,6 +103,8 @@ class IsaacLabTaskAdapter:
         self._final = torch.zeros(self.num_envs, 29, device=self.device)
         self._valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._metrics = {}
+        self._signals = {}
+        self._signal_time = torch.zeros(self.num_envs, device=self.device, dtype=torch.float64)
         original_rewards, original_reset = env._get_rewards, env._reset_idx
 
         def rewards(source):
@@ -66,17 +114,32 @@ class IsaacLabTaskAdapter:
                 data = source.robot.data
                 linear = data.root_com_lin_vel_b.torch
                 angular = data.root_com_ang_vel_b.torch
+                gravity = data.projected_gravity_b.torch
                 height = source._base_height()
                 # Reward decrements command timers but does not resample. Capture
                 # the transition's command, before next-observation resampling.
                 clean = build_observation(
-                    angular, data.projected_gravity_b.torch, source.commands,
+                    angular, gravity, source.commands,
                     q, dq, source.actions, source.contract,
                 )
                 self._final.copy_(build_critic(clean, linear, height))
                 self._metrics = physical_metrics(
                     linear, angular, height, source.commands,
                     source._contact_magnitudes()[:, source._non_wheel_body_ids].amax(-1),
+                    gravity,
+                )
+                # Capture in train too: diagnostics only, never actor/collector inputs.
+                self._signals = control_signals(
+                    linear, angular, height, source.commands,
+                    getattr(source, "leg_targets", None),
+                    getattr(source, "wheel_targets", None),
+                    getattr(source, "torques", None),
+                )
+                # step() advances _tick after env.step returns; reset's existing tick
+                # offset is retained. Allocate anew so older step info stays owned.
+                self._signal_time = torch.full(
+                    (self.num_envs,), (self._tick + 1) * self.env.step_dt,
+                    device=self.device, dtype=torch.float64,
                 )
                 self._captured = True
             return reward
@@ -124,7 +187,9 @@ class IsaacLabTaskAdapter:
         self._issued[terminated | truncated] = 0.0
         result = StepResult(self._encode(raw), reward, terminated, truncated,
                             self._final, self._valid,
-                            {**info, "evaluation_metrics": self._metrics})
+                            {**info, "evaluation_metrics": self._metrics,
+                             "evaluation_signals": self._signals,
+                             "evaluation_signal_time": self._signal_time})
         return self._contract.step(result)
 
     def close(self):
@@ -208,6 +273,18 @@ def make_env(model_config, environment_config, device):
             "controller": "source_joint_space_feedback_each_physics_substep",
             "final_command": "preceding_transition_command_before_resample",
             "contact": "rigid_body_net_force_history_peak_not_ground_pair",
+            "evaluation_signals": {
+                "units": CONTROL_SIGNAL_UNITS,
+                "sampling": "after_reward_before_reset_every_policy_step_in_all_modes",
+                "time": "float64_seconds_adapter_tick_plus_one_times_step_dt_at_capture",
+                "order": "source_leg_targets_wheel_targets_torques_column_order",
+                "effort": "last_physics_substep_effort_target_at_policy_boundary",
+                "bandwidth": "one_sample_per_step_dt_not_full_200Hz_trace_or_hardware_PID",
+            },
+            "evaluation_state": {
+                "base_height": "m_source_base_height",
+                "tilt_angle": "rad_acos_clamp_minus_true_gravity_z_over_norm_zero_maps_to_pi_over_2",
+            },
             "hardware_deployment_ready": False,
         }
         metadata["identity"] = {key: metadata[key] for key in (

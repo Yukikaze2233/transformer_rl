@@ -1,9 +1,61 @@
+# Python and development caches
 __pycache__/
+*.py[cod]
 .pytest_cache/
-.venv/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 *.egg-info/
 build/
 dist/
+
+# Local environments and private configuration
+.venv/
+.venv-*/
+venv/
+.env
+.env.*
+!.env.example
+/.secrets/
+
+# Experiment outputs and model weights
 runs/
+logs/
+/outputs/
+/artifacts/
+/checkpoints/
+/datasets/
+/data/
+/downloads/
+/snapshots/
 *.pt
+*.pth
+*.ckpt
+*.safetensors
 *.onnx
+*.onnx.json
+*.onnx.data
+*.whl
+*.tfevents.*
+events.out.tfevents.*
+*.log
+
+# Generated simulator assets and recordings
+usd_cache/
+.usd_cache/
+sim_cache/
+/.cache/
+/recordings/
+*.mp4
+*.webm
+*.mkv
+*.avi
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

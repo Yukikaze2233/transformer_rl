@@ -13,6 +13,7 @@ import torch
 from .adapters import _TensorEnvContract
 from .checkpoint import _load_checkpoint_bytes
 from .history import HistoryBuffer
+from .stability import EpisodeSignalStatistics
 
 
 class _MetricAccumulator:
@@ -37,14 +38,18 @@ class _MetricAccumulator:
 
 @torch.no_grad()
 def evaluate_policy(checkpoint_path, env_factory, environment_config, steps, seed,
-                    device, action_clip=None) -> dict:
+                    device, action_clip=None, *, settle_steps=200, min_steady_samples=200) -> dict:
     """Evaluate fixed mean actions; the factory owns scenario and physical semantics.
 
     Metrics must be PRE-reset float tensors [N], with the same names each step.
     No optimizer updates occur. Counts describe the complete sampled interval,
     including initial transients and any auto-resets; they do not prove a
     continuous no-reset standing interval or convergence.
+    Optional evaluation_signals use separate PRE-reset float64 signal times.
+    Stability discards settle_steps samples per episode, then requires at least
+    min_steady_samples retained samples; these units are steps, not measured seconds.
     """
+    EpisodeSignalStatistics.validate_protocol(settle_steps, min_steady_samples)
     if type(steps) is not int or steps < 1 or type(seed) is not int or seed < 0:
         raise ValueError("steps must be positive and seed nonnegative integers")
     if not callable(env_factory) or not isinstance(environment_config, dict):
@@ -78,6 +83,8 @@ def evaluate_policy(checkpoint_path, env_factory, environment_config, steps, see
         rewards = _MetricAccumulator()
         metrics = {}
         metric_names = None
+        stability = EpisodeSignalStatistics(env.num_envs, settle_steps=settle_steps,
+                                            min_steady_samples=min_steady_samples)
         terminated = truncated = done_count = 0
         for _ in range(steps):
             # Do not sample a distribution or use its exploration std in evaluation.
@@ -101,6 +108,8 @@ def evaluate_policy(checkpoint_path, env_factory, environment_config, steps, see
                 raise ValueError("evaluation metric names must remain constant across steps")
             for name, value in physical.items():
                 metrics[name].add(contract.tensor(f"evaluation_metrics.{name}", value, (env.num_envs,)))
+            stability.update(result.info.get("evaluation_signals", {}),
+                             result.info.get("evaluation_signal_time"), done)
             history.reset(done)
             current = history.append(result.observation)
         if contract.device.type == "cuda":
@@ -113,6 +122,7 @@ def evaluate_policy(checkpoint_path, env_factory, environment_config, steps, see
             "truncated_count": truncated, "done_count": done_count,
             "metrics": {name: metric.report() for name, metric in sorted(metrics.items())},
             "physical_metrics_available": bool(metrics),
+            "stability": stability.report(),
             "environment": environment_config, "environment_provenance": provenance,
             "action_clip": action_clip, "actor": model.actor.describe(),
             "elapsed_s": time.monotonic() - started,

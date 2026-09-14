@@ -3,6 +3,7 @@
   "environment_factory": null,
   "seeds": [1011, 1022, 1033],
   "variants": [
+    {"name": "last_token_attention", "model": {"time_encoding": "index", "readout_type": "last"}, "ppo": {}, "group": "architecture"},
     {"name": "time_attention", "model": {}, "ppo": {}, "group": "architecture"},
     {"name": "index_attention", "model": {"time_encoding": "index"}, "ppo": {}, "group": "architecture"},
     {"name": "gated_attention", "model": {"residual_type": "gated"}, "ppo": {}, "group": "architecture"},
@@ -21,6 +22,8 @@
   "execution": {"devices": ["cuda:0"], "max_parallel": 2, "job_timeout_seconds": 10800},
   "evaluation": {
     "steps": 2000,
+    "settle_steps": 200,
+    "min_steady_samples": 200,
     "seeds": [301],
     "environment": {},
     "scenarios": [

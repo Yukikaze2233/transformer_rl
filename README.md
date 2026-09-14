@@ -1,57 +1,56 @@
 # transformer_rl
 
-**独立的时间感知 Transformer 控制研究仓库。** Actor 以因果注意力编码本体观测、历史指令与真实时间信息，再通过当前命令 query 输出连续动作。采集、PPO、控制时序和模型导出采用独立接口；不依赖 RSL-RL。
+这个项目想把一件事做清楚：**在轮腿机器人的控制任务里，什么形式的 Transformer 更合适？**
 
-## 优化敏感性与足量训练
+我们关心的不只是机器人能不能动起来，还包括站立时会不会慢慢漂走、不同高度能不能保持、动作是否抖动，以及这些表现需要多少训练和推理开销。MLP 和 GRU 都是值得认真对待的对照，Transformer 是否有优势，要靠同条件下的结果说明。
 
-已完成学习率、均值输出头初始化和探索std的真实敏感性研究，并在三个新训练seed上复验。候选配方为`learning_rate=3e-5 / mean_init_scale=0.1 / initial_std=0.2`：三个seed均用满8步/update的优化预算，原baseline仅约14–16%。这说明优化节奏改善，**不等于高度/接触表现已经通过**。
+代码使用 PyTorch，实现了自己的 PPO、历史管理和实验调度，没有依赖 RSL-RL。仿真通过环境接口接入；目前已在 Kaiser 的 Isaac Lab 环境跑通真实训练与评估。
 
-同时复现并修复了batch512与4096间的FP32舍入差被log-prob放大、误触发一致性检查的问题；没有放宽原moment容差或改变PPO ratio。详情见[数值证据](docs/BEHAVIOR_PRECISION.md)和[完整复验](docs/KAISER_SENSITIVITY_RECHECK.md)。
+## 我们在比较什么
 
-[足量训练设计](docs/TRAINING_EVALUATION_PLAN.md)按16M→64M→128M transitions渐进推进，区分调参seed与最终确认seed。[学习曲线规格](configs/learning_curves.json)第一档为6模型×3训练seed，每项在512环境下采16,007,168样本，最终checkpoint评估7个命名场景。仅最终checkpoint自动评估，中间checkpoint用于恢复/后续分析。
+所有网络读取相同的本体观测、命令和动作历史。当前默认窗口是16帧，每帧30维，包含传感器数据年龄及实际采样间隔。
 
-## 多架构对照
+| 配置名 | 想回答的问题 |
+|---|---|
+| `last_token_attention` | 标准因果 Transformer，从最后一个当前帧读出动作，表现如何？ |
+| `index_attention` | 在相同位置编码下，独立的命令 query 是否比最后一帧读出更好？ |
+| `time_attention` | 用真实时间差编码历史，是否比只用帧位置更合适？ |
+| `gated_attention` | 门控残差能否让优化和控制更稳定？ |
+| `supervised_attention` | 加入显式状态估计监督，是否能改善时序表示？ |
+| `history_mlp` | 同样的历史信息，普通 MLP 能做到什么程度？ |
+| `history_gru` | 门控记忆是否已经够用，是否需要 attention？ |
 
-现支持六种配置变体，统一历史信息、环境与样本预算，分别保存优化器和产物：
+Transformer默认使用64维、2层、4个注意力头。辅助监督单独分组，因为它增加了训练信息，不能把收益全算到结构上。网络尺寸和历史长度都在配置里，命名不绑定机器人型号或实验轮次。
 
-| 变体 | 目的 | 默认actor参数量 |
-|---|---|---:|
-| `time_attention` | 真实时间年龄编码的Transformer基线 | 69,772 |
-| `index_attention` | 历史位置编码消融；frame中的时间信息仍保留 | 69,772 |
-| `gated_attention` | GRU式深度残差门控，研究优化稳定性 | 168,844 |
-| `supervised_attention` | query辅助状态预测，研究显式监督的作用 | 69,967 |
-| `history_mlp` | 同窗口、同可见信息的MLP对照 | 74,700 |
-| `history_gru` | 每窗从零重算的GRU对照，无跨调用隐藏状态 | 19,230 |
+## 怎么判断“更好”
 
-监督变体独立分组；辅助目标列必须由环境解释，不能仅凭列号冒称速度真值。参数量和实际计算量不同，不宣称等参数对照。原始默认网络检查点可通过显式迁移继续加载。
+先看任务是否完成，再看完成得是否平稳。
 
-`configs/comparison.json`默认规划6变体×3训练seed，各自用3个独立评估seed验证：
+我们复查过已有 MLP 的原始轨迹：有一个高度的波动很小，但机器人每20秒仍会漂移约1米。另一个高度的速度曲线也很平滑，却在持续后退。**“不怎么抖”和“站在正确的位置、保持正确的高度”是两件事。**
 
-```bash
-python -m transformer_rl.experiment_cli plan --spec configs/comparison.json --root runs/comparison
-python -m transformer_rl.experiment_cli summarize --root runs/comparison
-# 在新规格中配置实际环境工厂后执行，可显式选择并发数：
-python -m transformer_rl.experiment_cli run --root runs/configured_comparison --max-parallel 2
-```
+因此评估会分开记录：
 
-默认通用规格的工厂为null，只能规划；机器人例子另见[Kaiser接入与实测](docs/KAISER_EXPERIMENTS.md)。调度有独立进程组、超时回收、来源/配置哈希与分层seed统计，详情见[实验指南](docs/EXPERIMENTS.md)。
+- 高度、速度和姿态的偏差；
+- 静止漂移、异常接触及失败情况；
+- 每个环境、每个回合去掉均值后的波动；
+- 腿部目标、轮速目标和力矩在采样点之间的变化；
+- 多个训练 seed 的差异、实际样本量和计算开销。
 
-**Kaiser已完成6/6真实训练＋独立评估pilot**：每项512环境、20次PPO更新、327,680个训练样本；有效并发2，总训练样本1,966,080。全机GPU利用率峰值98%（含已有任务）。3并发启动时WSL内存余量不足，已保留该中止记录。这是单seed短测，不是收敛或架构优胜证明。
+稳态统计固定去掉每次 reset 后的前200步，不把 reset 的跳变算作抖动，也不把不同回合的均值差混进去。采样频率为100 Hz时，这些结果只反映相应控制频段，不能当作下位机高频电流环的测量。
 
-## 当前实现
+## 目前做到哪一步
 
-- **时间感知 actor**：默认64维、2层、4 heads、FFN128；16帧历史，末尾附加当前命令 query。无dropout、无可变KV缓存。
-- **显式观测时间**：历史时间戳以float64秒保存，先求age再转网络精度。未知sensor age由known标志区分，不等同零延迟。
-- **纯PyTorch PPO**：Gaussian raw-action likelihood、clipped policy/value loss、GAE双mask、KL提前停止、更新前完整行为分布校验。
-- **采集与存储**：partial reset、跨rollout历史连续、独立tensor快照；time-limit使用reset前终态bootstrap。
-- **控制时序组件**：按秒运行的batched延迟指令通道；区分issued、到达、控制侧应用和目标保持；提供独立policy/controller/physics周期约束。
-- **检查点与导出**：模型/Adam恢复、严格元数据校验；ONNX导出前通过多种合成历史的CPU ORT一致性检查。
+多架构的训练、检查点恢复、ONNX导出、命名场景评估和批量汇总已经接通。Kaiser上完成了六种网络的短训试验，以及学习率、输出初始化和探索标准差的敏感性研究。
 
-核心保持通用tensor接口；`examples/isaaclab_task.py`已接入Kaiser现有的外部研究物理任务并完成上述pilot。**研究资产、真实通信和下位机PID的硬件一致性仍未验证**，旧部署demo不是硬件依据。当前任务沿用研究合同，额外通信延迟为零；不能由此声称获得延迟鲁棒性或有效实机策略。
+目前采用的工作配方是 `learning_rate=3e-5`、`mean_init_scale=0.1`、`initial_std=0.2`。它让 Transformer 在三个新 seed 上都能充分使用优化预算，但短训的高度和接触表现还不好，不能据此选出赢家。
 
-## 快速使用
+下一档配置是 **7种网络 × 3个训练 seed**。在512环境、32步 rollout 下，每项977次更新，对应 **16,007,168个样本**。最终模型分别测试低、中、高站立、前进、后退和左右旋转。16M只是学习曲线的第一档，是否继续到64M、128M，要看学习趋势和独立评估。
 
-Python 3.11及以上。核心依赖为PyTorch，建议使用独立环境：
+机械模型本次只做了视觉随动修复。训练继续采用同一研究动力学，视觉组件数量不会自动变成新的物理自由度。模型和驱动仍有研究近似，当前对照也没有覆盖非零通信延迟或推扰，结果会按这个范围解释。
+
+## 快速开始
+
+需要 Python 3.11 或更新版本，建议使用独立环境：
 
 ```bash
 python -m pip install -e '.[test,export]'
@@ -59,76 +58,42 @@ python -m transformer_rl inspect --config configs/control.json
 python -m pytest -q
 ```
 
-`inspect`只构造网络并报告参数，不创建环境。配置中的16维本体量、3维命令、6维动作是一个轮腿控制示例；字段含义与缩放由环境明确绑定，仓库名称和模块不绑定型号或实验轮次。
+`inspect`只显示网络配置和参数量，不创建仿真环境。
 
-### 接入自己的环境
-
-实现 [`VectorEnv`](src/transformer_rl/types.py)：
-
-- `reset(seed)`返回`VectorObservation`。
-- `step(issued_action)`返回`StepResult`，done行已auto-reset。
-- `final_critic`必须来自真正的reset前状态，不能用重置后的状态替代。
-- 环境工厂签名为`create_env(*, model_config, environment_config, device)`。
-
-已有Gymnasium/Isaac Lab风格tensor环境可用`TensorEnvAdapter`，显式提供观测encoder和终态字段。适配器不猜测关节、命令、传感器时间、动作映射，也不负责创建Simulator；Isaac AppLauncher启动与关闭由环境工厂管理。
-
-未来完成环境接入后，显式训练入口为：
+先生成实验计划，可以检查将要运行哪些网络、seed和评估场景：
 
 ```bash
-python -m transformer_rl train \
-  --config configs/control.json \
-  --env-factory my_task:create_env \
-  --device cuda:0 --updates 1000 --rollout-steps 48 \
-  --max-seconds 3600 --run-dir runs/experiment
+python -m transformer_rl.experiment_cli plan \
+  --spec configs/learning_curves.json --root runs/comparison
 ```
 
-`my_task:create_env`是用户提供的接口位置，不是仓库已提供的机器人任务。当前没有默认的环境交互或训练启动。默认不裁剪发出动作；需要时显式配置`--action-clip`，并在环境中实现一致的控制量映射。
-
-run生成`run.json`、`metrics.jsonl`、`checkpoints/`和完成/失败回执。输出目录与检查点拒绝覆盖。`--resume`恢复模型与优化器，指定的`--updates`是本次额外更新数；采集从新episode开始。模型/PPO配置、环境配置、工厂和动作裁剪必须与checkpoint一致。
-
-时间预算是**软预算**：在物理交互和优化边界检查；阻塞的环境调用、初始化或正在进行的一次PPO update不能被此参数强制中断。长任务仍应由外层进程管理器设置硬超时。收到SIGINT/SIGTERM后在边界停止并保存完整优化状态。
-
-### 导出
+通用配置中的`environment_factory`默认为`null`，需要先填写实际环境工厂和参数，再生成新计划。配置完成后运行：
 
 ```bash
-python -m transformer_rl export \
-  --checkpoint runs/experiment/checkpoints/checkpoint_001000.pt \
-  --output runs/experiment/policy.onnx
+python -m transformer_rl.experiment_cli run \
+  --root runs/configured_comparison --max-parallel 2
+
+python -m transformer_rl.experiment_cli summarize \
+  --root runs/configured_comparison
 ```
 
-模型只输出确定性raw mean；动作缩放、限幅、通信和PID留在控制层。五个输入为`frames / times / valid / command / now`，静态历史长度、动态batch。详情见[导出约定](docs/EXPORT.md)。
+每项实验有独立进程、优化器、检查点和日志。默认只对最终检查点执行完整场景评估，中间检查点用于恢复和后续分析。已有输出目录不会被覆盖。
 
-## 默认网络输入
+## 接入自己的任务
 
-| 字段 | 维数 | 语义 |
-|---|---:|---|
-| 本体观测 | 16 | 由环境定义并缩放，不自动读取仿真真值 |
-| 历史命令 | 3 | 每帧保留当时命令 |
-| previous issued action | 6 | 上次发出的控制量，不冒称电机已应用 |
-| sensor age | 2 | 秒，协议与时钟确实支持时才已知 |
-| age known flags | 2 | 区分未知与已知零延迟 |
-| policy interval | 1 | 实际policy事件时间间隔，秒 |
-| **单帧合计** | **30** | 历史时间戳与valid mask另行保存 |
+环境实现 `VectorEnv` 接口，提供观测、reward、终止状态以及 reset 前的终态。网络只生成控制量；动作缩放、通信队列和底层控制器仍由环境或控制层负责。
 
-默认actor为**69,772参数**，独立critic为**48,897参数**。这些数字只是结构计数；Transformer参数虽小，完整历史attention仍比短窗MLP消耗更多计算与激活显存。
+`previous_issued_action`表示上一条已经发出的指令，不意味着电机已经执行。已知的数据年龄与未知延迟也分开编码。这样的区分是为了让训练和真实控制链路有清楚的对应关系。
 
-## 为什么尝试Transformer
+`examples/isaaclab_task.py`是现有研究任务的接入示例，不是一个自动适配任意机器人资产的工具。Isaac SDK的进程生命周期由专用worker管理，使用方法在[Kaiser记录](docs/KAISER_EXPERIMENTS.md)中。
 
-期待它通过较长的动作—响应历史，适应延迟、异步观测和隐含动力学；当前命令query提供独立读出，使历史命令不被新命令覆盖。时间编码提供物理时间尺度，而不只依赖帧序号。
+## 文档
 
-代价包括更高的训练/推理开销、更多采样需求和可能的控制滞后。query没有增加额外可观测信息，网络也无法恢复完全不可辨识的滑移。应与**同历史、同时间信息**的MLP、复旦式速度估计MLP和GRU比较。当前实现是Transformer在线PPO，不是Decision Transformer；DT/ODT需要独立的轨迹与回报条件化设计。
+- [训练预算与网络选型计划](docs/TRAINING_EVALUATION_PLAN.md)
+- [实验配置、并发和结果汇总](docs/EXPERIMENTS.md)
+- [MLP稳态基线](docs/MLP_STEADY_STATE_BASELINE.md) / [稳定性统计口径](docs/STABILITY_METRICS.md)
+- [优化敏感性复验](docs/KAISER_SENSITIVITY_RECHECK.md) / [浮点一致性问题](docs/BEHAVIOR_PRECISION.md)
+- [检查点与ONNX导出](docs/EXPORT.md)
+- [视觉修复审查](docs/CHASSIS_GEOMETRY_REVIEW.md)
 
-详细取舍、时间通道、内存算术与硬件边界见[架构评审](docs/ARCHITECTURE_REVIEW.md)，集成契约见[接口说明](docs/INTERFACES.md)。
-
-## 源码结构
-
-| 模块 | 职责 |
-|---|---|
-| `model.py` / `history.py` | 时序actor、独立critic、帧构造与历史 |
-| `storage.py` / `ppo.py` | 完整窗口rollout、GAE、PPO优化 |
-| `runner.py` / `adapters.py` | 同步采集与环境契约 |
-| `timing.py` | 目标通信延迟、锁存和多频率调度约束 |
-| `checkpoint.py` / `export.py` | 模型恢复、ONNX及验证回执 |
-| `cli.py` / `config.py` / `types.py` | 入口、参数与共享tensor接口 |
-
-维护者：**yukikaze2233 <yingziyuw@gmail.com>**。
+维护者：`yukikaze2233 <yingziyuw@gmail.com>`。

@@ -3,6 +3,7 @@
   "environment_factory": null,
   "seeds": [11, 22, 33],
   "variants": [
+    {"name": "last_token_attention", "model": {"time_encoding": "index", "readout_type": "last"}, "ppo": {}, "group": "architecture"},
     {"name": "time_attention", "model": {}, "ppo": {}, "group": "architecture"},
     {"name": "index_attention", "model": {"time_encoding": "index"}, "ppo": {}, "group": "architecture"},
     {"name": "gated_attention", "model": {"residual_type": "gated"}, "ppo": {}, "group": "architecture"},

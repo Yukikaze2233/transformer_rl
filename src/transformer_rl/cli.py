@@ -30,6 +30,13 @@ def _positive_int(text: str) -> int:
     return value
 
 
+def _nonnegative_int(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be a nonnegative integer")
+    return value
+
+
 def _positive_seconds(text: str) -> float:
     value = float(text)
     if not math.isfinite(value) or value <= 0:
@@ -263,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
     evaluate.add_argument("--seed", type=int, required=True)
     evaluate.add_argument("--device", default="cpu")
     evaluate.add_argument("--action-clip", type=_positive_seconds)
+    evaluate.add_argument("--settle-steps", type=_nonnegative_int, default=200)
+    evaluate.add_argument("--min-steady-samples", type=_positive_int, default=200)
     evaluate.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
@@ -281,7 +290,9 @@ def main(argv: list[str] | None = None) -> int:
             if model.config != model_config:
                 raise ValueError("evaluation model configuration differs from checkpoint")
             result = evaluate_policy(args.checkpoint, _factory(args.env_factory), environment,
-                                     args.steps, args.seed, args.device, args.action_clip)
+                                     args.steps, args.seed, args.device, args.action_clip,
+                                     settle_steps=args.settle_steps,
+                                     min_steady_samples=args.min_steady_samples)
             _write_json(args.output, result)
         else:
             model_config, ppo_config, environment = (load_config(args.config) if args.config

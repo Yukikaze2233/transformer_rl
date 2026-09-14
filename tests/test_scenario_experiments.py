@@ -358,7 +358,7 @@ def test_learning_curves_recipe_and_complete_plan(tmp_path):
         "stand_high": {"fixed_command": [0, 0, 0.32]}, "forward": {"fixed_command": [0.5, 0, 0.30]},
         "reverse": {"fixed_command": [-0.5, 0, 0.30]}, "turn_left": {"fixed_command": [0, 1, 0.30]},
         "turn_right": {"fixed_command": [0, -1, 0.30]}}
-    assert len(manifest["jobs"]) == 18 and len(manifest["configs"]) == 48
+    assert len(manifest["jobs"]) == 21 and len(manifest["configs"]) == 56
     assert ex.validate_plan(root, check_source=True) == manifest
     summary = ex.summarize(root)
     assert "evaluation_updates" not in summary
@@ -367,7 +367,7 @@ def test_learning_curves_recipe_and_complete_plan(tmp_path):
         ex.run(root, runner=lambda *_: pytest.fail("must not launch training"))
 
 
-def test_learning_curves_runs_18_train_and_126_final_scenario_evaluations(tmp_path):
+def test_learning_curves_runs_all_variants_and_final_scenario_evaluations(tmp_path):
     repo = Path(__file__).resolve().parents[1]
     spec = ex._read(repo / "configs/learning_curves.json")
     spec["base_config"] = str(repo / "configs/optimized_control.json")
@@ -388,8 +388,8 @@ def test_learning_curves_runs_18_train_and_126_final_scenario_evaluations(tmp_pa
 
     result = ex.run(root, runner=runner)
     assert all(job["status"] == "completed" for job in result["jobs"])
-    assert sum(argv[3] == "train" for argv in commands) == 18
-    assert sum(argv[3] == "evaluate" for argv in commands) == 126
+    assert sum(argv[3] == "train" for argv in commands) == 21
+    assert sum(argv[3] == "evaluate" for argv in commands) == 147
     assert ex._read(root / "execution.json")["max_parallel"] == 2
     for job in manifest["jobs"]:
         directory = root / job["directory"]

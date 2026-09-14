@@ -1,5 +1,7 @@
 # 多架构、多 seed 实验编排
 
+当前规格已加入标准`last_token_attention`，共7种配置；首档为21次训练、147次最终checkpoint场景评估。旧六变体pilot记录保持原数量。`readout_type`作为结构变量允许对照；last模式要求当前帧有效，时间与now一致，帧内command与当前command一致。
+
 接口以 `EXPERIMENT_INTERFACES.md` 为准。独立入口为
 `python -m transformer_rl.experiment_cli`，Python API 位于 `transformer_rl.experiments`。
 默认通用规格的环境工厂为null，只能规划。额外提供的Isaac Lab研究任务适配器已在Kaiser完成六变体并行pilot，见[实测记录](KAISER_EXPERIMENTS.md)；这不代表真实硬件合同已验证。调度器的单元测试使用fake subprocess，物理训练收据单独记录。
@@ -92,7 +94,7 @@ run 使用当前Python解释器，argv直接传入subprocess，不使用shell。
 每个 eval seed 调用：
 
 ```text
-python -m transformer_rl evaluate --checkpoint PATH --config MERGED_EVAL_CONFIG --env-factory MODULE:CALLABLE --steps N --seed N --device DEVICE --output PATH [--action-clip X]
+python -m transformer_rl evaluate --checkpoint PATH --config MERGED_EVAL_CONFIG --env-factory MODULE:CALLABLE --steps N --seed N --device DEVICE --output PATH [--action-clip X] [--settle-steps N] [--min-steady-samples N]
 ```
 
 评估 config 的 model/PPO 保留训练配置，environment 为 common base environment 与 evaluation.environment 的顶层合并。
@@ -134,6 +136,70 @@ training_reward_diagnostic 仅为每个 seed 最后一次更新的收益诊断�
 缺失 seed 显式展示，统计只描述可用的完整 seed 子集，不代表完整实验结论；不挑最佳 seed，也不把 frames 当独立样本。
 没有环境提供的物理指标时 physical_metrics_complete=false；该字段只说明报告齐全，不是 physical success。
 物理成功仍需环境定义的阈值与任务语义。不同分组、环境、预算和评估协议不混合排名。
+
+### 分回合稳定性与覆盖率
+
+精确定义见 [STABILITY_METRICS.md](STABILITY_METRICS.md)。主 CLI 的 `evaluate` 新增
+`--settle-steps`（非负整数，允许 0）和 `--min-steady-samples`（正整数），默认均为 **200**。
+它们以 keyword-only 参数传给 `evaluate_policy`。实验规格的 `evaluation` 可选同名下划线字段：
+
+```json
+{
+  "steps": 2000,
+  "seeds": [301, 302],
+  "environment": {},
+  "settle_steps": 200,
+  "min_steady_samples": 200
+}
+```
+
+窗口对全部模型、训练 seed、评估 seed 和场景统一。省略字段时由 core 解析默认值；
+默认值所在的 `stability.py`、`evaluation.py` 以及 CLI／编排代码均受 package source SHA 约束。
+显式值受 spec/plan SHA 约束。worker argv **仅在规格显式提供字段时**附加对应 flag；
+旧规格的 manifest、配置和 job 路由保持兼容。
+
+每个环境的每个 episode 固定丢弃前 `settle_steps` 个 PRE-reset 样本，只统计达到
+`min_steady_samples` 的连续保留段；失败段与截止时的 partial 段遵守同一规则。
+报告校验完整 `stability.protocol` 与 core 的预期协议一致，包含窗口、逐环境／回合中心化、
+时间单位和统计权重；不同 reset／窗口／权重协议的报告不能进入同一统计池。
+`summary.stability_protocol` 记录本规格的**预期协议**，不表示旧报告已提供稳定性数据。
+信号计数必须为非负整数，满足样本分解、段数分解和导数对数关系；
+核心统计必须按有效计数为有限数或 `null`。`available=false` 时不能用伪零指标代表缺段。
+旧报告省略整个 `stability` 仍有效，读取结果标记 `stability_missing=true`。
+
+逐信号汇总 `mean / within_episode_std / derivative_rms / max_abs`，键为
+`stability.SIGNAL.STAT`；有场景时继续使用 `scenarios.NAME.stability.SIGNAL.STAT`。
+复用物理指标的两层统计：**先对同一训练 seed 的可用 eval runs 等权均值，再跨可用训练
+seeds 计算 mean 和样本 std**。这里 max_abs 的汇总也是各报告 max_abs 的两层均值，
+不是所有报告的全局最大值；不按合格帧数加权，不跨场景混池。
+`null` 不补 0；一个指标全不可用时为 `n=0, mean=null, std=null`。
+允许 `min_steady_samples=1` 时，单样本段的 bias/std/max_abs 可用而 derivative_rms 不可用。
+
+JSON 中逐训练 seed 与 variant 均有 `stability_coverage`：
+
+- `stability`（或 `scenarios.NAME.stability`）条目记录有合格段的 eval-run 覆盖；
+  逐训练 seed 保留 `missing_report_eval_seeds`，区分旧报告缺字段和已报告但无合格段。
+- 每个 `stability.SIGNAL.STAT` 条目记录该指标的可用 eval runs 和缺失 eval seeds；
+  variant 汇总 `requested/available_training_seeds`、`missing_training_seeds`、
+  `incomplete_training_seeds`、`requested/available_eval_runs`、`missing_eval_runs` 与 `complete`。
+  部分 eval runs 可用的训练 seed 仍贡献一次均值，并明确标为 incomplete。
+- 指标条目还保留信号的累计 `count / segments / short_count / short_segments` 等原始计数，
+  含 completed/partial 分类；`sample_coverage=count/transitions`，分母是已验证报告的全区间
+  transitions，包含该信号缺失的有效报告。完全缺失的执行 job 无法推断实际帧数，
+  由 requested/missing run 与 training-seed 计数反映。不同指标条目中的同一信号计数不能相加。
+
+任一 eval run／训练 seed 缺少稳定段或四项指标之一不可得时，`stability_complete=false`，
+组内 `stability_comparison_available=false`；不同模型信号集合不一致也阻断稳定性比较。
+命名场景另有独立的稳定性完整性／比较标志。CSV 的 `metric` 包含上述四项指标，
+`stability_coverage` 列以 JSON 保留覆盖详情，并重复输出两项稳定性标志；
+无任何信号时仍输出场景级 `stability` coverage 行，其 `n=0`、均值／std 留空。
+
+**覆盖不足不是执行失败。** 有效但无稳定段的 job 仍为 completed，原 reward、全区间物理
+metrics、termination/truncation/done 计数及预算检查继续保留；缺少整个评估文件或协议损坏
+仍遵守原 missing/failed 规则。合格 count 不要求跨模型相等：频繁失败造成更低覆盖本身就是结果。
+`stability_comparison_available` 还要求原训练／评估预算检查通过，仅说明描述性比较条件满足。
+大偏差常值、倒下后静止都可能 jitter=0；必须结合 signed mean、max_abs、逐报告回合均值漂移、
+全区间物理指标和失败计数解读，不自动生成 winner 或站稳成功判定。
 
 ### 命名评估场景
 
@@ -230,7 +296,7 @@ variant 和 group 也为 partial，不能宣布全场景 evaluation_complete 或
 ## 定向验证
 
 ```bash
-python -m pytest tests/test_experiments.py tests/test_scenario_experiments.py tests/test_sensitivity_experiments.py -q
+CUDA_VISIBLE_DEVICES='' /home/yukikaze/isaacsim60-venv/bin/python -m pytest tests/test_stability_reporting.py tests/test_cli.py tests/test_experiments.py tests/test_scenario_experiments.py tests/test_sensitivity_experiments.py -q
 ```
 
 测试内部 runner 替换 CLI 执行载荷为短生命周期 fake Python subprocess，保留 argv/产物协议。
@@ -238,3 +304,6 @@ python -m pytest tests/test_experiments.py tests/test_scenario_experiments.py te
 SHA/更新数/报告检查、层次均值和样本标准差、失败/超时、SIGTERM 清理及无关进程隔离。
 新增覆盖不公平 override 拒绝、训练/评估样本预算不一致、组间隔离、partial 比较阻断、
 metric 统计一致性、合作式 SIGTERM 清理与忽略终止后的有界 SIGKILL 升级。
+稳定性测试通过直接构造报告与 fake subprocess，覆盖默认／显式窗口、跨训练 seed 的场景内
+两层均值、null 与部分覆盖、大 bias／零 jitter、协议不一致拒绝、单样本导数缺失及旧报告兼容。
+这些验证不运行训练或仿真。

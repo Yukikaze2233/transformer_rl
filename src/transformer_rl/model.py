@@ -183,6 +183,7 @@ class GaussianActor(nn.Module):
     def describe(self) -> dict:
         config = self.config
         transformer = config.actor_type == "transformer"
+        last = transformer and config.readout_type == "last"
         return {
             "actor_type": config.actor_type,
             "history_length": config.history_length,
@@ -199,10 +200,22 @@ class GaussianActor(nn.Module):
             }[config.actor_type],
             "state": "finite window recomputed each call; no cross-call hidden state",
             "history_encoder": {
-                "transformer": "causal self-attention with appended current-command query",
+                "transformer": "causal self-attention with last current-frame readout" if last
+                else "causal self-attention with appended current-command query",
                 "mlp": "flattened masked history MLP with separate current command",
                 "gru": "masked finite-window GRU with separate current command",
             }[config.actor_type],
+            "readout_type": config.readout_type if transformer else None,
+            "current_command": {
+                "source": "last frame command fields" if last else "separate command input",
+                "requires_valid_last_frame": last,
+                "requires_last_time_equal_now": last,
+                "requires_last_frame_command_equal_command": last,
+                "supports_empty_history": not last,
+                "external_command_role": "contract only; caller must also update current frame"
+                if last else "policy input",
+                "validation": "checked HistoryBatch APIs; unchecked tensor/ONNX callers must enforce",
+            },
             "time_encoding": {
                 "position": config.time_encoding if transformer else "none",
                 "history_time_features": (
@@ -218,7 +231,8 @@ class GaussianActor(nn.Module):
             "gating": "GRU-style depth residual, not streaming recurrence"
             if transformer and config.residual_type == "gated" else None,
             "auxiliary_indices": list(config.auxiliary_indices),
-            "auxiliary_source": "query representation" if config.auxiliary_indices else None,
+            "auxiliary_source": ("last current-frame representation" if last
+                                 else "query representation") if config.auxiliary_indices else None,
             "mean_initialization": {
                 "scale": config.mean_init_scale,
                 "target": "action mean output layer weight and bias only",
@@ -264,12 +278,15 @@ class GaussianActor(nn.Module):
 
 
 class TimeAwareActor(GaussianActor):
-    """Causal history encoder with a current-command query and raw Gaussian actions.
+    """Causal history encoder with query or last-frame readout and raw Gaussian actions.
 
     Public HistoryBatch methods validate shapes, devices and meaningful values.
     ``forward_tensors`` / ``encode_tensors`` are unchecked tensor-only export
     entry points; validate their inputs at the integration boundary. Padding may
     contain arbitrary values, including nonfinite frames and timestamps.
+    Last readout requires a valid final slot at ``now`` whose command fields
+    exactly equal ``command``. Empty history and external-only command changes
+    are unsupported; no historical command is rewritten inside the actor.
     """
 
     def __init__(self, config: ModelConfig) -> None:
@@ -277,8 +294,9 @@ class TimeAwareActor(GaussianActor):
             raise ValueError("TimeAwareActor requires actor_type='transformer'")
         super().__init__(config)
         self.frame_projection = nn.Linear(config.frame_dim, config.d_model)
-        self.command_projection = nn.Linear(config.command_dim, config.d_model)
-        self.query_embedding = nn.Parameter(torch.zeros(config.d_model))
+        if config.readout_type == "query":
+            self.command_projection = nn.Linear(config.command_dim, config.d_model)
+            self.query_embedding = nn.Parameter(torch.zeros(config.d_model))
         self.blocks = nn.ModuleList(
             _CausalBlock(config) for _ in range(config.num_layers)
         )
@@ -299,6 +317,18 @@ class TimeAwareActor(GaussianActor):
         if config.auxiliary_indices:
             self.auxiliary_head = nn.Linear(config.d_model, len(config.auxiliary_indices))
         self._scale_initial_mean_head(self.mean_head)
+
+    def _validate_history(self, history: HistoryBatch) -> None:
+        super()._validate_history(history)
+        if self.config.readout_type == "last":
+            if not history.valid[:, -1].all():
+                raise ValueError("last readout requires a valid last frame; empty history is unsupported")
+            if not torch.equal(history.times[:, -1], history.now):
+                raise ValueError("last readout requires last frame time == now")
+            start = self.config.proprio_dim
+            current_command = history.frames[:, -1, start : start + self.config.command_dim]
+            if not torch.equal(current_command, history.command):
+                raise ValueError("last readout requires last frame command == command")
 
     def time_features_tensors(
         self, times: torch.Tensor, valid: torch.Tensor, now: torch.Tensor
@@ -327,7 +357,7 @@ class TimeAwareActor(GaussianActor):
         command: torch.Tensor,
         now: torch.Tensor,
     ) -> torch.Tensor:
-        """Return [B, L+1, D] representations, with the command query last.
+        """Return [B, L+1, D] for query or [B, L, D] for last-frame readout.
 
         This path is tensor-only and has no mutable cache or inference fast path.
         Historical tokens never attend to the appended current command query.
@@ -339,16 +369,20 @@ class TimeAwareActor(GaussianActor):
         history_tokens = torch.where(
             valid[..., None], history_tokens, torch.zeros_like(history_tokens)
         )
-        query = self.command_projection(command) + self.query_embedding
-        tokens = torch.cat((history_tokens, query[:, None]), dim=1)
-        query_valid = torch.ones_like(now[:, None], dtype=torch.bool)
-        token_valid = torch.cat((valid, query_valid), dim=1)
+        if self.config.readout_type == "query":
+            query = self.command_projection(command) + self.query_embedding
+            tokens = torch.cat((history_tokens, query[:, None]), dim=1)
+            query_valid = torch.ones_like(now[:, None], dtype=torch.bool)
+            token_valid = torch.cat((valid, query_valid), dim=1)
+        else:
+            tokens = history_tokens
+            token_valid = valid
         positions = torch.arange(tokens.shape[1], device=frames.device)
         causal = positions[:, None] >= positions[None, :]
         diagonal = positions[:, None] == positions[None, :]
         allowed = causal[None] & token_valid[:, None, :]
         # A padding row needs a finite softmax even though its output is erased.
-        # The real query is always valid and can attend to itself for empty history.
+        # Query readout also supports empty history through its always-valid query.
         allowed = allowed | ((~token_valid)[:, :, None] & diagonal[None])
         for block in self.blocks:
             tokens = block(tokens, allowed, token_valid)
@@ -356,7 +390,7 @@ class TimeAwareActor(GaussianActor):
         return torch.where(token_valid[..., None], tokens, torch.zeros_like(tokens))
 
     def encode(self, history: HistoryBatch) -> torch.Tensor:
-        """Validated representations, including the query; useful for causal audits."""
+        """Validated representations, including the readout; useful for causal audits."""
         self._validate_history(history)
         return self.encode_tensors(
             history.frames, history.times, history.valid, history.command, history.now

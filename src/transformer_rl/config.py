@@ -29,6 +29,7 @@ class ModelConfig:
     baseline_hidden: tuple[int, ...] = (128, 64)
     gru_hidden: int = 64
     mean_init_scale: float = 1.0
+    readout_type: str = "query"
 
     @property
     def frame_dim(self) -> int:
@@ -43,6 +44,10 @@ class ModelConfig:
             raise ValueError("time_encoding must be elapsed or index")
         if self.residual_type not in ("add", "gated"):
             raise ValueError("residual_type must be add or gated")
+        if self.readout_type not in ("query", "last"):
+            raise ValueError("readout_type must be query or last")
+        if self.actor_type != "transformer" and self.readout_type != "query":
+            raise ValueError("readout_type='last' requires transformer")
         if self.actor_type != "transformer" and (
             self.time_encoding != "elapsed" or self.residual_type != "add"
             or self.auxiliary_indices

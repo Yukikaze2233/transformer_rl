@@ -19,13 +19,14 @@ from .ppo import PPOTrainer
 
 
 _FORMAT = "transformer_rl.checkpoint"
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _V2_MODEL_DEFAULTS = {
     "actor_type": "transformer", "time_encoding": "elapsed", "residual_type": "add",
     "auxiliary_indices": [], "baseline_hidden": [128, 64], "gru_hidden": 64,
 }
 _V2_PPO_DEFAULTS = {"auxiliary_coef": 0.0}
 _V3_MODEL_DEFAULTS = {"mean_init_scale": 1.0}
+_V4_MODEL_DEFAULTS = {"readout_type": "query"}
 _DTYPES = {
     "float16": torch.float16,
     "bfloat16": torch.bfloat16,
@@ -279,11 +280,11 @@ def _validated_components(
     if type(payload) is not dict:
         raise ValueError("checkpoint requires exactly the declared top-level keys")
     if "schema_version" in payload and (
-        type(payload["schema_version"]) is not int or payload["schema_version"] not in (1, 2, 3)
+        type(payload["schema_version"]) is not int or payload["schema_version"] not in (1, 2, 3, 4)
     ):
         raise ValueError("unsupported checkpoint schema_version")
     expected_keys = _PAYLOAD_KEYS | (
-        {"source_schema_version"} if payload.get("schema_version") in (2, 3) else set()
+        {"source_schema_version"} if payload.get("schema_version") in (2, 3, 4) else set()
     )
     if set(payload) != expected_keys:
         raise ValueError("checkpoint requires exactly the declared top-level keys")
@@ -297,7 +298,8 @@ def _validated_components(
         payload = dict(payload)
         for key, cls, additions in (
             ("model_config", ModelConfig, {
-                **(_V2_MODEL_DEFAULTS if schema == 1 else {}), **_V3_MODEL_DEFAULTS,
+                **(_V2_MODEL_DEFAULTS if schema == 1 else {}),
+                **(_V3_MODEL_DEFAULTS if schema <= 2 else {}), **_V4_MODEL_DEFAULTS,
             }),
             ("ppo_config", PPOConfig, _V2_PPO_DEFAULTS if schema == 1 else {}),
         ):

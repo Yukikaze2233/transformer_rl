@@ -20,7 +20,7 @@ model, trainer, update, metadata = load_checkpoint(
 
 ### 格式与校验
 
-- 格式标识为 `transformer_rl.checkpoint`，新文件内部`schema_version=3`，文件名不要求带版本号。旧schema 1/2按各自精确字段集合显式迁移，补`mean_init_scale=1.0`等对应默认值；`source_schema_version`保留来源格式，原metadata保留。
+- 格式标识为 `transformer_rl.checkpoint`，新文件内部`schema_version=4`，文件名不要求带版本号。旧schema 1/2/3按各自精确字段集合显式迁移，补对应`mean_init_scale`及`readout_type="query"`默认值；`source_schema_version`保留来源格式，原metadata保留。
 - 保存完整 `ModelConfig`、`PPOConfig`、模型 dtype、actor/critic weights 与 buffers、Adam 状态、累计 update 和 JSON metadata。
 - metadata 必须为字符串键 JSON object；嵌套值仅接受 object、list、string、有限 number、boolean、null。tuple、tensor、非字符串键及循环引用被拒绝。
 - 读取显式使用 `torch.load(..., weights_only=True, map_location="cpu")`，不回退到非受限 pickle。
@@ -33,6 +33,8 @@ model, trainer, update, metadata = load_checkpoint(
 模型初始化所消耗的 CPU RNG 被局部保存和恢复，保存/加载不推进调用方全局 CPU RNG。checkpoint 不保存全局随机流、环境、通信队列、collector history 或 PID 状态。恢复采集须从新 episode 开始；不承诺 bitwise 续训或外部控制状态的精确续接。
 
 ## ONNX API
+
+标准last-token读出仍使用五输入签名；但必须提供有效当前帧，最后时间等于now，帧内command等于外部command。计算读取当前帧command，外部command是接口一致性字段；不支持空历史或仅修改外部command的调用。query读出的原有行为保持不变，sidecar记录各自契约。
 
 ```python
 from transformer_rl.export import export_policy

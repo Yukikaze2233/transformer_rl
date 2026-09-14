@@ -209,7 +209,7 @@ def test_schema_one_exact_default_migration_and_adam_order(tmp_path):
     payload["schema_version"] = 1
     payload.pop("source_schema_version")
     for name in ("actor_type", "time_encoding", "residual_type", "auxiliary_indices",
-                 "baseline_hidden", "gru_hidden", "mean_init_scale"):
+                 "baseline_hidden", "gru_hidden", "mean_init_scale", "readout_type"):
         payload["model_config"].pop(name)
     payload["ppo_config"].pop("auxiliary_coef")
     legacy = tmp_path / "legacy.pt"

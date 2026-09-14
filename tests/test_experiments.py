@@ -299,7 +299,7 @@ def test_cli_plan_summary_and_null_run(specification):
 def test_default_comparison_freezes_all_variants(tmp_path):
     repo = Path(__file__).resolve().parents[1]
     manifest = ex.plan(repo / "configs/comparison.json", tmp_path / "comparison")
-    assert len(manifest["jobs"]) == 18
+    assert len(manifest["jobs"]) == 21
     assert manifest["spec"]["evaluation"]["seeds"] == [101, 102, 103]
     config = ex._read(tmp_path / "comparison/configs/supervised_attention.json")
     assert config["model"]["auxiliary_indices"] == [25, 26, 27]

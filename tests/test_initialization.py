@@ -164,7 +164,7 @@ def test_scaled_checkpoint_adam_roundtrip_and_export(tmp_path, variant, scale):
     metadata = {"source_schema": {"version": "user metadata", "nested": [1, None]}}
     save_checkpoint(path, model, trainer, 1, metadata)
     payload = torch.load(path, weights_only=True)
-    assert payload["schema_version"] == payload["source_schema_version"] == 3
+    assert payload["schema_version"] == payload["source_schema_version"] == 4
     assert payload["model_config"]["mean_init_scale"] == scale
     restored, resumed, update, restored_metadata = load_checkpoint(path)
     assert update == 1 and restored_metadata == metadata and restored.config == config
@@ -176,7 +176,7 @@ def test_scaled_checkpoint_adam_roundtrip_and_export(tmp_path, variant, scale):
     assert torch.equal(torch.get_rng_state(), rng)
     sidecar = json.loads(Path(result["sidecar_path"]).read_text())
     assert sidecar["model_config"]["mean_init_scale"] == scale
-    assert sidecar["checkpoint"]["source_schema_version"] == 3
+    assert sidecar["checkpoint"]["source_schema_version"] == 4
     initialization = sidecar["actor"]["mean_initialization"]
     assert initialization == model.actor.describe()["mean_initialization"]
     assert initialization["scale"] == scale
@@ -193,38 +193,45 @@ def test_scaled_checkpoint_adam_roundtrip_and_export(tmp_path, variant, scale):
     _assert_tree_equal(resumed.optimizer.state_dict(), trainer.optimizer.state_dict())
 
 
-@pytest.fixture(scope="module")
-def schema_two_reference():
-    """Use the actual schema-2 implementation, not a relabeled current checkpoint.
+@pytest.fixture(scope="module", params=[
+    ("79f67cf", 2, 1.0), ("e0f97a6", 3, 1.0), ("e0f97a6", 3, 0.1),
+])
+def schema_reference(request):
+    """Use actual historical implementations, not relabeled current checkpoints.
 
-    This regression requires the repository's 79f67cf Git object. Modules live in
+    This regression requires the repository's historical Git objects. Modules live in
     an isolated namespace so current imports and concurrent working edits are untouched.
     """
     root = Path(__file__).resolve().parents[1]
-    package = ModuleType("_initialization_reference_79f67cf")
+    revision, schema, scale = request.param
+    package = ModuleType(f"_initialization_reference_{revision}")
+    package.schema = schema
+    package.mean_init_scale = scale
     package.__path__ = []
     with pytest.MonkeyPatch.context() as patch:
         patch.setitem(sys.modules, package.__name__, package)
         for name in ("config", "types", "storage", "model", "ppo", "checkpoint"):
             source = subprocess.run(
-                ["git", "show", f"79f67cf:src/transformer_rl/{name}.py"],
+                ["git", "show", f"{revision}:src/transformer_rl/{name}.py"],
                 cwd=root, check=True, capture_output=True, text=True,
             ).stdout
             module = ModuleType(f"{package.__name__}.{name}")
             patch.setitem(sys.modules, module.__name__, module)
             setattr(package, name, module)
-            exec(compile(source, f"79f67cf/{name}.py", "exec"), module.__dict__)
+            exec(compile(source, f"{revision}/{name}.py", "exec"), module.__dict__)
         yield package
 
 
 @pytest.mark.parametrize("variant", VARIANTS)
-def test_79f67cf_defaults_weights_mean_rng_and_next_adam_step_are_exact(
-    tmp_path, schema_two_reference, variant,
+def test_historical_defaults_weights_mean_rng_and_next_adam_step_are_exact(
+    tmp_path, schema_reference, variant,
 ):
-    reference = schema_two_reference
-    config = _config(variant)
+    reference = schema_reference
+    config = replace(_config(variant), mean_init_scale=reference.mean_init_scale)
     old_arguments = asdict(config)
-    old_arguments.pop("mean_init_scale")
+    old_arguments.pop("readout_type")
+    if reference.schema == 2:
+        old_arguments.pop("mean_init_scale")
     rng = torch.get_rng_state().clone()
     old_model = reference.model.ActorCritic(reference.config.ModelConfig(**old_arguments))
     expected_rng = torch.get_rng_state().clone()
@@ -240,15 +247,17 @@ def test_79f67cf_defaults_weights_mean_rng_and_next_adam_step_are_exact(
     old_trainer = reference.ppo.PPOTrainer(old_model, reference.config.PPOConfig())
     _assert_tree_equal(trainer.optimizer.state_dict(), old_trainer.optimizer.state_dict())
     _synthetic_adam_step(old_model, old_trainer.optimizer, old_history)
-    old_path = tmp_path / "schema2.pt"
+    old_path = tmp_path / "legacy.pt"
     metadata = {"source_schema": {"original": 1}, "source_schema_version": "user-owned"}
     reference.checkpoint.save_checkpoint(old_path, old_model, old_trainer, 1, metadata)
     old_payload = torch.load(old_path, weights_only=True)
-    assert old_payload["schema_version"] == old_payload["source_schema_version"] == 2
-    assert "mean_init_scale" not in old_payload["model_config"]
+    assert old_payload["schema_version"] == old_payload["source_schema_version"] == reference.schema
+    assert "readout_type" not in old_payload["model_config"]
+    if reference.schema == 2:
+        assert "mean_init_scale" not in old_payload["model_config"]
     restored, resumed, update, restored_metadata = load_checkpoint(old_path)
     assert update == 1 and restored_metadata == metadata
-    assert restored.config == config and restored.checkpoint_source_schema_version == 2
+    assert restored.config == config and restored.checkpoint_source_schema_version == reference.schema
     _assert_tree_equal(restored.state_dict(), old_model.state_dict())
     _assert_tree_equal(resumed.optimizer.state_dict(), old_trainer.optimizer.state_dict())
     old_evaluation = old_model.actor.act(old_history, deterministic=True).evaluation
@@ -264,18 +273,18 @@ def test_79f67cf_defaults_weights_mean_rng_and_next_adam_step_are_exact(
             assert torch.equal(actual.grad, expected.grad)
     _assert_tree_equal(restored.state_dict(), old_model.state_dict())
     _assert_tree_equal(resumed.optimizer.state_dict(), old_trainer.optimizer.state_dict())
-    migrated = tmp_path / "schema3.pt"
+    migrated = tmp_path / "migrated.pt"
     save_checkpoint(migrated, restored, resumed, 2, restored_metadata)
     payload = torch.load(migrated, weights_only=True)
-    assert payload["schema_version"] == 3 and payload["source_schema_version"] == 2
+    assert payload["schema_version"] == 4 and payload["source_schema_version"] == reference.schema
     assert payload["metadata"] == metadata
     _assert_tree_equal(load_checkpoint(migrated)[0].state_dict(), old_model.state_dict())
     pytest.importorskip("onnx")
     pytest.importorskip("onnxruntime")
     report = export_policy(old_path, tmp_path / "legacy.onnx")
     sidecar = json.loads(Path(report["sidecar_path"]).read_text())
-    assert sidecar["checkpoint"]["source_schema_version"] == 2
-    assert sidecar["actor"]["mean_initialization"]["scale"] == 1.0
+    assert sidecar["checkpoint"]["source_schema_version"] == reference.schema
+    assert sidecar["actor"]["mean_initialization"]["scale"] == config.mean_init_scale
 
 
 def _legacy_payload(path, schema):
@@ -285,7 +294,9 @@ def _legacy_payload(path, schema):
     payload = torch.load(path, weights_only=True)
     payload["schema_version"] = schema
     payload["source_schema_version"] = 1
-    payload["model_config"].pop("mean_init_scale")
+    payload["model_config"].pop("readout_type")
+    if schema <= 2:
+        payload["model_config"].pop("mean_init_scale")
     if schema == 1:
         payload.pop("source_schema_version")
         for key in ("actor_type", "time_encoding", "residual_type", "auxiliary_indices",
@@ -295,19 +306,20 @@ def _legacy_payload(path, schema):
     return payload
 
 
-@pytest.mark.parametrize("schema", [1, 2])
+@pytest.mark.parametrize("schema", [1, 2, 3])
 def test_legacy_source_one_and_metadata_survive_migration_and_export(tmp_path, schema):
     path = tmp_path / "legacy.pt"
     payload = _legacy_payload(path, schema)
     torch.save(payload, path)
     model, trainer, update, metadata = load_checkpoint(path)
     assert model.config.mean_init_scale == 1.0
+    assert model.config.readout_type == "query"
     assert model.checkpoint_source_schema_version == 1
     assert metadata == payload["metadata"]
     migrated = tmp_path / "migrated.pt"
     save_checkpoint(migrated, model, trainer, update, metadata)
     current = torch.load(migrated, weights_only=True)
-    assert current["schema_version"] == 3 and current["source_schema_version"] == 1
+    assert current["schema_version"] == 4 and current["source_schema_version"] == 1
     _assert_tree_equal(current["model_state"], payload["model_state"])
     assert load_checkpoint(migrated)[3] == metadata
     pytest.importorskip("onnx")
@@ -317,9 +329,9 @@ def test_legacy_source_one_and_metadata_survive_migration_and_export(tmp_path, s
     assert sidecar["checkpoint"]["source_schema_version"] == 1
 
 
-@pytest.mark.parametrize("schema", [1, 2])
+@pytest.mark.parametrize("schema", [1, 2, 3])
 @pytest.mark.parametrize("mutation", [
-    lambda p: p["model_config"].update(mean_init_scale=1.0),
+    lambda p: p["model_config"].update(readout_type="query"),
     lambda p: p["model_config"].update(unknown=1),
     lambda p: p["model_config"].pop("initial_std"),
     lambda p: p["ppo_config"].update(unknown=1),
@@ -336,8 +348,8 @@ def test_legacy_migration_requires_exact_original_fields(tmp_path, schema, mutat
     assert torch.equal(torch.get_rng_state(), rng)
 
 
-@pytest.mark.parametrize("source", [0, 4, True, "2", None])
-def test_schema_three_requires_valid_source_schema(tmp_path, source):
+@pytest.mark.parametrize("source", [0, 5, True, "2", None])
+def test_current_schema_requires_valid_source_schema(tmp_path, source):
     path = tmp_path / "checkpoint.pt"
     model = ActorCritic(_config({}))
     save_checkpoint(path, model, PPOTrainer(model, PPOConfig()), 0, {})

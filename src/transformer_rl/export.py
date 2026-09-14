@@ -89,11 +89,17 @@ def _verification_cases(config: ModelConfig) -> list[tuple[str, HistoryBatch]]:
     padding = _synthetic_history(
         config, [1, max(1, config.history_length // 2), config.history_length]
     )
-    reset = _synthetic_history(config, [0, 1, config.history_length])
+    reset = _synthetic_history(
+        config, [1 if config.readout_type == "last" else 0, 1, config.history_length]
+    )
     poisoned = reset.clone()
     poisoned.frames[~poisoned.valid] = float("nan")
     poisoned.times[~poisoned.valid] = float("inf")
     changed_command = replace(full, command=full.command + 0.7)
+    if config.readout_type == "last":
+        changed_command = changed_command.clone()
+        start = config.proprio_dim
+        changed_command.frames[:, -1, start : start + config.command_dim] = changed_command.command
     irregular = full.clone()
     age = irregular.now[:, None] - irregular.times
     irregular.times.copy_(irregular.now[:, None] - 3 * age)
@@ -234,6 +240,18 @@ def export_policy(checkpoint_path: str | Path, output_path: str | Path) -> dict:
     import onnx
 
     graph = onnx.load_model_from_string(data)
+    if config.readout_type == "last":
+        # The separate command is a checked-API consistency assertion, not a
+        # second computational command path. Preserve the common deployment
+        # signature explicitly instead of injecting dummy arithmetic in the actor.
+        inputs = {item.name: item for item in graph.graph.input}
+        if "command" not in inputs:
+            inputs["command"] = onnx.helper.make_tensor_value_info(
+                "command", onnx.TensorProto.FLOAT, ["batch", config.command_dim]
+            )
+        del graph.graph.input[:]
+        graph.graph.input.extend(inputs[name] for name in _INPUT_NAMES)
+        data = graph.SerializeToString()
     onnx.checker.check_model(graph)
     if any(any(name in item.name for name in ("critic", "log_std", "auxiliary_head"))
            for item in graph.graph.initializer):
@@ -297,6 +315,17 @@ def export_policy(checkpoint_path: str | Path, output_path: str | Path) -> dict:
     }
     if config.actor_type != "transformer" or config.time_encoding != "elapsed":
         sidecar["time_encoding"] = actor.describe()["time_encoding"]
+    if config.readout_type == "last":
+        sidecar["history_contract"].update({
+            "order": "oldest to newest, left padding, valid current complete frame required last",
+            "valid_times": "strictly increasing and <= now; last frame time must equal now exactly",
+            "reset": "caller clears reset environments then inserts one valid current frame; empty history unsupported",
+            "command": "last frame command must equal separate command exactly; update both on command changes; never rewrite older frames",
+            "validation": "caller must enforce these preconditions before unchecked ONNX/tensor calls",
+        })
+        sidecar["inputs"][3]["semantics"] = (
+            "contract-only input; must equal last frame command; graph computes from frame fields"
+        )
     sidecar_text = json.dumps(sidecar, indent=2, ensure_ascii=False, allow_nan=False)
     sidecar_bytes = (sidecar_text + "\n").encode("utf-8")
     _publish_new_files({output_path: data, sidecar_path: sidecar_bytes})
