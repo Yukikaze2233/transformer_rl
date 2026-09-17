@@ -208,6 +208,12 @@ def test_schema_one_exact_default_migration_and_adam_order(tmp_path):
     payload = torch.load(path, weights_only=True)
     payload["schema_version"] = 1
     payload.pop("source_schema_version")
+    from transformer_rl.checkpoint import _V5_MODEL_DEFAULTS, _V5_PPO_DEFAULTS
+    payload.pop("estimator_optimizer_state")
+    for key in _V5_MODEL_DEFAULTS:
+        payload["model_config"].pop(key)
+    for key in _V5_PPO_DEFAULTS:
+        payload["ppo_config"].pop(key)
     for name in ("actor_type", "time_encoding", "residual_type", "auxiliary_indices",
                  "baseline_hidden", "gru_hidden", "mean_init_scale", "readout_type"):
         payload["model_config"].pop(name)

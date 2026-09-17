@@ -273,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     evaluate.add_argument("--settle-steps", type=_nonnegative_int, default=200)
     evaluate.add_argument("--min-steady-samples", type=_positive_int, default=200)
     evaluate.add_argument("--output", type=Path, required=True)
+    evaluate.add_argument("--trace-output", type=Path, help="New NPZ file for PRE-reset physical trajectories")
     args = parser.parse_args(argv)
     try:
         if args.operation == "export":
@@ -285,6 +286,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise FileExistsError("evaluation output already exists")
             if not args.output.parent.is_dir():
                 raise FileNotFoundError("evaluation output parent does not exist")
+            if args.trace_output is not None and args.trace_output.absolute() == args.output.absolute():
+                raise ValueError("trace and evaluation report paths must be distinct")
             model_config, _, environment = load_config(args.config)
             model, _, _, _ = load_checkpoint(args.checkpoint)
             if model.config != model_config:
@@ -292,7 +295,8 @@ def main(argv: list[str] | None = None) -> int:
             result = evaluate_policy(args.checkpoint, _factory(args.env_factory), environment,
                                      args.steps, args.seed, args.device, args.action_clip,
                                      settle_steps=args.settle_steps,
-                                     min_steady_samples=args.min_steady_samples)
+                                     min_steady_samples=args.min_steady_samples,
+                                     **({"trace_output": args.trace_output} if args.trace_output else {}))
             _write_json(args.output, result)
         else:
             model_config, ppo_config, environment = (load_config(args.config) if args.config

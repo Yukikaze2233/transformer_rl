@@ -164,7 +164,7 @@ def test_scaled_checkpoint_adam_roundtrip_and_export(tmp_path, variant, scale):
     metadata = {"source_schema": {"version": "user metadata", "nested": [1, None]}}
     save_checkpoint(path, model, trainer, 1, metadata)
     payload = torch.load(path, weights_only=True)
-    assert payload["schema_version"] == payload["source_schema_version"] == 4
+    assert payload["schema_version"] == payload["source_schema_version"] == 5
     assert payload["model_config"]["mean_init_scale"] == scale
     restored, resumed, update, restored_metadata = load_checkpoint(path)
     assert update == 1 and restored_metadata == metadata and restored.config == config
@@ -176,7 +176,7 @@ def test_scaled_checkpoint_adam_roundtrip_and_export(tmp_path, variant, scale):
     assert torch.equal(torch.get_rng_state(), rng)
     sidecar = json.loads(Path(result["sidecar_path"]).read_text())
     assert sidecar["model_config"]["mean_init_scale"] == scale
-    assert sidecar["checkpoint"]["source_schema_version"] == 4
+    assert sidecar["checkpoint"]["source_schema_version"] == 5
     initialization = sidecar["actor"]["mean_initialization"]
     assert initialization == model.actor.describe()["mean_initialization"]
     assert initialization["scale"] == scale
@@ -228,10 +228,8 @@ def test_historical_defaults_weights_mean_rng_and_next_adam_step_are_exact(
 ):
     reference = schema_reference
     config = replace(_config(variant), mean_init_scale=reference.mean_init_scale)
-    old_arguments = asdict(config)
-    old_arguments.pop("readout_type")
-    if reference.schema == 2:
-        old_arguments.pop("mean_init_scale")
+    old_arguments = {name: value for name, value in asdict(config).items()
+                     if name in reference.config.ModelConfig.__dataclass_fields__}
     rng = torch.get_rng_state().clone()
     old_model = reference.model.ActorCritic(reference.config.ModelConfig(**old_arguments))
     expected_rng = torch.get_rng_state().clone()
@@ -276,7 +274,7 @@ def test_historical_defaults_weights_mean_rng_and_next_adam_step_are_exact(
     migrated = tmp_path / "migrated.pt"
     save_checkpoint(migrated, restored, resumed, 2, restored_metadata)
     payload = torch.load(migrated, weights_only=True)
-    assert payload["schema_version"] == 4 and payload["source_schema_version"] == reference.schema
+    assert payload["schema_version"] == 5 and payload["source_schema_version"] == reference.schema
     assert payload["metadata"] == metadata
     _assert_tree_equal(load_checkpoint(migrated)[0].state_dict(), old_model.state_dict())
     pytest.importorskip("onnx")
@@ -294,6 +292,12 @@ def _legacy_payload(path, schema):
     payload = torch.load(path, weights_only=True)
     payload["schema_version"] = schema
     payload["source_schema_version"] = 1
+    from transformer_rl.checkpoint import _V5_MODEL_DEFAULTS, _V5_PPO_DEFAULTS
+    payload.pop("estimator_optimizer_state")
+    for key in _V5_MODEL_DEFAULTS:
+        payload["model_config"].pop(key)
+    for key in _V5_PPO_DEFAULTS:
+        payload["ppo_config"].pop(key)
     payload["model_config"].pop("readout_type")
     if schema <= 2:
         payload["model_config"].pop("mean_init_scale")
@@ -319,7 +323,7 @@ def test_legacy_source_one_and_metadata_survive_migration_and_export(tmp_path, s
     migrated = tmp_path / "migrated.pt"
     save_checkpoint(migrated, model, trainer, update, metadata)
     current = torch.load(migrated, weights_only=True)
-    assert current["schema_version"] == 4 and current["source_schema_version"] == 1
+    assert current["schema_version"] == 5 and current["source_schema_version"] == 1
     _assert_tree_equal(current["model_state"], payload["model_state"])
     assert load_checkpoint(migrated)[3] == metadata
     pytest.importorskip("onnx")
@@ -348,7 +352,7 @@ def test_legacy_migration_requires_exact_original_fields(tmp_path, schema, mutat
     assert torch.equal(torch.get_rng_state(), rng)
 
 
-@pytest.mark.parametrize("source", [0, 5, True, "2", None])
+@pytest.mark.parametrize("source", [0, 6, True, "2", None])
 def test_current_schema_requires_valid_source_schema(tmp_path, source):
     path = tmp_path / "checkpoint.pt"
     model = ActorCritic(_config({}))

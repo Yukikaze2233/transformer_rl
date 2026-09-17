@@ -1,0 +1,132 @@
+{
+  "evidence_version": 1,
+  "date": "2026-09-17",
+  "scope": "CPU weights-only strict loading and byte-exact state audit; no real-model forward, optimizer step, export, training or simulation",
+  "root": "artifacts/recovered/architecture-16m-20260915T0540/recovery-post-stop-20260917T0900Z/extracted/study",
+  "before_stop_comparison": {
+    "root": "artifacts/recovered/architecture-16m-20260915T0540/20260915T075822Z-8f22/extracted/study",
+    "final_977_files_with_matching_sha256": 12
+  },
+  "environment": {
+    "python": "/home/yukikaze/isaacsim60-venv/bin/python",
+    "CUDA_VISIBLE_DEVICES": "",
+    "torch_version": "2.11.0+cu128",
+    "torch_git_version": "70d99e998b4955e0049d13a98d77ae1b14db1f45",
+    "cpu_capability": "AVX2"
+  },
+  "implementation": {
+    "checkpoint_schema_version": 4,
+    "compatibility": "Only actor.time_frequencies: discrete float32 recipe predecessor/center/successor cast to stored dtype; exact exp(0), positive nonincreasing values; all other buffers exact",
+    "checkpoint_py_sha256": "40ff152caa335fffe821c84b40fe1ea46046360a37f40f4391ef3cb95ef6e71b",
+    "test_frequency_portability_py_sha256": "b8838e9bcacf4a82f2621d9ec21d026aabe7b1732b05e0f70bc2c831875552ed",
+    "saved_buffers_replaced": false,
+    "buffer_hash_metadata_added": false
+  },
+  "tests": {
+    "regression_files": [
+      "tests/test_frequency_portability.py",
+      "tests/test_checkpoint.py",
+      "tests/test_preprocessing_checkpoint.py",
+      "tests/test_variants.py",
+      "tests/test_export.py",
+      "tests/test_readout.py",
+      "tests/test_initialization.py",
+      "tests/test_behavior_consistency.py"
+    ],
+    "regression_passed": 435,
+    "regression_skipped": {"opt_in_real_audit": 14, "cuda_unavailable": 9},
+    "real_audit_test": "tests/test_frequency_portability.py::test_recovered_checkpoint_state_only",
+    "real_audit_passed": 14,
+    "synthetic_onnx_saved_frequency_initializer_bitwise_equal": true
+  },
+  "assertions_passed_for_each_of_14_files": {
+    "strict_loader": true,
+    "weights_only_and_cpu_map_location": true,
+    "model_state_bitwise_equal": true,
+    "optimizer_state_bitwise_equal": true,
+    "metadata_and_update_equal": true,
+    "cpu_rng_unchanged": true,
+    "file_sha256_unchanged": true,
+    "cuda_not_initialized": true,
+    "forward_ppo_update_and_adam_step_blocked": true
+  },
+  "frequency_observation_for_each_of_14_files": {
+    "different_indices_from_local_recipe": [3, 23],
+    "max_abs_difference": 2.9802322387695312e-8,
+    "within_discrete_one_float32_step_set": true
+  },
+  "checkpoints": [
+    {
+      "path": "run/jobs/last_token_attention/seed_1011/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "b926e56982469b99e7b5362038d903b8bb6cee417fb7c5591920584c86e70c58",
+      "update": 977, "model_tensors": 41, "optimizer_entries": 39
+    },
+    {
+      "path": "run/jobs/last_token_attention/seed_1022/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "dc92d6be4b7b020691bc69be5949902a8ac618b2d0180492b53a214468b48a2b",
+      "update": 977, "model_tensors": 41, "optimizer_entries": 39
+    },
+    {
+      "path": "run/jobs/last_token_attention/seed_1033/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "cc776a0842cc616017bb0377b0b78d9142ed6761a9d6425428e04b622b47fb50",
+      "update": 977, "model_tensors": 41, "optimizer_entries": 39
+    },
+    {
+      "path": "run/jobs/time_attention/seed_1011/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "dbafa69e21ef426744cfcf2944df0842c8a772e3fabe76c9a173f9dd9b9aae48",
+      "update": 977, "model_tensors": 44, "optimizer_entries": 42
+    },
+    {
+      "path": "run/jobs/time_attention/seed_1022/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "ed0788a12609bb8194c88d22ad132781249575ad86e2f124693fd115dbb136a1",
+      "update": 977, "model_tensors": 44, "optimizer_entries": 42
+    },
+    {
+      "path": "run/jobs/time_attention/seed_1033/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "ff8b587e292e5e2397fc74b364a5bb31fc5ab83d440ccb82b1bfb1d473d0faca",
+      "update": 977, "model_tensors": 44, "optimizer_entries": 42
+    },
+    {
+      "path": "run/jobs/index_attention/seed_1011/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "77faf91ff39c1943bbb0d9e22df8c77bfa0c5e7c331b5be9ecc127bd8afcfc52",
+      "update": 977, "model_tensors": 44, "optimizer_entries": 42
+    },
+    {
+      "path": "run/jobs/index_attention/seed_1022/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "b9323f2b14555b1d74019710ed1958f0ed9bc7f5a3acdd2b6a4255f225dbdec9",
+      "update": 977, "model_tensors": 44, "optimizer_entries": 42
+    },
+    {
+      "path": "run/jobs/index_attention/seed_1033/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "2452c13557e025bfe89f7977d7ae10084296bffca0922bbe36a366c2cd72fc1b",
+      "update": 977, "model_tensors": 44, "optimizer_entries": 42
+    },
+    {
+      "path": "run/jobs/gated_attention/seed_1011/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "62b5cddb24e6b905f06944c64b7e4be7af3cd8e60c072a35818a9107efbc9ff1",
+      "update": 977, "model_tensors": 80, "optimizer_entries": 78
+    },
+    {
+      "path": "run/jobs/gated_attention/seed_1022/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "1f4639e12beb682b579a28ce187e88d59b50150d80352d83d6573bebdd42862f",
+      "update": 977, "model_tensors": 80, "optimizer_entries": 78
+    },
+    {
+      "path": "run/jobs/gated_attention/seed_1033/train/checkpoints/checkpoint_000977.pt",
+      "sha256": "174f6095321ca78a56877046847efb48d8643871089c684c50d514342a0314f4",
+      "update": 977, "model_tensors": 80, "optimizer_entries": 78
+    },
+    {
+      "path": "run/jobs/supervised_attention/seed_1011/train/checkpoints/checkpoint_000789.pt",
+      "sha256": "2510b96c79f7c9e935edcbe1dc86461a882b2c544dc24ae4e792be2e39b17f23",
+      "update": 789, "model_tensors": 46, "optimizer_entries": 44,
+      "matches_user_stop_sha256": true
+    },
+    {
+      "path": "run/jobs/supervised_attention/seed_1022/train/checkpoints/checkpoint_000732.pt",
+      "sha256": "2c6a28106dd88913d3a83e0fc2cb44d3d24f3c953fe6541fd8a1022fddc3f0fc",
+      "update": 732, "model_tensors": 46, "optimizer_entries": 44,
+      "matches_user_stop_sha256": true
+    }
+  ]
+}

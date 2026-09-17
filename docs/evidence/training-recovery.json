@@ -1,0 +1,5031 @@
+{
+  "schema_version": 1,
+  "integrity": {
+    "verified_files": 729,
+    "verified_bytes": 313976774,
+    "archive": {
+      "path": "snapshot.tar.gz",
+      "size": 226433945,
+      "sha256": "b798cdfe296da6ee2524549cad0e3d0cdefcd85a991d955e93197f6949d1eb92"
+    },
+    "manifest_sha256": "4d8ba084fb983eb4c1e4c89df1c2851d24339fc4cddd393fc02919628f393b4a",
+    "recovery_receipt_sha256": "e725655231cd0c29da0b9938b61fc04434303631c2219b7160c78cb3fb33fc14",
+    "skipped": [],
+    "partial_jsonl_tails": [],
+    "snapshot_start": "2026-09-15T07:58:13.487549+00:00",
+    "snapshot_end": "2026-09-15T07:58:20.347381+00:00",
+    "snapshot_semantics": "per-file open/fstat bounded prefixes; not a global atomic snapshot",
+    "snapshot_queue_counts": {
+      "completed": 12,
+      "running": 2,
+      "queued": 7
+    },
+    "path_mapping": {
+      "remote_prefix": "/home/kaiser/robot-rl-sim60/architecture-16m-20260915T0540",
+      "local_prefix": "/home/yukikaze/Documents/workspace/transformer_rl/artifacts/recovered/architecture-16m-20260915T0540/20260915T075822Z-8f22/extracted/study"
+    }
+  },
+  "plan_sha256": "7a37cad280f7676b4103c0ec883bf1c8ee16e41adf72a9ae9c843f03ea90ed57",
+  "source_commit": "80a45b40c9afc7e6e3356ccbb6fa15f8933a3970",
+  "package_sha256": "e6ef86cae8177052999b773d2615af5edaa2c46774a9942548fa0f47242af5c7",
+  "environment": {
+    "identity": {
+      "contract_sha256": "667865de8352e67cff6720af9a142d00ff9b980132b27e4993a25c8e09d3d22e",
+      "asset_manifest_sha256": "df5ca7693022b7a4c68cb1dc823482291f265e3addc8c4870fb3b0b2ab364886",
+      "source_sha256": "fa4c140c0f72bcaad0b089fa378942ee4087faa121d92289aaa6823889a7be40",
+      "usd_seed_sha256": null,
+      "adapter_sha256": "e04ac8afe81777b435897bbb60ad309651429433f851f21938a95dc72e6c8ae9",
+      "worker_sha256": "58181e8136a0747ea0d9745e7c6dff2de1206bfca295c381d49edea75a80b02b"
+    },
+    "task_source_files_verified": 53,
+    "asset_files_verified": 68,
+    "contact": "rigid_body_net_force_history_peak_not_ground_pair",
+    "signal_semantics": {
+      "units": {
+        "height_error": "m",
+        "vx_error": "m/s",
+        "wz_error": "rad/s",
+        "angular_velocity_x": "rad/s",
+        "angular_velocity_y": "rad/s",
+        "leg_target_0": "rad",
+        "leg_target_1": "rad",
+        "leg_target_2": "rad",
+        "leg_target_3": "rad",
+        "wheel_target_0": "rad/s",
+        "wheel_target_1": "rad/s",
+        "effort_0": "Nm",
+        "effort_1": "Nm",
+        "effort_2": "Nm",
+        "effort_3": "Nm",
+        "effort_4": "Nm",
+        "effort_5": "Nm"
+      },
+      "sampling": "after_reward_before_reset_every_policy_step_in_all_modes",
+      "time": "float64_seconds_adapter_tick_plus_one_times_step_dt_at_capture",
+      "order": "source_leg_targets_wheel_targets_torques_column_order",
+      "effort": "last_physics_substep_effort_target_at_policy_boundary",
+      "bandwidth": "one_sample_per_step_dt_not_full_200Hz_trace_or_hardware_PID"
+    }
+  },
+  "verification": {
+    "checkpoint_weights_only_deserialized_cpu": 14,
+    "tensor_and_adam_schema_validated": 14,
+    "strict_checkpoint_loader_passed": 0,
+    "local_torch_version": "2.11.0+cu128",
+    "local_cpu_capability": "AVX2",
+    "evaluation_files_verified": 84,
+    "failures": [
+      {
+        "job": "last_token_attention/seed_1011",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "last_token_attention/seed_1022",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "last_token_attention/seed_1033",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "time_attention/seed_1011",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "time_attention/seed_1022",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "time_attention/seed_1033",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "index_attention/seed_1011",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "index_attention/seed_1022",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "index_attention/seed_1033",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "gated_attention/seed_1011",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "gated_attention/seed_1022",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "gated_attention/seed_1033",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "supervised_attention/seed_1011",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      },
+      {
+        "job": "supervised_attention/seed_1022",
+        "scope": "strict_checkpoint_loader",
+        "error": "model_state.actor.time_frequencies differs from configured preprocessing"
+      }
+    ]
+  },
+  "jobs": [
+    {
+      "job": "last_token_attention/seed_1011",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/last_token_attention/seed_1011/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "b926e56982469b99e7b5362038d903b8bb6cee417fb7c5591920584c86e70c58",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 118349,
+        "adam_state_entries": 39,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7815.0,
+          7815.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "last_token_attention/seed_1022",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/last_token_attention/seed_1022/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "dc92d6be4b7b020691bc69be5949902a8ac618b2d0180492b53a214468b48a2b",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 118349,
+        "adam_state_entries": 39,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7813.0,
+          7813.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "last_token_attention/seed_1033",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/last_token_attention/seed_1033/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "cc776a0842cc616017bb0377b0b78d9142ed6761a9d6425428e04b622b47fb50",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 118349,
+        "adam_state_entries": 39,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7814.0,
+          7814.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "time_attention/seed_1011",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/time_attention/seed_1011/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "dbafa69e21ef426744cfcf2944df0842c8a772e3fabe76c9a173f9dd9b9aae48",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 118669,
+        "adam_state_entries": 42,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7816.0,
+          7816.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "time_attention/seed_1022",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/time_attention/seed_1022/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "ed0788a12609bb8194c88d22ad132781249575ad86e2f124693fd115dbb136a1",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 118669,
+        "adam_state_entries": 42,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7794.0,
+          7794.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "time_attention/seed_1033",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/time_attention/seed_1033/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "ff8b587e292e5e2397fc74b364a5bb31fc5ab83d440ccb82b1bfb1d473d0faca",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 118669,
+        "adam_state_entries": 42,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7816.0,
+          7816.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "index_attention/seed_1011",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/index_attention/seed_1011/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "77faf91ff39c1943bbb0d9e22df8c77bfa0c5e7c331b5be9ecc127bd8afcfc52",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 118669,
+        "adam_state_entries": 42,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7812.0,
+          7812.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "index_attention/seed_1022",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/index_attention/seed_1022/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "b9323f2b14555b1d74019710ed1958f0ed9bc7f5a3acdd2b6a4255f225dbdec9",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 118669,
+        "adam_state_entries": 42,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7814.0,
+          7814.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "index_attention/seed_1033",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/index_attention/seed_1033/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "2452c13557e025bfe89f7977d7ae10084296bffca0922bbe36a366c2cd72fc1b",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 118669,
+        "adam_state_entries": 42,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7804.0,
+          7804.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "gated_attention/seed_1011",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/gated_attention/seed_1011/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "62b5cddb24e6b905f06944c64b7e4be7af3cd8e60c072a35818a9107efbc9ff1",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 217741,
+        "adam_state_entries": 78,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7804.0,
+          7804.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "gated_attention/seed_1022",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/gated_attention/seed_1022/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "1f4639e12beb682b579a28ce187e88d59b50150d80352d83d6573bebdd42862f",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 217741,
+        "adam_state_entries": 78,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7816.0,
+          7816.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "gated_attention/seed_1033",
+      "snapshot_status": "completed",
+      "checkpoint": {
+        "path": "study/run/jobs/gated_attention/seed_1033/train/checkpoints/checkpoint_000977.pt",
+        "sha256": "174f6095321ca78a56877046847efb48d8643871089c684c50d514342a0314f4",
+        "update": 977,
+        "transitions": 16007168,
+        "schema_version": 4,
+        "model_parameters": 217741,
+        "adam_state_entries": 78,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          7816.0,
+          7816.0
+        ]
+      },
+      "evaluation_files_verified": 7
+    },
+    {
+      "job": "supervised_attention/seed_1011",
+      "snapshot_status": "partial",
+      "checkpoint": {
+        "path": "study/run/jobs/supervised_attention/seed_1011/train/checkpoints/checkpoint_000700.pt",
+        "sha256": "cff40ab6b277be1d63e9f4ff9a72ca47d6f4f0810381d0706a2d5778e68877bd",
+        "update": 700,
+        "transitions": 11468800,
+        "schema_version": 4,
+        "model_parameters": 118864,
+        "adam_state_entries": 44,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          5600.0,
+          5600.0
+        ]
+      },
+      "excluded_from_equal_budget_comparison": true
+    },
+    {
+      "job": "supervised_attention/seed_1022",
+      "snapshot_status": "partial",
+      "checkpoint": {
+        "path": "study/run/jobs/supervised_attention/seed_1022/train/checkpoints/checkpoint_000600.pt",
+        "sha256": "256a4354a084eb2232106d0099f52cc5d02d8fee537e74f2988ac8b794e9a6ad",
+        "update": 600,
+        "transitions": 9830400,
+        "schema_version": 4,
+        "model_parameters": 118864,
+        "adam_state_entries": 44,
+        "weights_only_deserialized": true,
+        "tensor_and_adam_schema_validated": true,
+        "strict_loader_passed": false,
+        "strict_loader_error": "model_state.actor.time_frequencies differs from configured preprocessing",
+        "buffer_differences": [
+          {
+            "name": "actor.time_frequencies",
+            "different_elements": 2,
+            "max_abs_difference": 2.9802322387695312e-08,
+            "max_relative_difference": 8.729918241696692e-08,
+            "indices": [
+              [
+                3
+              ],
+              [
+                23
+              ]
+            ],
+            "stored_differing_values": [
+              0.4216965138912201,
+              0.0013335214462131262
+            ],
+            "local_differing_values": [
+              0.4216964840888977,
+              0.0013335213297978044
+            ]
+          }
+        ],
+        "adam_step_range": [
+          4800.0,
+          4800.0
+        ]
+      },
+      "excluded_from_equal_budget_comparison": true
+    },
+    {
+      "job": "supervised_attention/seed_1033",
+      "snapshot_status": "not_started",
+      "excluded_from_equal_budget_comparison": true
+    },
+    {
+      "job": "history_mlp/seed_1011",
+      "snapshot_status": "not_started",
+      "excluded_from_equal_budget_comparison": true
+    },
+    {
+      "job": "history_mlp/seed_1022",
+      "snapshot_status": "not_started",
+      "excluded_from_equal_budget_comparison": true
+    },
+    {
+      "job": "history_mlp/seed_1033",
+      "snapshot_status": "not_started",
+      "excluded_from_equal_budget_comparison": true
+    },
+    {
+      "job": "history_gru/seed_1011",
+      "snapshot_status": "not_started",
+      "excluded_from_equal_budget_comparison": true
+    },
+    {
+      "job": "history_gru/seed_1022",
+      "snapshot_status": "not_started",
+      "excluded_from_equal_budget_comparison": true
+    },
+    {
+      "job": "history_gru/seed_1033",
+      "snapshot_status": "not_started",
+      "excluded_from_equal_budget_comparison": true
+    }
+  ],
+  "aggregation": "per scenario; sample SD (ddof=1) over independent training seeds",
+  "derivative_aggregation": "sqrt(mean(channel derivative_rms squared)); equal channel support; legs/wheels/effort separated",
+  "post_snapshot_status": {
+    "evidence_source": "parent-agent handoff, not the pre-stop snapshot",
+    "stopped_at": "2026-09-15T16:02:56+08:00",
+    "abort_reason": "signal_SIGTERM",
+    "completed": 12,
+    "manually_stopped": 2,
+    "never_started": 7,
+    "all_batch_pids_exited": true,
+    "untransferred_final_updates": {
+      "supervised_attention/seed_1011": 789,
+      "supervised_attention/seed_1022": 732
+    },
+    "transfer_blocker": "SSH connection reset reported by parent; no remote access attempted"
+  },
+  "limitations": [
+    "snapshot is per-file, pre-stop, not globally atomic",
+    "partial supervised checkpoints are 700/600, not final stopped 789/732",
+    "no same-budget MLP/GRU results; supervised incomplete",
+    "one evaluation seed, three training seeds per complete variant",
+    "net force has no ground-pair identity",
+    "planar speed, tilt, force and MAE include transients and resets",
+    "derivatives sample policy boundaries, not full physics-rate traces",
+    "CPU load validates model and Adam state, not inference or physical quality"
+  ],
+  "summaries": [
+    {
+      "variant": "last_token_attention",
+      "scenario": "stand_low",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -66.9668545072965,
+          "std": 57.210043897446894
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02597751228056904,
+          "std": 0.0207612144715138
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.0014891599692609917,
+          "std": 0.004225462817040818
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.01157605035212086,
+          "std": 0.020193189591684264
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 66.725351030007,
+          "std": 56.68580937012645
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.008536478314973162,
+          "std": 0.0030813297269973363
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.13278030893410322,
+          "std": 0.1445276575388774
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 76.13975040149688,
+          "std": 43.21582099409015
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.006454298515983888,
+          "std": 0.0010732999848458214
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.021116661471610617,
+          "std": 0.025596974461793508
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.03526144326583017,
+          "std": 0.009406311577821982
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.017118053519945605,
+          "std": 0.017456358251018027
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.11164646996806692,
+          "std": 0.14447588852715704
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.869791632763143,
+          "std": 1.8878072720424277
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.4093551545041008,
+          "std": 1.1693841043977429
+        }
+      }
+    },
+    {
+      "variant": "last_token_attention",
+      "scenario": "stand_mid",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -86.94662110683637,
+          "std": 57.265168271427676
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02693221833665631,
+          "std": 0.021317154868054994
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.0014247405758688483,
+          "std": 0.00417780924193704
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.011361895572872838,
+          "std": 0.02026053054448312
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 86.48697170087446,
+          "std": 56.87859496107465
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.008412799511913666,
+          "std": 0.0031698148669389373
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.13204657157875285,
+          "std": 0.1444755299713928
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 75.58534868329764,
+          "std": 43.52561959838882
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.006403143400743223,
+          "std": 0.0011957113553674444
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.021142009952558813,
+          "std": 0.025403081977766938
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.032731047542823945,
+          "std": 0.004998844368887207
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.015894135564165426,
+          "std": 0.016579017999356998
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.10486534661949674,
+          "std": 0.13634971481746255
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.724327783136798,
+          "std": 1.7763608902031471
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.353815263130157,
+          "std": 1.140283741527979
+        }
+      }
+    },
+    {
+      "variant": "last_token_attention",
+      "scenario": "stand_high",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -106.83508138093816,
+          "std": 57.328189288773544
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.035787277879160403,
+          "std": 0.033720870995226616
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.001643509713948662,
+          "std": 0.003908905736862631
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.008756850554350899,
+          "std": 0.015470278347495797
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 106.25080225616693,
+          "std": 57.03230849573916
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.00786596473377358,
+          "std": 0.0020851374175959404
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.13172028611057127,
+          "std": 0.14342695729884916
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 76.37939008502165,
+          "std": 43.18413463415034
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.006280466715124324,
+          "std": 0.0009838739518816641
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.018604203081120242,
+          "std": 0.021244708257425245
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.029749180387336916,
+          "std": 0.0001465766602903485
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.014278840837877187,
+          "std": 0.014079174071822343
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.09415602582239041,
+          "std": 0.11818718711852953
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.5220380995469485,
+          "std": 1.3955298084430259
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.2473519129702009,
+          "std": 0.9995614843790996
+        }
+      }
+    },
+    {
+      "variant": "last_token_attention",
+      "scenario": "forward",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -87.33574497277579,
+          "std": 57.94730520931168
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.011941079382891488,
+          "std": 0.009182712031999584
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.5018656060868543,
+          "std": 0.0024073912664573094
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.002412844710559045,
+          "std": 0.004979762021212708
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 86.86621514894068,
+          "std": 57.538190730945864
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.006841444094285066,
+          "std": 0.0013385009924974521
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1306538969852845,
+          "std": 0.13259492356332062
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 74.46026118352016,
+          "std": 44.52051830104264
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.5023791270609945,
+          "std": 0.0011170683277050247
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.013708169165381411,
+          "std": 0.010865938720498921
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.020257392088355117,
+          "std": 0.005447928989016816
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.011571005371980476,
+          "std": 0.013874490331524752
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1021012290413088,
+          "std": 0.13943180818764817
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.110610676075211,
+          "std": 1.0305894645736278
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.2888968285776288,
+          "std": 1.1167991918591982
+        }
+      }
+    },
+    {
+      "variant": "last_token_attention",
+      "scenario": "reverse",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -86.53796536336127,
+          "std": 56.87245630221229
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02258884607219705,
+          "std": 0.029026806145610283
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.49869015520414034,
+          "std": 0.0036365497268297563
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.009857942345013146,
+          "std": 0.018080009687228744
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 86.07654142534982,
+          "std": 56.51261279407719
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.007921873188747364,
+          "std": 0.0036637736890453533
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.14095046743300432,
+          "std": 0.1436777362219807
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 68.09051078816255,
+          "std": 39.13900850152406
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.4978621511310339,
+          "std": 0.0019863494226275897
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02083865164442032,
+          "std": 0.02338890149033307
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.020085145542310782,
+          "std": 0.0047920383904460195
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02726687363970026,
+          "std": 0.03876337202307183
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.14930131864410165,
+          "std": 0.23715614548469235
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 2.5824182887559872,
+          "std": 3.760760685860575
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.796545566571554,
+          "std": 2.68314621932523
+        }
+      }
+    },
+    {
+      "variant": "last_token_attention",
+      "scenario": "turn_left",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -85.02282008662615,
+          "std": 56.44550125028648
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.03648178068398346,
+          "std": 0.05485646022469257
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.0019106241621503015,
+          "std": 0.0016658048911170566
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.9972751163345193,
+          "std": 0.005392858163056154
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 84.57059656642377,
+          "std": 56.07144717982001
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.005851576120448651,
+          "std": 0.0021701697615740135
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.13400611818032726,
+          "std": 0.15133861663818474
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 74.82638080026706,
+          "std": 44.70463541845883
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.004927088118385275,
+          "std": 0.002004749192542459
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.9987022724586229,
+          "std": 0.009864273648041016
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02307410664053168,
+          "std": 0.0051366266716179
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.014821647504653628,
+          "std": 0.018085940503978097
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.13367087987534382,
+          "std": 0.19040420746646922
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.2362755542733022,
+          "std": 1.1146960485682555
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.416923392514844,
+          "std": 1.182657378056326
+        }
+      }
+    },
+    {
+      "variant": "last_token_attention",
+      "scenario": "turn_right",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -88.8685184143165,
+          "std": 57.86759108375074
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.12684005086228864,
+          "std": 0.14258605538223484
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.0014845452509078955,
+          "std": 0.003873688394052344
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.9893663626648064,
+          "std": 0.01734287275147149
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 88.37227370589972,
+          "std": 57.491080269748174
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.008192590397862508,
+          "std": 0.0029146381951478083
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1343959166842008,
+          "std": 0.13638591574981523
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 71.9887543061475,
+          "std": 45.68211690738694
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.006281399098217738,
+          "std": 0.0010649174894662992
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.9914991136603057,
+          "std": 0.01947006241010197
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.022879951279409096,
+          "std": 0.004946476029343971
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02545428020561423,
+          "std": 0.030928640581713972
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.17100724284085486,
+          "std": 0.2498845393634972
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 2.4994301668854546,
+          "std": 2.9325096883196395
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.9881848812555885,
+          "std": 2.3539265949996926
+        }
+      }
+    },
+    {
+      "variant": "time_attention",
+      "scenario": "stand_low",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -50.940247880367735,
+          "std": 43.53426187826827
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.16654676310459313,
+          "std": 0.25520562287163795
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0023549328670917284,
+          "std": 0.002222045622425614
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.0057928586775344475,
+          "std": 0.010598218778998523
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 50.748782967838146,
+          "std": 43.231737966958995
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0107431965793264,
+          "std": 0.007996900328712689
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.2588905548673744,
+          "std": 0.21541402116194103
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 652.2477992877563,
+          "std": 896.7945397804734
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.006398369676812213,
+          "std": 0.002913073837746033
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.022245916312627134,
+          "std": 0.008335738975607498
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.032513236995825236,
+          "std": 0.00686502114450523
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.007572817704317277,
+          "std": 0.010493961448088389
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1528431234240814,
+          "std": 0.2510956868533206
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 7.156948278521548,
+          "std": 11.280007590789875
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 4.292164683771569,
+          "std": 6.616579533009582
+        }
+      }
+    },
+    {
+      "variant": "time_attention",
+      "scenario": "stand_mid",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -71.25412668582078,
+          "std": 43.29778060792907
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.2791060579420245,
+          "std": 0.2515681946865814
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.002402037217003726,
+          "std": 0.00860546266034969
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.03034870052321778,
+          "std": 0.04112984834056548
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 70.88843261326353,
+          "std": 43.02741381650192
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.012426491932315969,
+          "std": 0.010555430621660653
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.26709109063756964,
+          "std": 0.21174918640019924
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 628.3719688478709,
+          "std": 856.1960041403795
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.009781848921973799,
+          "std": 0.0081077753408514
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.041913222112860846,
+          "std": 0.03913628667080521
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.027257729877271535,
+          "std": 0.004724384892923951
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.017181177802786364,
+          "std": 0.02831817015116975
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.2075493256920032,
+          "std": 0.35249133467428995
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 7.413361012292845,
+          "std": 11.966290071329322
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8.317840530173225,
+          "std": 13.819616589555368
+        }
+      }
+    },
+    {
+      "variant": "time_attention",
+      "scenario": "stand_high",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -91.36616083181951,
+          "std": 43.28887465335499
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1886830284961269,
+          "std": 0.2665307456500393
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.009522950378038042,
+          "std": 0.020589918888613876
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.06695882432275663,
+          "std": 0.10407298028088922
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 90.90212413823853,
+          "std": 43.036523423418956
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.01691271154318171,
+          "std": 0.01829882352785657
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.26889187417998134,
+          "std": 0.2113274590806805
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 616.9202396581967,
+          "std": 837.2699702765265
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.015604720077384266,
+          "std": 0.01822830759736376
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.07730643414448635,
+          "std": 0.10046519059297615
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.025702467116100403,
+          "std": 0.004495298818221259
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.008729881124039482,
+          "std": 0.013780107541031088
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.08196210912526368,
+          "std": 0.13545391525981237
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 2.8889692203653703,
+          "std": 4.210139279369962
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 3.2794754013720495,
+          "std": 5.072494443873522
+        }
+      }
+    },
+    {
+      "variant": "time_attention",
+      "scenario": "forward",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -70.8643287404397,
+          "std": 43.83565237870938
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.49936955751190576,
+          "std": 0.8233423651341807
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.49657456941415323,
+          "std": 0.0028213356044715404
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0013754134524884742,
+          "std": 0.01632548106738801
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 70.53421336505562,
+          "std": 43.54282614166012
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.01184192135560089,
+          "std": 0.008645287015209058
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.23963164694044584,
+          "std": 0.19630941105491367
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 517.7724851337274,
+          "std": 668.4133315137922
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.49713591947592795,
+          "std": 0.0012487031128385873
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.023474094290580335,
+          "std": 0.010713171147390423
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.015658052199723594,
+          "std": 0.004433376082102402
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.007880451586000321,
+          "std": 0.010975252788898151
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1560148152224973,
+          "std": 0.25434639001182163
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 7.839131944858892,
+          "std": 11.308427712312401
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 4.48223099012966,
+          "std": 6.040249273578215
+        }
+      }
+    },
+    {
+      "variant": "time_attention",
+      "scenario": "reverse",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -72.45427446861952,
+          "std": 43.729579957512286
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.15899550478255856,
+          "std": 0.1482992662944862
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.48551435702961304,
+          "std": 0.026934491161558417
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.07234068572820451,
+          "std": 0.12281578290845437
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 72.07199188135564,
+          "std": 43.45147314067582
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.019974303489879833,
+          "std": 0.026604408741571023
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.27251269333957073,
+          "std": 0.22188294232067501
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 577.4390355920791,
+          "std": 788.2710212551666
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.484935826767236,
+          "std": 0.02849000822390348
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.08083589557728714,
+          "std": 0.12220753289797429
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.014301313829442733,
+          "std": 0.004773002377345179
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.047934193917754726,
+          "std": 0.0807495368105834
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.48392072030809824,
+          "std": 0.8239579383253326
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 11.175717528965402,
+          "std": 17.008328366822457
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 27.129106929950126,
+          "std": 43.87620277901956
+        }
+      }
+    },
+    {
+      "variant": "time_attention",
+      "scenario": "turn_left",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -73.32975169471543,
+          "std": 42.614592794502656
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.37684527547041785,
+          "std": 0.45330908070275155
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.06689528177761767,
+          "std": 0.11067184221423028
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.6628914467088929,
+          "std": 0.5746150692749485
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 72.99067242319386,
+          "std": 42.3127128598676
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.073428156994308,
+          "std": 0.11222717901674421
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.2062376347175256,
+          "std": 0.1458345555922922
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 578.923543805917,
+          "std": 812.2410135993684
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.06903792886830809,
+          "std": 0.10775472374649847
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.6788682204286257,
+          "std": 0.5451368899689989
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02116532912508895,
+          "std": 0.0023702880845435353
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0262355857558236,
+          "std": 0.04122710397595211
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.41134454062818954,
+          "std": 0.6756919330764369
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 11.384056896069957,
+          "std": 17.459835429102057
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 25.051687334255046,
+          "std": 26.721142083435314
+        }
+      }
+    },
+    {
+      "variant": "time_attention",
+      "scenario": "turn_right",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -94.45612326510111,
+          "std": 43.71661814704907
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.2806794709284081,
+          "std": 0.27896055001055975
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.09205494888769104,
+          "std": 0.16024778000009496
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.5386489997967341,
+          "std": 0.797833465364344
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 93.4265547702089,
+          "std": 42.95742234355145
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.10145603290104008,
+          "std": 0.15910202727346104
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.20465966827088658,
+          "std": 0.07405173704291111
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 412.5696894306342,
+          "std": 538.3388035993073
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.09805453772532124,
+          "std": 0.15539835040458091
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.798001958048592,
+          "std": 0.3488043362551062
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.01905042740300875,
+          "std": 0.0003552890866912494
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.03138609589989106,
+          "std": 0.05249501035686
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.4244501164749813,
+          "std": 0.7129179098896676
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 16.860181148677338,
+          "std": 28.072339545181986
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 34.88855903881762,
+          "std": 59.83409148853082
+        }
+      }
+    },
+    {
+      "variant": "index_attention",
+      "scenario": "stand_low",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -61.02054242347708,
+          "std": 40.66705943871599
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.03014410285390196,
+          "std": 0.025939769863165072
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0007157531040523957,
+          "std": 0.001771890184874688
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.003264341932625651,
+          "std": 0.008608618030239462
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 59.29331645245353,
+          "std": 40.632135511550324
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.012890231244396774,
+          "std": 0.00904589557779166
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.18783633906945277,
+          "std": 0.13891305398933929
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 602.0260898156166,
+          "std": 924.3236899309472
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.008886747500565926,
+          "std": 0.005433470503188658
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02554518994472725,
+          "std": 0.01289939287627534
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.032303653049311834,
+          "std": 0.006959316946515148
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.01017835187403871,
+          "std": 0.013966830235016327
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.11240269615281115,
+          "std": 0.15319359408749927
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 5.382111224650395,
+          "std": 8.064683102637668
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 4.280313187637022,
+          "std": 5.723021913110913
+        }
+      }
+    },
+    {
+      "variant": "index_attention",
+      "scenario": "stand_mid",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -81.47575879013603,
+          "std": 40.37549071754975
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.028184624753059214,
+          "std": 0.04345867788586552
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.010688063044841416,
+          "std": 0.0180197420799401
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.05695731789435927,
+          "std": 0.10113129213152636
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 79.72633075434715,
+          "std": 40.31696263031458
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.01874920484165462,
+          "std": 0.018241819276308042
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.19384012447627416,
+          "std": 0.1355661172725048
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 619.2960930865605,
+          "std": 952.8521352117854
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.01728077962360654,
+          "std": 0.018017867755133282
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.07365069841143516,
+          "std": 0.09596562703486344
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02853330515528796,
+          "std": 0.0021665857424199215
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.003745845889113639,
+          "std": 0.0059160738339518945
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.051469977533859644,
+          "std": 0.08258792994008833
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.3780087147534636,
+          "std": 1.7902791080942833
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.1940659732136416,
+          "std": 1.3968464705474397
+        }
+      }
+    },
+    {
+      "variant": "index_attention",
+      "scenario": "stand_high",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -101.91257799943995,
+          "std": 40.37269968662889
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.031779774306945764,
+          "std": 0.05303298753277324
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.009207173165109713,
+          "std": 0.015749958870264334
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.05141721016174722,
+          "std": 0.09015343553074155
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 100.3174436998864,
+          "std": 40.27525415727543
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.018046670063934622,
+          "std": 0.01710467488072922
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.19551138070912566,
+          "std": 0.13301153318462916
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 505.7920932631493,
+          "std": 754.3424302006911
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.016406365331877865,
+          "std": 0.016267971311401477
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.06627676397947693,
+          "std": 0.08641804198224086
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02755145242786966,
+          "std": 0.0021141489264043796
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.016245579876968876,
+          "std": 0.027693559127742694
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.23890792630761412,
+          "std": 0.40859641331393814
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 5.437439704721058,
+          "std": 8.70928896710984
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 7.280082701078998,
+          "std": 12.151133336815406
+        }
+      }
+    },
+    {
+      "variant": "index_attention",
+      "scenario": "forward",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -62.3185508341779,
+          "std": 54.40321184754659
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.018217043662016714,
+          "std": 0.014173944995116112
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.5013123302153963,
+          "std": 0.023230000094686946
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.00017924670000147737,
+          "std": 0.1469312505227889
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 61.96666158208003,
+          "std": 54.06755884725374
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02191100352784403,
+          "std": 0.015777199104247592
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.2471898059960222,
+          "std": 0.22060541107297024
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 636.2668631211519,
+          "std": 969.0459161644256
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.5017337965356807,
+          "std": 0.023134398354131218
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.10540751135458754,
+          "std": 0.08182289448637649
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.018311824142628212,
+          "std": 0.0027529217718801216
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.006475723437484331,
+          "std": 0.009484950609857256
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.07699939181434351,
+          "std": 0.11191621787139357
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 3.202170416950378,
+          "std": 3.7941456918976226
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 4.258538929760768,
+          "std": 2.895624533207533
+        }
+      }
+    },
+    {
+      "variant": "index_attention",
+      "scenario": "reverse",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -82.9000844057095,
+          "std": 40.654780480759854
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.08667564596837338,
+          "std": 0.11911101068917126
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.4804906842345572,
+          "std": 0.03364930692281224
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.08178228237960145,
+          "std": 0.14405935002952772
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 81.80951155691098,
+          "std": 40.47282527758065
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.027211793568356367,
+          "std": 0.03339397180834171
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1923017196826016,
+          "std": 0.1386172996234754
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 586.8658385004203,
+          "std": 902.2925293611864
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.4771880426183343,
+          "std": 0.032834673384987814
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.09626424220112181,
+          "std": 0.14163169743740894
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.016197420198951477,
+          "std": 0.002052711666741798
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.07767938908621677,
+          "std": 0.13292064536624848
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.9981914352188703,
+          "std": 1.7112624054509957
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 13.8001248507574,
+          "std": 22.182276741963438
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 30.76439203473078,
+          "std": 49.80450284085122
+        }
+      }
+    },
+    {
+      "variant": "index_attention",
+      "scenario": "turn_left",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -88.03518421910682,
+          "std": 40.40144616221739
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.07577878858365704,
+          "std": 0.1278901299211118
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.10189688144663141,
+          "std": 0.17621228486350976
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.49168254892561475,
+          "std": 0.8781353047895267
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 87.03413106345882,
+          "std": 40.04276832630826
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1073654300581355,
+          "std": 0.17288768625682122
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.19508311629858022,
+          "std": 0.13587353917974546
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 516.5548719065587,
+          "std": 784.1054572889267
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1048845820806991,
+          "std": 0.17018286561871243
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8387813001386821,
+          "std": 0.27111696962080944
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.01794708009059468,
+          "std": 0.0019264951747465394
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0310381727785266,
+          "std": 0.05305441282967463
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1832472107839683,
+          "std": 0.31067008679516067
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 10.753006486605988,
+          "std": 17.795293636172097
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 19.434512661868027,
+          "std": 31.755336284098824
+        }
+      }
+    },
+    {
+      "variant": "index_attention",
+      "scenario": "turn_right",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -82.76562483893936,
+          "std": 33.072419578809956
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0717713117006397,
+          "std": 0.12325492604549479
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.08900809088890714,
+          "std": 0.15340904455139984
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.4610837432125308,
+          "std": 0.9350860908206344
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 81.48670659338434,
+          "std": 33.08927573237548
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.09701091685518577,
+          "std": 0.152202408141829
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.23989904245111393,
+          "std": 0.10935497228331145
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 458.20092718760174,
+          "std": 666.7243470045036
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.09345102422768908,
+          "std": 0.14893449968342973
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8808189192699889,
+          "std": 0.22101689601459748
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0170500240635641,
+          "std": 0.002272751217307001
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.04184565027185913,
+          "std": 0.07168409184998531
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.7050982538153949,
+          "std": 1.2104415344878394
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 16.39939386482484,
+          "std": 28.15628137282069
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 30.36228435843166,
+          "std": 52.25517068078396
+        }
+      }
+    },
+    {
+      "variant": "gated_attention",
+      "scenario": "stand_low",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -69.16996902684903,
+          "std": 32.73341793900744
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.20626469638501815,
+          "std": 0.17114144866696426
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.00014488923356824592,
+          "std": 0.00043563894751546563
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0005870625800467534,
+          "std": 0.0007521910886015688
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 68.48319997141759,
+          "std": 32.405165237297766
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0075886306398149,
+          "std": 0.0022605317903420354
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.18721342667611315,
+          "std": 0.07358075004789061
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 55.99177414906025,
+          "std": 11.489018806659233
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.005588964467704907,
+          "std": 0.0031404373086375685
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.009391100554633927,
+          "std": 0.0034420724989263633
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.030532156721145533,
+          "std": 0.00401691242453014
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0011015510608843595,
+          "std": 0.000897725514817262
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.013786371051981456,
+          "std": 0.013367073008531417
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.1265695877536095,
+          "std": 0.31962902998705084
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8.023185853356027,
+          "std": 4.467070871093334
+        }
+      }
+    },
+    {
+      "variant": "gated_attention",
+      "scenario": "stand_mid",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -89.08990546315496,
+          "std": 32.79098869578012
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.20328071586369972,
+          "std": 0.1712884055651799
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.000139798014618749,
+          "std": 0.00039295996056415146
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0002602471052646315,
+          "std": 0.00041909665399574025
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 88.1135746880124,
+          "std": 32.4718385587433
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.007643897696646282,
+          "std": 0.002219802355292558
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1871438738667057,
+          "std": 0.07441928671002444
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 55.81743088197708,
+          "std": 11.461899508227116
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0055754523911220434,
+          "std": 0.00314650582742451
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.009215904527752637,
+          "std": 0.004228840671441882
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02868909754876707,
+          "std": 0.0013078882145766996
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.001104030189918983,
+          "std": 0.0008591688180713212
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.014522805432492859,
+          "std": 0.015263725265413475
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.0593187126989738,
+          "std": 0.31407221610605224
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 7.83049363566269,
+          "std": 5.168786645615916
+        }
+      }
+    },
+    {
+      "variant": "gated_attention",
+      "scenario": "stand_high",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -108.98682946083514,
+          "std": 32.906776154045566
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.24285678871045926,
+          "std": 0.21311005267791572
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.00013281062376866625,
+          "std": 0.0004947113785403824
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.00013302836045775684,
+          "std": 0.0003645292695759677
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 107.84428408555686,
+          "std": 32.64737350482225
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.007523519060719541,
+          "std": 0.0022566778020240807
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1870387747193357,
+          "std": 0.07451917578953621
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 56.5659537763993,
+          "std": 11.449523047518436
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.005625095871606101,
+          "std": 0.0030414183074087696
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.009996747463531866,
+          "std": 0.0032467577965725122
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.02831908501617242,
+          "std": 0.001187738600770409
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.001471684520757753,
+          "std": 0.0013080969096108273
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.016359478092718132,
+          "std": 0.01592792535807512
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.223661675922118,
+          "std": 0.24048860470930444
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 9.808043069829424,
+          "std": 4.589559247121409
+        }
+      }
+    },
+    {
+      "variant": "gated_attention",
+      "scenario": "forward",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -90.68334983426739,
+          "std": 31.295800952849337
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.36462118379253705,
+          "std": 0.4685424115302138
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.5004144343600158,
+          "std": 0.001460119550006945
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.006743548650480825,
+          "std": 0.00795660524843308
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 89.62922430038452,
+          "std": 31.071240211919005
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.007330102507861056,
+          "std": 0.0024308421202727734
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.18753868918836816,
+          "std": 0.06876859800205387
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 54.26663367489974,
+          "std": 12.479002360590126
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.5032545259284477,
+          "std": 0.003966963401032398
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.01482206705211064,
+          "std": 0.0026051590282234515
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.01597903250110418,
+          "std": 0.0011281238561934026
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0007232041180009055,
+          "std": 0.0005844549763260661
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.007559090525905938,
+          "std": 0.0006419826950680956
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.69809363801783,
+          "std": 1.5198920413448094
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 6.107539899848326,
+          "std": 4.039730041953123
+        }
+      }
+    },
+    {
+      "variant": "gated_attention",
+      "scenario": "reverse",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -86.88415528069896,
+          "std": 34.68705405522899
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.08140633812166341,
+          "std": 0.11947774405056542
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.49970238346641715,
+          "std": 0.0006478523122611941
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.004445137744035357,
+          "std": 0.007272218603747696
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 85.95927918857585,
+          "std": 34.192726934158614
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.00797275342942902,
+          "std": 0.0022758154446622762
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.16316787267497665,
+          "std": 0.09096517421067991
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 55.53898438211282,
+          "std": 10.36368902567599
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.49664805210257573,
+          "std": 0.0025295217243228516
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.014210954425014771,
+          "std": 0.002188603764793652
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.016701815775440384,
+          "std": 0.0017081614351400324
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.000806697509863225,
+          "std": 0.0005552189433742242
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.009445451908505278,
+          "std": 0.006597741253634592
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.6439590033921259,
+          "std": 1.5067130533948403
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 10.696515662385128,
+          "std": 11.353158765261298
+        }
+      }
+    },
+    {
+      "variant": "gated_attention",
+      "scenario": "turn_left",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -86.28631585182882,
+          "std": 30.12148607705518
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.11059956040622332,
+          "std": 0.1719788570737722
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 6.304050668731578e-05,
+          "std": 0.00023031792351219818
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.997950538125925,
+          "std": 0.0030757609861340445
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 85.33589326807608,
+          "std": 29.720863720526093
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.007646905027241199,
+          "std": 0.001803599259530983
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1705593489057695,
+          "std": 0.10549097720386909
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 64.35043998527527,
+          "std": 17.352548658115015
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.00530762082877197,
+          "std": 0.0030727493826997075
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.9958887643739581,
+          "std": 0.0027352408673551854
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.019052836695337798,
+          "std": 0.001415925604326487
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0008102937281067857,
+          "std": 0.0010504152800981984
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.00594781486589785,
+          "std": 0.007967463622087743
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.7367959405387955,
+          "std": 0.7133176654704247
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 3.492935879008205,
+          "std": 3.104240137615703
+        }
+      }
+    },
+    {
+      "variant": "gated_attention",
+      "scenario": "turn_right",
+      "training_seeds": [
+        1011,
+        1022,
+        1033
+      ],
+      "metrics": {
+        "height_signed_bias_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": -89.96318068202774,
+          "std": 37.51650526733547
+        },
+        "height_within_episode_std_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.15162369830692798,
+          "std": 0.13551590134179434
+        },
+        "vx_signed_error_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": -0.0011053870083267481,
+          "std": 0.001564621975756774
+        },
+        "wz_signed_error_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.0055240496788753,
+          "std": 0.013008938635218473
+        },
+        "height_full_interval_mae_mm": {
+          "n": 3,
+          "missing": 0,
+          "mean": 89.0424013833205,
+          "std": 37.05713403800873
+        },
+        "planar_speed_full_interval_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.007529462963574209,
+          "std": 0.002330702747796616
+        },
+        "tilt_full_interval_rad": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.1568500681394944,
+          "std": 0.09517419916757192
+        },
+        "nonwheel_netforce_full_interval_N": {
+          "n": 3,
+          "missing": 0,
+          "mean": 52.18179793584346,
+          "std": 11.608115877115905
+        },
+        "vx_full_interval_mae_m_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.006224197979977144,
+          "std": 0.002457894406528253
+        },
+        "wz_full_interval_mae_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.0054492164527375,
+          "std": 0.012834034492517596
+        },
+        "terminated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "truncated_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "done_count": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "steady_coverage": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.8995,
+          "std": 0.0
+        },
+        "steady_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 14392,
+          "std": 0.0
+        },
+        "steady_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_segments": {
+          "n": 3,
+          "missing": 0,
+          "mean": 8,
+          "std": 0.0
+        },
+        "short_retained_samples": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0,
+          "std": 0.0
+        },
+        "reward_mean_diagnostic": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.019478924299583013,
+          "std": 0.0018031576290810031
+        },
+        "leg_target_derivative_rms_rad_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.0006345526696034094,
+          "std": 0.0004917992534231815
+        },
+        "wheel_target_derivative_rms_rad_s2": {
+          "n": 3,
+          "missing": 0,
+          "mean": 0.008221323298774777,
+          "std": 0.009436057419858217
+        },
+        "leg_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 1.203430743711873,
+          "std": 0.4610676993874509
+        },
+        "wheel_effort_derivative_rms_Nm_s": {
+          "n": 3,
+          "missing": 0,
+          "mean": 6.0058354056091305,
+          "std": 3.271404963877271
+        }
+      }
+    }
+  ]
+}

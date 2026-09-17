@@ -1,0 +1,28 @@
+{
+  "base_config": "optimized_control.json",
+  "environment_factory": null,
+  "seeds": [2101, 2113, 2129],
+  "variants": [
+    {"name": "direct_mlp", "model": {"actor_type": "mlp", "baseline_hidden": [128, 64]}, "ppo": {}, "group": "architecture"},
+    {"name": "direct_transformer", "model": {"d_model": 64, "num_layers": 2, "num_heads": 4, "ffn_dim": 128, "time_encoding": "index", "readout_type": "last"}, "ppo": {}, "group": "architecture"},
+    {"name": "velocity_mlp", "model": {"actor_type": "mlp", "estimator_type": "velocity", "state_indices": [25, 26, 27], "baseline_hidden": [128, 64], "controller_hidden": [128, 64, 32]}, "ppo": {}, "group": "estimation_velocity"},
+    {"name": "velocity_transformer", "model": {"estimator_type": "velocity", "state_indices": [25, 26, 27], "time_encoding": "index", "readout_type": "last", "controller_hidden": [128, 64, 32]}, "ppo": {}, "group": "estimation_velocity"},
+    {"name": "context_mlp", "model": {"actor_type": "mlp", "estimator_type": "context", "state_indices": [25, 26, 27, 28], "baseline_hidden": [128, 64], "controller_hidden": [128, 64, 32]}, "ppo": {}, "group": "estimation_context"},
+    {"name": "context_transformer", "model": {"estimator_type": "context", "state_indices": [25, 26, 27, 28], "time_encoding": "index", "readout_type": "last", "controller_hidden": [128, 64, 32]}, "ppo": {}, "group": "estimation_context"}
+  ],
+  "training": {"updates": 3908, "rollout_steps": 32, "max_seconds": 21600, "checkpoint_interval": 977, "action_clip": 100.0, "diagnostics": false},
+  "execution": {"devices": ["cuda:0"], "max_parallel": 1, "job_timeout_seconds": 43200, "worker_module": "examples._isaaclab_process"},
+  "evaluation": {
+    "steps": 4000, "settle_steps": 200, "min_steady_samples": 200, "seeds": [3101, 3113],
+    "environment": {"mode": "evaluation", "num_envs": 8},
+    "scenarios": [
+      {"name": "stand_low", "environment": {"fixed_command": [0, 0, 0.28]}},
+      {"name": "stand_mid", "environment": {"fixed_command": [0, 0, 0.30]}},
+      {"name": "stand_high", "environment": {"fixed_command": [0, 0, 0.32]}},
+      {"name": "forward", "environment": {"fixed_command": [0.5, 0, 0.30]}},
+      {"name": "reverse", "environment": {"fixed_command": [-0.5, 0, 0.30]}},
+      {"name": "turn_left", "environment": {"fixed_command": [0, 1, 0.30]}},
+      {"name": "turn_right", "environment": {"fixed_command": [0, -1, 0.30]}}
+    ]
+  }
+}

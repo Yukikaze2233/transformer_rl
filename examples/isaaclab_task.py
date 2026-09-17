@@ -21,6 +21,9 @@ def encode_observation(config, raw, previous_issued_action, timestamp, policy_dt
         raise ValueError("external actor observation must be N x 125")
     scalar = raw["policy"][:, -25:]
     proprio = torch.cat((scalar[:, :6], scalar[:, 9:19]), dim=-1)
+    if config.proprio_dim == 20:
+        # Explicit diagnostic-only oracle. Never enabled by the ordinary actor contract.
+        proprio = torch.cat((proprio, raw["critic"][:, 25:29]), dim=-1)
     command = scalar[:, 6:9].clone()
     ages = scalar.new_zeros((scalar.shape[0], 2))
     frame = pack_frame(
@@ -104,6 +107,7 @@ class IsaacLabTaskAdapter:
         self._valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._metrics = {}
         self._signals = {}
+        self._evaluation_state = {}
         self._signal_time = torch.zeros(self.num_envs, device=self.device, dtype=torch.float64)
         original_rewards, original_reset = env._get_rewards, env._reset_idx
 
@@ -135,6 +139,14 @@ class IsaacLabTaskAdapter:
                     getattr(source, "wheel_targets", None),
                     getattr(source, "torques", None),
                 )
+                self._evaluation_state = {
+                    "height": height.detach().clone(),
+                    "tilt": self._metrics["tilt_angle"].clone(),
+                    "world_position": data.root_pos_w.torch.detach().clone(),
+                    "linear_velocity": linear.detach().clone(),
+                    "angular_velocity": angular.detach().clone(),
+                    "command": source.commands.detach().clone(),
+                } if hasattr(data, "root_pos_w") else {}
                 # step() advances _tick after env.step returns; reset's existing tick
                 # offset is retained. Allocate anew so older step info stays owned.
                 self._signal_time = torch.full(
@@ -188,7 +200,9 @@ class IsaacLabTaskAdapter:
         result = StepResult(self._encode(raw), reward, terminated, truncated,
                             self._final, self._valid,
                             {**info, "evaluation_metrics": self._metrics,
-                             "evaluation_signals": self._signals,
+                              "evaluation_signals": self._signals,
+                              "evaluation_state": self._evaluation_state,
+                              "evaluation_step_dt": float(self.env.step_dt),
                              "evaluation_signal_time": self._signal_time})
         return self._contract.step(result)
 
@@ -203,12 +217,20 @@ class IsaacLabTaskAdapter:
 def make_env(model_config, environment_config, device):
     """Factory for train/evaluate: external paths are explicit and hash recorded."""
     options = dict(environment_config)
-    allowed = {"task_root", "contract", "num_envs", "mode", "stage", "fixed_command", "usd_seed"}
+    allowed = {"task_root", "contract", "num_envs", "mode", "stage", "fixed_command", "usd_seed", "privileged_actor"}
     if set(options) - allowed:
         raise ValueError(f"unknown environment options: {sorted(set(options) - allowed)}")
+    privileged = options.get("privileged_actor", False)
+    if type(privileged) is not bool:
+        raise ValueError("privileged_actor must be bool")
+    proprio_dim = 20 if privileged else 16
     if (model_config.proprio_dim, model_config.command_dim, model_config.action_dim,
             model_config.sensor_groups, model_config.critic_dim) != (16, 3, 6, 2, 29):
-        raise ValueError("research adapter requires proprio16/command3/action6/sensors2/critic29")
+        if not (privileged and (model_config.proprio_dim, model_config.command_dim, model_config.action_dim,
+                                model_config.sensor_groups, model_config.critic_dim) == (20, 3, 6, 2, 29)):
+            raise ValueError("research adapter requires proprio16/command3/action6/sensors2/critic29; oracle explicitly requires proprio20")
+    if model_config.proprio_dim != proprio_dim:
+        raise ValueError("privileged_actor must agree with the explicit proprioception contract")
     root = Path(options["task_root"]).expanduser().resolve(strict=True)
     contract = Path(options["contract"])
     contract = (contract if contract.is_absolute() else root / contract).resolve(strict=True)
@@ -266,7 +288,8 @@ def make_env(model_config, environment_config, device):
             "usd_cache_dir": cfg.usd_cache_dir,
             "usd_seed_sha256": (hashlib.sha256(Path(cfg.usd_seed).read_bytes()).hexdigest() if cfg.usd_seed else None),
             "critic_auxiliary_semantics": {"25": "true_body_com_vx_m_s", "26": "true_body_com_vy_m_s",
-                                           "27": "true_body_com_vz_m_s"},
+                                           "27": "true_body_com_vz_m_s", "28": "base_height_m"},
+            "privileged_actor": privileged,
             "sensor_age": "simulated_current_state_known_zero_not_hardware_evidence",
             "timestamp": "independent_monotonic_float64_policy_event_seconds",
             "action": "previous_issued_before_source_clipping_zero_extra_transport_delay",
@@ -293,6 +316,7 @@ def make_env(model_config, environment_config, device):
         metadata["identity"].update(
             adapter_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             worker_sha256=hashlib.sha256(Path(_isaaclab_process.__file__).read_bytes()).hexdigest(),
+            privileged_actor=privileged,
         )
         print("ISAACLAB_TASK_METADATA=" + json.dumps(metadata, sort_keys=True), flush=True)
         return IsaacLabTaskAdapter(env, app, model_config, metadata, build_observation, build_critic)

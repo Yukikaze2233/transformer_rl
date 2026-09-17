@@ -13,7 +13,7 @@ from .adapters import _TensorEnvContract
 from .config import PPOConfig
 from .history import HistoryBuffer
 from .model import ActorCritic
-from .storage import PPOBatch, RolloutBuffer
+from .storage import EstimatorBatch, PPOBatch, RolloutBuffer
 from .types import VectorEnv, VectorObservation
 
 
@@ -105,6 +105,8 @@ class RolloutCollector:
         reward_sum = 0.0
         early_stopped = False
         buffer = RolloutBuffer(steps) if steps else None
+        auxiliary = self.model.config.estimator_type != "none"
+        next_proprio, next_valid = [], []
         try:
             for _ in range(steps):
                 stop = should_stop is not None and should_stop()
@@ -142,6 +144,11 @@ class RolloutCollector:
                 truncated_count += result.truncated.sum().item()
                 done = result.terminated | result.truncated
                 done_count += done.sum().item()
+                if auxiliary:
+                    valid = (~done).clone()
+                    target = result.observation.frame[:, :self.model.config.proprio_dim]
+                    next_proprio.append(torch.where(valid[:, None], target, torch.zeros_like(target)).clone())
+                    next_valid.append(valid)
                 self._check_model_version(version)
 
                 # Never evaluate undefined final rows, even when multiplying by zero later.
@@ -162,7 +169,11 @@ class RolloutCollector:
                 self._history.append(result.observation)
                 self._observation = result.observation
             self._check_model_version(version)
-            return buffer.finish(self.ppo_config.gamma, self.ppo_config.gae_lambda) if buffer and len(buffer) else None
+            if not buffer or not len(buffer):
+                return None
+            batch = buffer.finish(self.ppo_config.gamma, self.ppo_config.gae_lambda)
+            return EstimatorBatch(**vars(batch), next_proprio=torch.cat(next_proprio),
+                                  next_valid=torch.cat(next_valid)) if auxiliary else batch
         finally:
             self._synchronize()
             transitions = vector_steps * self.num_envs

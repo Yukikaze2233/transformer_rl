@@ -157,7 +157,7 @@ def test_weights_only_rejects_custom_pickled_objects(tmp_path):
         (lambda p: p.update(extra=1), "top-level keys"),
         (lambda p: p.pop("metadata"), "top-level keys"),
         (lambda p: p.update(format="other"), "format"),
-        (lambda p: p.update(schema_version=5), "schema_version"),
+        (lambda p: p.update(schema_version=6), "schema_version"),
         (lambda p: p.update(schema_version=True), "schema_version"),
         (lambda p: p.update(update=-1), "update"),
         (lambda p: p.update(update=True), "update"),

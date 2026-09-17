@@ -133,7 +133,7 @@ def _validate_spec(spec):
         if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", name) or name in names:
             raise ValueError("variant names must be unique safe identifiers")
         names.add(name)
-        if variant["group"] not in ("architecture", "supervision", "sensitivity"):
+        if variant["group"] not in ("architecture", "supervision", "sensitivity", "estimation_velocity", "estimation_context"):
             raise ValueError("unknown comparison group")
         if not all(isinstance(variant[k], dict) for k in ("model", "ppo")):
             raise ValueError("variant overrides must be objects")
@@ -201,6 +201,8 @@ def _configuration(base, variant, evaluation=None):
         allowed = set(_ACTOR_FIELDS) if key == "model" else set()
         if variant["group"] == "supervision":
             allowed.add("auxiliary_indices" if key == "model" else "auxiliary_coef")
+        elif variant["group"].startswith("estimation_") and key == "model":
+            allowed.update(("estimator_type", "state_indices", "controller_hidden"))
         elif variant["group"] == "sensitivity":
             allowed = _SENSITIVITY_FIELDS[key]
         reference_values = dict(section)
@@ -214,8 +216,12 @@ def _configuration(base, variant, evaluation=None):
             if name not in allowed and getattr(configured, name) != getattr(reference, name):
                 raise ValueError(f"fair comparison forbids changing {key}.{name}")
         configs.append(configured)
-    if variant["group"] == "architecture" and getattr(configs[0], "auxiliary_indices", ()):
+    if variant["group"] == "architecture" and (getattr(configs[0], "auxiliary_indices", ())
+                                              or configs[0].estimator_type != "none"):
         raise ValueError("architecture group must not contain auxiliary supervision heads")
+    if variant["group"].startswith("estimation_"):
+        if configs[0].estimator_type != variant["group"].removeprefix("estimation_"):
+            raise ValueError("estimator family must match its comparison group")
     if getattr(configs[1], "auxiliary_coef", 0) > 0:
         if (not getattr(configs[0], "auxiliary_indices", ())
                 or variant["group"] not in ("supervision", "sensitivity")):
@@ -420,6 +426,13 @@ def _validate_stability(stability, evaluation, transitions):
                     or not signal["episode_mean_min"] - tolerance <= signal["mean"] <= (
                         signal["episode_mean_max"] + tolerance)):
                 raise ValueError("inconsistent stability statistics")
+        if "mean_abs" in signal:
+            value = signal["mean_abs"]
+            if (not count and value is not None) or (count and (
+                type(value) not in (int, float) or not math.isfinite(value)
+                or value < abs(signal["mean"]) - 1e-7 or value > signal["max_abs"] + 1e-7
+            )):
+                raise ValueError("invalid stability mean_abs")
     if stability["available"] != any(s["count"] > 0 for s in stability["signals"].values()):
         raise ValueError("stability availability contradicts counts")
 

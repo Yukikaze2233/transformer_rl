@@ -30,6 +30,22 @@ class ModelConfig:
     gru_hidden: int = 64
     mean_init_scale: float = 1.0
     readout_type: str = "query"
+    estimator_type: str = "none"
+    state_indices: tuple[int, ...] = ()
+    controller_hidden: tuple[int, ...] = (128, 64, 32)
+    state_velocity_scale: float = 1.0
+    state_height_center: float = 0.30
+    state_height_scale: float = 0.10
+    context_dim: int = 16
+    context_target_hidden: tuple[int, ...] = (128, 64)
+    context_prototypes: int = 32
+    context_temperature: float = 3.0
+    context_sinkhorn_epsilon: float = 0.05
+    context_sinkhorn_iterations: int = 3
+
+    @property
+    def requires_current_frame(self) -> bool:
+        return self.estimator_type != "none" or self.readout_type == "last"
 
     @property
     def frame_dim(self) -> int:
@@ -38,6 +54,32 @@ class ModelConfig:
         return self.proprio_dim + self.command_dim + self.action_dim + 2 * self.sensor_groups + 1
 
     def __post_init__(self) -> None:
+        if self.estimator_type not in ("none", "velocity", "context"):
+            raise ValueError("estimator_type must be none, velocity or context")
+        expected_states = {"none": 0, "velocity": 3, "context": 4}[self.estimator_type]
+        if (type(self.state_indices) is not tuple or len(self.state_indices) != expected_states
+            or any(type(i) is not int or not 0 <= i < self.critic_dim for i in self.state_indices)
+            or len(set(self.state_indices)) != len(self.state_indices)):
+            raise ValueError("state_indices must explicitly identify the estimator's critic targets")
+        for hidden in (self.controller_hidden, self.context_target_hidden):
+            if type(hidden) is not tuple or not hidden or any(type(n) is not int or n < 1 for n in hidden):
+                raise ValueError("estimator hidden dimensions must be positive integers")
+        if any(type(n) is not int or n < 1 for n in
+               (self.context_dim, self.context_prototypes, self.context_sinkhorn_iterations)):
+            raise ValueError("context dimensions and iterations must be positive integers")
+        if any(type(v) not in (float, int) or not math.isfinite(v) or v <= 0 for v in
+               (self.state_velocity_scale, self.state_height_scale,
+                self.context_temperature, self.context_sinkhorn_epsilon)):
+            raise ValueError("estimator scales and temperatures must be finite and positive")
+        if type(self.state_height_center) not in (float, int) or not math.isfinite(self.state_height_center):
+            raise ValueError("state_height_center must be finite")
+        if self.estimator_type != "none":
+            if self.actor_type not in ("mlp", "transformer") or self.auxiliary_indices:
+                raise ValueError("detached estimators require MLP/Transformer without a shared auxiliary head")
+            if self.actor_type == "transformer" and (
+                self.readout_type != "last" or self.time_encoding != "index" or self.residual_type != "add"
+            ):
+                raise ValueError("estimator Transformer requires index/last/add")
         if self.actor_type not in ("transformer", "mlp", "gru"):
             raise ValueError("actor_type must be transformer, mlp or gru")
         if self.time_encoding not in ("elapsed", "index"):
@@ -95,8 +137,22 @@ class PPOConfig:
     target_kl: float = 0.01
     normalize_advantage: bool = True
     auxiliary_coef: float = 0.0
+    estimator_learning_rate: float = 0.001
+    estimator_epochs: int = 2
+    estimator_minibatches: int = 4
+    estimator_max_grad_norm: float = 1.0
+    estimator_target_kl: float = 0.0025
+    estimator_context_coef: float = 1.0
 
     def __post_init__(self) -> None:
+        if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in
+               (self.estimator_learning_rate, self.estimator_max_grad_norm, self.estimator_target_kl)):
+            raise ValueError("estimator optimizer rates and limits must be finite and positive")
+        if (type(self.estimator_context_coef) not in (int, float)
+            or not math.isfinite(self.estimator_context_coef) or self.estimator_context_coef < 0):
+            raise ValueError("estimator_context_coef must be finite and nonnegative")
+        if any(type(v) is not int or v < 1 for v in (self.estimator_epochs, self.estimator_minibatches)):
+            raise ValueError("estimator epochs and minibatches must be positive integers")
         values = (self.learning_rate, self.gamma, self.gae_lambda, self.clip_ratio,
                   self.value_clip, self.value_coef, self.entropy_coef,
                   self.max_grad_norm, self.target_kl, self.auxiliary_coef)
@@ -129,7 +185,8 @@ def load_config(path: str | Path) -> tuple[ModelConfig, PPOConfig, dict]:
             raise ValueError(f"unknown {key} configuration fields")
         if key == "model":
             section = dict(section)
-            for name in ("critic_hidden", "baseline_hidden", "auxiliary_indices"):
+            for name in ("critic_hidden", "baseline_hidden", "auxiliary_indices", "state_indices",
+                         "controller_hidden", "context_target_hidden"):
                 if name in section:
                     section[name] = tuple(section[name])
         configs.append(cls(**section))

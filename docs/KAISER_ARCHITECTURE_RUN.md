@@ -2,7 +2,9 @@
 
 ## 状态与实际启动时间
 
-正式队列实际启动于 **2026-09-15 05:44:19.296248 +08:00**，当前在独立 tmux 后台运行。
+正式队列实际启动于 **2026-09-15 05:44:19.296248 +08:00**，9月15日按用户要求暂停。
+9月17日已在新root恢复剩余任务，见 [暂停后续训](KAISER_ARCHITECTURE_RESUME.md)。
+以下进度与操作说明保留首次启动时的历史记录。
 `requested_not_before=2026-09-15T00:00:00+08:00` 是最早允许时间，**不是实际开跑时间**；
 `start_reason="user clarified visual-only and requested continue"` 已写入远端 `launch.json`。
 

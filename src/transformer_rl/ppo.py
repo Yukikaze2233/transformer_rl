@@ -44,7 +44,14 @@ class PPOTrainer:
             if not callable(getattr(model.actor, "predict_auxiliary", None)):
                 raise ValueError("positive auxiliary_coef requires an actor auxiliary prediction head")
         self.model.eval()
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+        self.policy_parameters = list(getattr(model, "policy_parameters", model.parameters)())
+        self.optimizer = torch.optim.Adam(self.policy_parameters, lr=config.learning_rate)
+        self.estimator = None
+        if getattr(getattr(model, "config", None), "estimator_type", "none") != "none":
+            if config.auxiliary_coef:
+                raise ValueError("detached estimators cannot use the shared auxiliary loss")
+            from .estimation import EstimatorTrainer
+            self.estimator = EstimatorTrainer(model, config)
 
     @staticmethod
     def _require_finite(name: str, tensor: torch.Tensor) -> None:
@@ -164,6 +171,8 @@ class PPOTrainer:
         self.model.eval()  # Deterministic dropout behavior; this does not disable autograd.
         self.optimizer.zero_grad(set_to_none=True)
         batch.validate()
+        if self.estimator is not None:
+            self.estimator.validate_batch(batch)
         batch = self._detached_batch(batch)
         chunks = min(self.config.num_minibatches, len(batch))
         self._check_old_log_prob(batch, chunks)
@@ -185,7 +194,7 @@ class PPOTrainer:
         optimizer_steps = sample_count = 0
         early_stopped = False
         stop_kl = 0.0
-        parameters = [parameter for parameter in self.model.parameters() if parameter.requires_grad]
+        parameters = [parameter for parameter in self.policy_parameters if parameter.requires_grad]
         for _ in range(self.config.epochs):
             order = torch.randperm(len(batch), device=batch.raw_action.device)
             for indices in torch.tensor_split(order, chunks):
@@ -274,6 +283,9 @@ class PPOTrainer:
             if early_stopped:
                 break
         self.optimizer.zero_grad(set_to_none=True)
+        estimator_metrics = self.estimator.update(batch) if self.estimator is not None else {}
+        if self.estimator is not None:
+            estimator_metrics["total_policy_kl"] = self._distribution_diagnostics(batch, chunks)["kl"]
         if diagnostics:
             final = self._distribution_diagnostics(batch, chunks)
             diagnostic_metrics.update({f"final_{name}": final[name]
@@ -288,4 +300,5 @@ class PPOTrainer:
             "early_stopped": early_stopped,
             "stop_kl": stop_kl,
             **diagnostic_metrics,
+            **estimator_metrics,
         }

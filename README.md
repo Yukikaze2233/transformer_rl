@@ -6,7 +6,7 @@
 
 代码使用 PyTorch，实现了自己的 PPO、历史管理和实验调度，没有依赖 RSL-RL。仿真通过环境接口接入；目前已在 Kaiser 的 Isaac Lab 环境跑通真实训练与评估。
 
-**正式对照已于2026年9月15日05:44（北京时间）在Kaiser启动。** 这批共有21个独立训练任务，保持两项并发。当前运行状态、检查点和查看方法见[启动记录](docs/KAISER_ARCHITECTURE_RUN.md)。完整训练与评估尚未结束，暂时没有最终网络排名。
+**首轮七种网络、三个seed的训练已于2026年9月18日02:17（北京时间）全部完成并回收。** 共21个最终模型、147份场景评估，见[完成与回收记录](docs/KAISER_ARCHITECTURE_COMPLETE.md)。执行完成不代表控制效果合格，完整网络选型还需结合物理指标。
 
 ## 我们在比较什么
 
@@ -46,7 +46,7 @@ Transformer默认使用64维、2层、4个注意力头。辅助监督单独分�
 
 目前采用的工作配方是 `learning_rate=3e-5`、`mean_init_scale=0.1`、`initial_std=0.2`。它让 Transformer 在三个新 seed 上都能充分使用优化预算，但短训的高度和接触表现还不好，不能据此选出赢家。
 
-下一档配置是 **7种网络 × 3个训练 seed**。在512环境、32步 rollout 下，每项977次更新，对应 **16,007,168个样本**。最终模型分别测试低、中、高站立、前进、后退和左右旋转。16M只是学习曲线的第一档，是否继续到64M、128M，要看学习趋势和独立评估。
+已完成首轮为 **7种网络 × 3个训练 seed**，每项累计977次更新，对应完整rollout预算 **16,007,168个样本**；两个分段续训任务另保留中断和采样计数。[估计器对照方案](docs/ESTIMATOR_TRAINING_PLAN.md)的六种网络现已实现并通过CPU验证，主档部署参数均在10万以内，配对比较MLP与Transformer。分阶段队列先验证接线和16M任务可行性，通过后再进入18项64M主对照，保存并评估16M/32M/64M检查点。
 
 机械模型本次只做了视觉随动修复。训练继续采用同一研究动力学，视觉组件数量不会自动变成新的物理自由度。模型和驱动仍有研究近似，当前对照也没有覆盖非零通信延迟或推扰，结果会按这个范围解释。
 
@@ -92,6 +92,7 @@ python -m transformer_rl.experiment_cli summarize \
 ## 文档
 
 - [训练预算与网络选型计划](docs/TRAINING_EVALUATION_PLAN.md)
+- [估计器与控制网络训练方案](docs/ESTIMATOR_TRAINING_PLAN.md) / [华南虎、复旦与Transformer设计复核](docs/TRANSFORMER_APPLICATIONS.md)
 - [实验配置、并发和结果汇总](docs/EXPERIMENTS.md)
 - [MLP稳态基线](docs/MLP_STEADY_STATE_BASELINE.md) / [稳定性统计口径](docs/STABILITY_METRICS.md)
 - [优化敏感性复验](docs/KAISER_SENSITIVITY_RECHECK.md) / [浮点一致性问题](docs/BEHAVIOR_PRECISION.md)

@@ -11,7 +11,8 @@ import time
 import torch
 
 from .adapters import _TensorEnvContract
-from .checkpoint import _load_checkpoint_bytes
+from .checkpoint import _load_checkpoint_bytes, _require_new_paths
+from .control_quality import ControlQuality, EvaluationTrace
 from .history import HistoryBuffer
 from .stability import EpisodeSignalStatistics
 
@@ -38,7 +39,8 @@ class _MetricAccumulator:
 
 @torch.no_grad()
 def evaluate_policy(checkpoint_path, env_factory, environment_config, steps, seed,
-                    device, action_clip=None, *, settle_steps=200, min_steady_samples=200) -> dict:
+                    device, action_clip=None, *, settle_steps=200, min_steady_samples=200,
+                    trace_output=None) -> dict:
     """Evaluate fixed mean actions; the factory owns scenario and physical semantics.
 
     Metrics must be PRE-reset float tensors [N], with the same names each step.
@@ -58,6 +60,8 @@ def evaluate_policy(checkpoint_path, env_factory, environment_config, steps, see
                                    or not math.isfinite(action_clip) or action_clip <= 0):
         raise ValueError("action_clip must be None or finite and positive")
     environment_config = json.loads(json.dumps(environment_config, allow_nan=False))
+    if trace_output is not None:
+        _require_new_paths([Path(trace_output)])
     data = Path(checkpoint_path).read_bytes()
     model, _, update, metadata = _load_checkpoint_bytes(data, device="cpu")
     if "action_clip" in metadata and metadata["action_clip"] != action_clip:
@@ -86,10 +90,20 @@ def evaluate_policy(checkpoint_path, env_factory, environment_config, steps, see
         stability = EpisodeSignalStatistics(env.num_envs, settle_steps=settle_steps,
                                             min_steady_samples=min_steady_samples)
         terminated = truncated = done_count = 0
+        quality = ControlQuality(env.num_envs, settle_steps, min_steady_samples)
+        trace = EvaluationTrace(env.num_envs) if trace_output is not None else None
+        estimation_errors = []
         for _ in range(steps):
             # Do not sample a distribution or use its exploration std in evaluation.
             action = contract.tensor("policy mean", model.actor(current),
-                                     (env.num_envs, model.config.action_dim))
+                                      (env.num_envs, model.config.action_dim))
+            raw_mean = action.clone()
+            estimated = target = action.new_empty((env.num_envs, 0))
+            if model.config.estimator_type != "none":
+                estimate, _ = model.actor.estimate(current)
+                estimated = estimate * model.actor.state_scale + model.actor.state_offset
+                target = observation.critic[:, model.config.state_indices]
+                estimation_errors.append((estimated - target).double().cpu())
             if action_clip is not None:
                 action = action.clamp(-action_clip, action_clip)
             result = contract.step(env.step(action.clone()))
@@ -109,9 +123,23 @@ def evaluate_policy(checkpoint_path, env_factory, environment_config, steps, see
             for name, value in physical.items():
                 metrics[name].add(contract.tensor(f"evaluation_metrics.{name}", value, (env.num_envs,)))
             stability.update(result.info.get("evaluation_signals", {}),
-                             result.info.get("evaluation_signal_time"), done)
+                              result.info.get("evaluation_signal_time"), done)
+            state = result.info.get("evaluation_state", {})
+            quality.update(state, result.info.get("evaluation_signal_time"),
+                           result.terminated, result.truncated, result.info.get("evaluation_step_dt"))
+            if trace is not None:
+                if not state:
+                    raise ValueError("physical trajectory recording requires evaluation_state")
+                trace.add({
+                    "observation_time": current.now, "signal_time": result.info["evaluation_signal_time"],
+                    "frame": current.frames[:, -1], "raw_mean_action": raw_mean, "issued_action": action,
+                    "estimated_state_t": estimated, "state_target_t": target,
+                    "terminated": result.terminated, "truncated": result.truncated,
+                    **state, **result.info.get("evaluation_signals", {}),
+                }, done)
             history.reset(done)
-            current = history.append(result.observation)
+            observation = result.observation
+            current = history.append(observation)
         if contract.device.type == "cuda":
             torch.cuda.synchronize(contract.device)
         report = {
@@ -123,11 +151,23 @@ def evaluate_policy(checkpoint_path, env_factory, environment_config, steps, see
             "metrics": {name: metric.report() for name, metric in sorted(metrics.items())},
             "physical_metrics_available": bool(metrics),
             "stability": stability.report(),
+            "control_quality": quality.report(),
             "environment": environment_config, "environment_provenance": provenance,
             "action_clip": action_clip, "actor": model.actor.describe(),
             "elapsed_s": time.monotonic() - started,
             "scope": "full interval including transients and auto-resets; task metrics are pre-reset",
         }
+        if estimation_errors:
+            errors = torch.cat(estimation_errors)
+            report["state_estimation"] = {
+                "indices": list(model.config.state_indices), "samples": len(errors),
+                "mae": errors.abs().mean(0).tolist(), "rmse": errors.square().mean(0).sqrt().tolist(),
+                "p95_abs": torch.quantile(errors.abs(), 0.95, dim=0).tolist(),
+                "units": ["m/s"] * 3 + (["m"] if errors.shape[1] == 4 else []),
+                "alignment": "current observation endpoint, before issuing its action",
+            }
+        if trace is not None:
+            report["trajectory"] = trace.save(trace_output)
         json.dumps(report, allow_nan=False)
         return report
     finally:

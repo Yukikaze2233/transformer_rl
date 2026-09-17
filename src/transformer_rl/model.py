@@ -505,11 +505,165 @@ class ValueCritic(nn.Module):
         return self.network(critic).squeeze(-1)
 
 
+class HistoryEstimator(nn.Module):
+    """Deterministic state/context encoder; preprocessing is owned by the actor."""
+
+    def __init__(self, config: ModelConfig):
+        super().__init__()
+        self.config = config
+        outputs = len(config.state_indices) + (config.context_dim if config.estimator_type == "context" else 0)
+        if config.actor_type == "mlp":
+            width = config.history_length * (config.frame_dim + 2)
+            layers = []
+            for hidden in config.baseline_hidden:
+                layers.extend((nn.Linear(width, hidden), nn.ELU()))
+                width = hidden
+            layers.append(nn.Linear(width, outputs))
+            self.network = nn.Sequential(*layers)
+        else:
+            self.projection = nn.Linear(config.frame_dim + 2, config.d_model)
+            self.blocks = nn.ModuleList(_CausalBlock(config) for _ in range(config.num_layers))
+            self.output_norm = nn.LayerNorm(config.d_model)
+            self.state_head = nn.Linear(config.d_model, outputs)
+            self.register_buffer("time_frequencies", torch.exp(
+                -math.log(10000.0) * torch.arange(0, config.d_model, 2, dtype=torch.float32) / config.d_model
+            ))
+
+    def forward(self, features, valid):
+        length = self.config.history_length
+        features = torch.nn.functional.pad(features, (0, 0, length - features.shape[1], 0))
+        valid = torch.nn.functional.pad(valid, (length - valid.shape[1], 0), value=False)
+        if self.config.actor_type == "mlp":
+            return self.network(features.flatten(1))
+        positions = torch.arange(length, device=features.device)
+        phase = positions.to(features.dtype)[:, None] * self.time_frequencies
+        tokens = self.projection(features) + torch.cat((phase.sin(), phase.cos()), dim=-1)
+        tokens = torch.where(valid[..., None], tokens, torch.zeros_like(tokens))
+        causal = positions[:, None] >= positions[None, :]
+        diagonal = positions[:, None] == positions[None, :]
+        allowed = (causal[None] & valid[:, None, :]) | ((~valid)[:, :, None] & diagonal[None])
+        for block in self.blocks:
+            tokens = block(tokens, allowed, valid)
+        return self.state_head(self.output_norm(tokens[:, -1]))
+
+
+class EstimatorActor(_WindowActor):
+    """Current-frame feedback with a separately optimized, detached estimator."""
+
+    def __init__(self, config: ModelConfig):
+        super().__init__(config)
+        self.estimator = HistoryEstimator(config)
+        states = len(config.state_indices)
+        latent = config.context_dim if config.estimator_type == "context" else 0
+        width = config.frame_dim + states + latent
+        layers = []
+        for hidden in config.controller_hidden:
+            layers.extend((nn.Linear(width, hidden), nn.ELU()))
+            width = hidden
+        layers.append(nn.Linear(width, config.action_dim))
+        self.controller = nn.Sequential(*layers)
+        scale = torch.full((states,), config.state_velocity_scale, dtype=self.log_std.dtype)
+        offset = torch.zeros(states, dtype=self.log_std.dtype)
+        if states == 4:
+            scale[-1], offset[-1] = config.state_height_scale, config.state_height_center
+        self.register_buffer("state_scale", scale)
+        self.register_buffer("state_offset", offset)
+        self._scale_initial_mean_head(self.controller[-1])
+
+    def _validate_history(self, history):
+        super()._validate_history(history)
+        if not history.valid[:, -1].all() or not torch.equal(history.times[:, -1], history.now):
+            raise ValueError("estimator requires a valid current last frame at now")
+        start = self.config.proprio_dim
+        if not torch.equal(history.frames[:, -1, start:start + self.config.command_dim], history.command):
+            raise ValueError("estimator requires current frame command == command")
+
+    def estimate_tensors(self, frames, times, valid, now):
+        features, valid = self._window_features(frames, times, valid, now)
+        prediction = self.estimator(features, valid)
+        states = len(self.config.state_indices)
+        state = prediction[:, :states]
+        latent = torch.nn.functional.normalize(prediction[:, states:], dim=-1) if self.config.estimator_type == "context" else prediction[:, states:]
+        return state, latent
+
+    def estimate(self, history):
+        self._validate_history(history)
+        return self.estimate_tensors(history.frames, history.times, history.valid, history.now)
+
+    def forward_tensors(self, frames, times, valid, command, now):
+        with torch.no_grad():
+            state, latent = self.estimate_tensors(frames, times, valid, now)
+        current = frames[:, -1] * self.frame_scale
+        return self.controller(torch.cat((current, state.detach(), latent.detach()), dim=-1))
+
+    def describe(self):
+        result = super().describe()
+        result.update(
+            history_encoder="detached finite-window state estimator with current-frame feedback",
+            estimator_type=self.config.estimator_type,
+            state_indices=list(self.config.state_indices),
+            controller_hidden=list(self.config.controller_hidden),
+            deployment_parameters=sum(p.numel() for p in self.parameters()) - self.log_std.numel(),
+            current_command={"source": "last frame command fields", "requires_valid_last_frame": True,
+                             "requires_last_time_equal_now": True, "requires_last_frame_command_equal_command": True,
+                             "supports_empty_history": False, "external_command_role": "contract only"},
+        )
+        return result
+
+
+class ContextObjective(nn.Module):
+    """Training-only target projection and balanced prototype assignments."""
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        layers, width = [], config.proprio_dim
+        for hidden in config.context_target_hidden:
+            layers.extend((nn.Linear(width, hidden), nn.ELU()))
+            width = hidden
+        layers.append(nn.Linear(width, config.context_dim))
+        self.target = nn.Sequential(*layers)
+        self.prototypes = nn.Embedding(config.context_prototypes, config.context_dim)
+
+    @torch.no_grad()
+    def _assignments(self, scores):
+        log_q = (scores / self.config.context_sinkhorn_epsilon).T
+        log_q = log_q - torch.logsumexp(log_q.flatten(), dim=0)
+        for _ in range(self.config.context_sinkhorn_iterations):
+            log_q = log_q - torch.logsumexp(log_q, dim=1, keepdim=True) - math.log(log_q.shape[0])
+            log_q = log_q - torch.logsumexp(log_q, dim=0, keepdim=True) - math.log(log_q.shape[1])
+        return (log_q + math.log(log_q.shape[1])).exp().T
+
+    def forward(self, latent, next_proprio):
+        target = torch.nn.functional.normalize(self.target(next_proprio), dim=-1)
+        with torch.no_grad():
+            self.prototypes.weight.copy_(torch.nn.functional.normalize(self.prototypes.weight, dim=-1))
+        scores_s, scores_t = latent @ self.prototypes.weight.T, target @ self.prototypes.weight.T
+        q_s, q_t = self._assignments(scores_s), self._assignments(scores_t)
+        log_s = torch.nn.functional.log_softmax(scores_s / self.config.context_temperature, dim=-1)
+        log_t = torch.nn.functional.log_softmax(scores_t / self.config.context_temperature, dim=-1)
+        return -0.5 * (q_s * log_t + q_t * log_s).mean()
+
+
 class ActorCritic(nn.Module):
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
         self.config = config
-        self.actor = {
+        self.actor = EstimatorActor(config) if config.estimator_type != "none" else {
             "transformer": TimeAwareActor, "mlp": HistoryMLPActor, "gru": WindowGRUActor,
         }[config.actor_type](config)
         self.critic = ValueCritic(config)
+        if config.estimator_type == "context":
+            self.context_objective = ContextObjective(config)
+
+    def estimator_parameters(self):
+        if self.config.estimator_type == "none":
+            return []
+        parameters = list(self.actor.estimator.parameters())
+        if self.config.estimator_type == "context":
+            parameters += list(self.context_objective.parameters())
+        return parameters
+
+    def policy_parameters(self):
+        excluded = {id(p) for p in self.estimator_parameters()}
+        return [p for p in self.parameters() if id(p) not in excluded]

@@ -20,13 +20,13 @@ model, trainer, update, metadata = load_checkpoint(
 
 ### 格式与校验
 
-- 格式标识为 `transformer_rl.checkpoint`，新文件内部`schema_version=4`，文件名不要求带版本号。旧schema 1/2/3按各自精确字段集合显式迁移，补对应`mean_init_scale`及`readout_type="query"`默认值；`source_schema_version`保留来源格式，原metadata保留。
+- 格式标识为 `transformer_rl.checkpoint`，新文件内部`schema_version=5`，文件名不要求带版本号。旧schema 1/2/3/4按各自精确字段集合显式迁移，补对应默认值和空估计器优化器；`source_schema_version`保留来源格式，原metadata保留。
 - 保存完整 `ModelConfig`、`PPOConfig`、模型 dtype、actor/critic weights 与 buffers、Adam 状态、累计 update 和 JSON metadata。
 - metadata 必须为字符串键 JSON object；嵌套值仅接受 object、list、string、有限 number、boolean、null。tuple、tensor、非字符串键及循环引用被拒绝。
 - 读取显式使用 `torch.load(..., weights_only=True, map_location="cpu")`，不回退到非受限 pickle。
 - 严格检查顶层和配置 keys、配置类型/约束、模型 state keys/shape/dtype/finite，以及 Adam 参数 ID/顺序、state keys/shape/dtype/finite、非负二阶矩和整数 step。
 - 支持 float32、float64、float16、bfloat16 checkpoint。各参数和 buffer 的 dtype 必须与该模型 dtype 一致；导出目前仅接受 float32。
-- 优化器须为 PPOTrainer 使用的单参数组 ordinary Adam，覆盖完整模型参数。保存实际 group 学习率，可与配置初始学习率不同；不保存外部 scheduler 对象。支持普通 Adam/AMSGrad 状态；拒绝 capturable、differentiable、fused 或 decoupled-weight-decay 模式。
+- 优化器须为单参数组ordinary Adam。普通模型的PPO优化器覆盖完整模型；独立估计器模型的PPO与估计器优化器分别绑定各自参数，后者存入`estimator_optimizer_state`，包含训练专用target/prototype的状态。保存实际group学习率；不保存外部scheduler。支持普通Adam/AMSGrad；拒绝capturable、differentiable、fused或decoupled-weight-decay。
 - 加载先把模型放到目标 device，再构造 optimizer，避免设备转换更换 Parameter 后 optimizer 仍引用旧参数。由 Adam 自己恢复 moment/counter 的设备位置。
 - 格式/数据不合法抛出 `ValueError`，API 对象类型不符可抛出 `TypeError`，已存在目标抛出 `FileExistsError`；文件系统错误保留原异常。
 
@@ -34,7 +34,7 @@ model, trainer, update, metadata = load_checkpoint(
 
 ## ONNX API
 
-标准last-token读出仍使用五输入签名；但必须提供有效当前帧，最后时间等于now，帧内command等于外部command。计算读取当前帧command，外部command是接口一致性字段；不支持空历史或仅修改外部command的调用。query读出的原有行为保持不变，sidecar记录各自契约。
+标准last-token与独立估计器策略使用五输入签名；必须提供有效当前帧，最后时间等于now，帧内command等于外部command。计算读取当前帧command，外部command是接口一致性字段；不支持空历史或仅修改外部command的调用。query读出的原有行为保持不变，sidecar记录各自契约。
 
 ```python
 from transformer_rl.export import export_policy
@@ -73,9 +73,9 @@ print(report["path"], report["sidecar_path"], report["sha256"])
 
 sidecar根据实际ModelConfig生成布局和actor.describe()，维度改变时不硬编码默认偏移。传感器age与policy dt在网络内除以time_scale_s。elapsed Transformer将float64时间差转为网络精度后作Fourier编码；index变体以位置索引编码历史位置；MLP/GRU将真实age直接作为额外窗口特征。生产端应直接提供float64 timestamp，不能先转float32再期望恢复uptime下的毫秒精度。
 
-有效 timestamp 须严格递增且 `<= now`。所有有意义的输入须有限；无效 padding 的 frame/time 可含 NaN/Inf，不参与模型计算。空历史合法；partial reset 由调用方清理对应环境的 history，图内部没有可变 KV/cache。导出路径不执行 Python 数据校验，调用方须在 ONNX 调用前满足这些约束。
+有效 timestamp 须严格递增且 `<= now`。所有有意义的输入须有限；无效padding的frame/time可含NaN/Inf，不参与模型计算。空历史是否允许取决于sidecar的current-frame约束；partial reset由调用方清理对应环境history，图内部没有可变KV/cache。导出路径不执行Python数据校验，调用方须满足这些约束。
 
-输出没有tanh、clipping、动作抽样或actuator conversion；图不包含critic、optimizer、Gaussian log_std或辅助预测头。sidecar仍记录辅助目标列与训练系数，避免把额外监督隐藏起来。外部命令限幅/缩放由调用方负责，随后写回history的应为 **issued action**。该导出不包含applied action、传输FIFO、PID、执行器响应或真实硬件时序模型。
+输出没有tanh、clipping、动作抽样或actuator conversion；图不包含critic、optimizer、Gaussian log_std、训练专用共享辅助头及context target/prototype。独立估计器本身参与控制，必须随控制头一起导出。sidecar记录估计器类型、标签列和监督信息。外部命令限幅/缩放由调用方负责，随后写回history的是 **issued action**。导出不包含传输FIFO、PID、执行器响应或真实硬件时序模型。
 
 ### 发布前验证
 

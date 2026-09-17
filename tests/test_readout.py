@@ -224,7 +224,7 @@ def test_last_initialization_checkpoint_adam_and_onnx(tmp_path, variant, scale):
     save_checkpoint(path, model, trainer, 1, {})
     restored, resumed, update, _ = load_checkpoint(path)
     assert restored.config == model.config and update == 1
-    assert restored.checkpoint_source_schema_version == 4
+    assert restored.checkpoint_source_schema_version == 5
     _assert_tree_equal(restored.state_dict(), model.state_dict())
     _assert_tree_equal(resumed.optimizer.state_dict(), trainer.optimizer.state_dict())
     expected_loss = _synthetic_adam_step(model, trainer.optimizer, history)
@@ -241,7 +241,7 @@ def test_last_initialization_checkpoint_adam_and_onnx(tmp_path, variant, scale):
     assert sidecar["model_config"]["readout_type"] == "last"
     assert sidecar["actor"]["readout_type"] == "last"
     assert sidecar["actor"]["auxiliary_source"] == "last current-frame representation"
-    assert sidecar["checkpoint"]["source_schema_version"] == 4
+    assert sidecar["checkpoint"]["source_schema_version"] == 5
     assert "empty history unsupported" in sidecar["history_contract"]["reset"]
     assert "equal now exactly" in sidecar["history_contract"]["valid_times"]
     assert "equal separate command exactly" in sidecar["history_contract"]["command"]

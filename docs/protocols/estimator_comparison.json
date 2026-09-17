@@ -1,0 +1,250 @@
+{
+  "document_type": "research_protocol",
+  "protocol_revision": 3,
+  "name": "estimator_comparison",
+  "status": "implemented_pending_runtime_binding_and_simulator_wiring",
+  "launchable": false,
+  "reference_cli_spec": "../../configs/estimator_reference.json",
+  "full_cli_spec": "../../configs/estimator_comparison.json",
+  "scope": "Controlled architecture adaptations on one frozen research robot; not upstream hardware reproduction.",
+  "questions": [
+    "Does explicit state estimation improve direct history control?",
+    "Does replacing an MLP estimator with a Transformer improve control under matched supervision?",
+    "Does an HIM-style predictive context provide value beyond explicit velocity estimation?"
+  ],
+  "upstream_references": {
+    "fudan_commit": "8204e853dfd2ed06d85a322e1a998c3d20a3be2c",
+    "scut_commit": "b8ff79f3df855faf9dc92f4a282bd80c42649466"
+  },
+  "common": {
+    "num_envs": 512,
+    "rollout_steps": 32,
+    "policy_hz": 100,
+    "physics_hz": 200,
+    "history_length": 16,
+    "frame_dim": 30,
+    "critic_dim": 29,
+    "action_dim": 6,
+    "action_clip": 100.0,
+    "base_config": "../../configs/optimized_control.json",
+    "critic_hidden": [256, 128, 64],
+    "extra_transport_delay_s": 0,
+    "external_pushes": false,
+    "history_padding": "zero_left_padding_with_valid_mask",
+    "target_update_count_is_cumulative": true,
+    "checkpoint_interval_updates": 977,
+    "estimator_control_hidden": [128, 64, 32],
+    "estimator_frame_features": "scaled_frame30 + elapsed_age_over_0.1s + valid_flag; same 32 features for both estimator backbones",
+    "estimator_mlp_hidden": [128, 64],
+    "estimator_transformer": {"d_model": 64, "layers": 2, "heads": 4, "ffn_dim": 128, "readout": "last", "position": "fixed_index", "residual": "add", "dropout": 0},
+    "factory_binding": null,
+    "environment_identity_binding": null,
+    "source_binding": null
+  },
+  "variants": [
+    {"name": "direct_mlp", "family": "direct", "backbone": "mlp", "state_targets": [], "latent_dim": 0, "actor_hidden": [128, 64], "current_frame_bypass": false, "estimator_gradient": "not_applicable", "implementation": "existing_reference_cli"},
+    {"name": "direct_transformer", "family": "direct", "backbone": "transformer", "state_targets": [], "latent_dim": 0, "actor_hidden": [], "current_frame_bypass": false, "estimator_gradient": "not_applicable", "implementation": "existing_reference_cli"},
+    {"name": "velocity_mlp", "family": "velocity", "backbone": "mlp", "state_targets": ["body_com_vx", "body_com_vy", "body_com_vz"], "latent_dim": 0, "current_frame_bypass": true, "estimator_gradient": "detached_separate_optimizer", "implementation": "implemented_cpu_verified"},
+    {"name": "velocity_transformer", "family": "velocity", "backbone": "transformer", "state_targets": ["body_com_vx", "body_com_vy", "body_com_vz"], "latent_dim": 0, "current_frame_bypass": true, "estimator_gradient": "detached_separate_optimizer", "implementation": "implemented_cpu_verified"},
+    {"name": "context_mlp", "family": "context", "backbone": "mlp", "state_targets": ["body_com_vx", "body_com_vy", "body_com_vz", "base_height"], "latent_dim": 16, "current_frame_bypass": true, "estimator_gradient": "detached_separate_optimizer", "implementation": "implemented_cpu_verified"},
+    {"name": "context_transformer", "family": "context", "backbone": "transformer", "state_targets": ["body_com_vx", "body_com_vy", "body_com_vz", "base_height"], "latent_dim": 16, "current_frame_bypass": true, "estimator_gradient": "detached_separate_optimizer", "implementation": "implemented_cpu_verified"}
+  ],
+  "model_capacity": {
+    "count_scope": "All deterministic deployment estimator and action-network parameters; excludes Gaussian exploration, critic, auxiliary target networks and prototypes; graph constants and buffers reported separately.",
+    "maximum_deployment_parameters": {"standard": 100000, "compact": 60000},
+    "mlp_profiles": {
+      "standard": {"direct_hidden": [128, 64], "estimator_hidden": [128, 64]},
+      "compact": {"direct_hidden": [64, 64], "estimator_hidden": [64, 64]}
+    },
+    "transformer_profiles": {
+      "standard": {"d_model": 64, "layers": 2, "heads": 4, "ffn_dim": 128},
+      "compact": {"d_model": 48, "layers": 2, "heads": 4, "ffn_dim": 96}
+    },
+    "expected_deployment_parameters": {
+      "standard": {
+        "direct_mlp": 74694,
+        "direct_transformer": 69446,
+        "velocity_mlp": 89001,
+        "velocity_transformer": 84265,
+        "context_mlp": 92282,
+        "context_transformer": 87546
+      },
+      "compact": {
+        "direct_mlp": 37574,
+        "direct_transformer": 39798,
+        "velocity_mlp": 52073,
+        "velocity_transformer": 54633,
+        "context_mlp": 55354,
+        "context_transformer": 57642
+      }
+    },
+    "compact_ablation": {
+      "enabled_by": "Select one family with task-valid standard MLP and Transformer results; compress both backbones before independent confirmation. If target-device latency disqualifies standard capacity before training, revise and freeze the paired study rather than silently substituting a compact model.",
+      "maximum_selected_families": 1,
+      "backbones_per_family": ["mlp", "transformer"],
+      "training_seeds": [2101, 2113, 2129],
+      "target_updates": 3908,
+      "wiring_seed": 2003,
+      "wiring_updates_per_variant": 80,
+      "fresh_initialization": true,
+      "selection": "Same validation gates and score as standard; prefer compact when tracking score is within 5 percent and no material failure, drift or jitter regression. Report differences rather than claiming statistical equivalence.",
+      "reuse_standard_results": true,
+      "changes_allowed": ["d_model", "ffn_dim", "baseline_hidden", "estimator_mlp_hidden"],
+      "history_and_estimator_control_head_unchanged": true,
+      "accept_compact_if": {
+        "all_task_gates_pass": true,
+        "tracking_score_relative_increase_max": 0.05,
+        "height_within_episode_std_increase_max_m": 0.0002,
+        "vx_within_episode_std_increase_max_m_s": 0.005,
+        "wz_within_episode_std_increase_max_rad_s": 0.02,
+        "standing_xy_max_excursion_p95_increase_max_m": 0.01,
+        "healthy_episode_fraction_must_not_decrease": true,
+        "comparison_scope": "each paired training seed, scenario and evaluation seed; standing drift applies only to standing scenarios"
+      }
+    }
+  },
+  "deployment_timing": {
+    "candidate_budget_hz": 200,
+    "cycle_deadline_ms": 5.0,
+    "complete_network_p99_max_ms": 2.0,
+    "complete_network_p999_target_ms": 3.0,
+    "requires_end_to_end_deadline_measurement": true,
+    "statistics": ["p50", "p95", "p99", "p99.9", "max", "deadline_miss_fraction", "maximum_consecutive_misses"],
+    "backend_baseline": "FP32 ONNX Runtime CPU, batch1, full estimator plus controller",
+    "precision_changes_require_action_and_closed_loop_equivalence": true,
+    "target_device": null,
+    "target_device_verified": false,
+    "minimum_profile_seconds": 1800,
+    "minimum_measured_calls": 100000,
+    "measurement_conditions": ["record CPU model and power mode", "compare 1 and 2 inference threads", "record affinity and governor without silent system changes", "representative ROS and communication load", "warmup and steady thermal state", "paced calls at candidate control rate", "measure input assembly and command submission separately from forward"],
+    "training_policy_hz": 100,
+    "actual_200hz_control_status": "pending_separate_training_and_environment_alignment",
+    "actual_200hz_alignment_requires": ["policy and controller timing", "physics resolution", "time-integrated reward and action-rate penalties", "discount and GAE time horizon", "history duration and memory cost", "full independent closed-loop validation"],
+    "history_at_200hz": "16 frames spans 75ms; 31/32 frames spans 150/155ms and requires a separately counted and benchmarked configuration"
+  },
+  "estimator_training": {
+    "state_target_time": "same endpoint t as policy input history; never post-reset t+1",
+    "velocity_target_scale_m_s": 1.0,
+    "height_target_center_m": 0.30,
+    "height_target_scale_m": 0.10,
+    "optimizer": "Adam",
+    "learning_rate": 0.001,
+    "epochs": 2,
+    "minibatches": 4,
+    "max_grad_norm": 1.0,
+    "state_loss": "mean_squared_error_over_normalized_state_dimensions",
+    "context_loss": "state_loss + 1.0 * HIM_style_swapped_assignment_loss",
+    "context_target": "next same-episode proprio16 only, separately projected; exclude commands, issued actions and clock fields",
+    "context_target_hidden": [128, 64],
+    "context_embedding_dim": 16,
+    "context_prototypes": 32,
+    "context_temperature": 3.0,
+    "sinkhorn_epsilon": 0.05,
+    "sinkhorn_iterations": 3,
+    "context_pair_valid": "not terminated and not truncated and next observation actually captured; no cross-reset pairs",
+    "update_order": ["freeze estimator and collect rollout", "validate old policy moments/log-probabilities", "complete all PPO epochs with estimator frozen", "update estimator using owned rollout targets", "validate policy change induced by estimator before next rollout"],
+    "auxiliary_policy_kl_max": 0.0025,
+    "auxiliary_policy_kl_reference": "post-PPO/pre-estimator policy on all saved rollout endpoints, fixed controller and Gaussian std",
+    "auxiliary_backtracking_lr_factors": [1.0, 0.5, 0.25],
+    "auxiliary_rejection": "restore entire estimator-side model, optimizer, prototype/target state and random state before retry; after all attempts fail keep pre-estimator state",
+    "log_actual_attempted_and_accepted_updates": true,
+    "report_total_behavior_to_final_policy_kl": true
+  },
+  "stages": {
+    "wiring": {"training_seeds": [2003], "variants": "all_six", "updates": 80, "purpose": "contracts_and_optimizer_integrity_only_not_selection"},
+    "feasibility": {"training_seeds": [2309, 2311], "variant": "privileged_current_state_mlp_diagnostic", "initial_checkpoint_updates": 977, "maximum_updates": 3908, "actor": "single-frame history MLP: frame34 includes true body_com_velocity3 and base_height1; age/valid and separate current command retained; hidden 128,64,32", "deployment_candidate": false, "automatic_extension": false, "rule": "Evaluate fixed 16M checkpoint; failed task gate stops for review before optional extension or full matrix; failure does not prove task impossible"},
+    "screening": {"training_seeds": [2101, 2113, 2129], "variants": "all_six", "target_updates": 3908, "evaluation_checkpoint_updates": [977, 1954, 3908], "reference_checkpoint_only_updates": [2931], "execution": "one continuous training segment to target; evaluate immutable saved checkpoints separately", "selection_checkpoint": 3908},
+    "confirmation": {"training_seeds": [2203, 2213, 2221, 2237, 2243], "variants": "one eligible MLP-family winner and one eligible Transformer-family winner", "fresh_initialization": true, "target_updates": 7816, "selection_checkpoint": 7816, "held_out_evaluation_only_at_final": true, "enabled_by": "both families have task-valid candidates and uncertainty justifies confirmation"}
+  },
+  "evaluation": {
+    "num_envs": 8,
+    "vector_steps": 4000,
+    "settle_steps_per_episode": 200,
+    "minimum_steady_samples": 200,
+    "validation_seeds": [3101, 3113],
+    "held_out_seeds": [3203, 3217, 3229],
+    "policy": "deterministic_mean",
+    "nominal_episode_timeout_s": 20,
+    "validation_scenarios": [
+      {"name": "stand_low", "command": [0, 0, 0.28]},
+      {"name": "stand_mid", "command": [0, 0, 0.30]},
+      {"name": "stand_high", "command": [0, 0, 0.32]},
+      {"name": "forward", "command": [0.5, 0, 0.30]},
+      {"name": "reverse", "command": [-0.5, 0, 0.30]},
+      {"name": "turn_left", "command": [0, 1, 0.30]},
+      {"name": "turn_right", "command": [0, -1, 0.30]}
+    ],
+    "held_out_scenarios": [
+      {"name": "stand_low", "command": [0, 0, 0.28]},
+      {"name": "stand_mid", "command": [0, 0, 0.30]},
+      {"name": "stand_high", "command": [0, 0, 0.32]},
+      {"name": "forward", "command": [0.5, 0, 0.30]},
+      {"name": "reverse", "command": [-0.5, 0, 0.30]},
+      {"name": "turn_left", "command": [0, 1, 0.30]},
+      {"name": "turn_right", "command": [0, -1, 0.30]},
+      {"name": "stand_intermediate_low", "command": [0, 0, 0.29]},
+      {"name": "stand_intermediate_high", "command": [0, 0, 0.31]},
+      {"name": "slow_forward_low", "command": [0.25, 0, 0.29]},
+      {"name": "slow_reverse_high", "command": [-0.25, 0, 0.31]},
+      {"name": "combined_forward_left", "command": [0.25, 0.5, 0.29]},
+      {"name": "combined_reverse_right", "command": [-0.25, -0.5, 0.31]}
+    ],
+    "trajectory_fields_required": ["observation_time", "signal_time", "env_id", "episode_id", "frame", "command", "height", "linear_velocity", "angular_velocity", "tilt", "world_position", "raw_mean_action", "issued_action", "leg_target_0", "leg_target_1", "leg_target_2", "leg_target_3", "wheel_target_0", "wheel_target_1", "effort_0", "effort_1", "effort_2", "effort_3", "effort_4", "effort_5", "estimated_state_t", "state_target_t", "terminated", "truncated"],
+    "episode_failure": {"terminated": true, "height_below_m": 0.20, "tilt_above_rad": 0.60, "continuous_violation_s": 0.20, "evaluated_during_settling": true},
+    "research_acceptance": {
+      "status": "proposed_research_thresholds_freeze_before_new_training_not_hardware_requirements",
+      "minimum_healthy_timeout_episode_fraction_per_report": 0.90,
+      "minimum_steady_coverage_per_report": 0.80,
+      "maximum_censored_sample_fraction": 0.10,
+      "stand_steady_height_mae_m": 0.015,
+      "stand_steady_vx_mae_m_s": 0.03,
+      "stand_steady_wz_mae_rad_s": 0.10,
+      "motion_steady_height_mae_m": 0.020,
+      "motion_steady_vx_mae_m_s": 0.10,
+      "motion_steady_wz_mae_rad_s": 0.20,
+      "all_validation_scenarios_and_seeds_required": true,
+      "all_three_screening_training_seeds_required": true,
+      "missing_metrics": "unavailable_never_zero_or_success"
+    },
+    "secondary_metrics": ["signed_tracking_bias", "within_episode_std", "derivative_rms", "world_xy_endpoint_drift", "world_xy_max_excursion", "state_estimation_mae_rmse_p95", "non_wheel_net_force_without_ground_pair_claim", "target_and_effort_changes", "batch1_forward_p50_p95_p99", "end_to_end_latency_separately", "peak_memory", "training_gpu_hours"],
+    "future_suites": ["command_step_responses", "continuous_no_timeout_standing", "validated_nonzero_delay_jitter_dropout", "validated_external_pushes"]
+  },
+  "selection": {
+    "primary_comparison": "MLP versus Transformer within each family; cross-family comparisons are complete recipe comparisons",
+    "ranking": "task eligibility first; then training-seed median of worst-scenario normalized steady tracking MAE",
+    "normalization": "each height/vx/wz steady MAE divided by its stand-or-motion acceptance threshold; maximum over dimensions, scenarios and validation seeds per training seed",
+    "tie_within_relative_fraction": 0.05,
+    "tie_breakers": ["lower worst-training-seed normalized tracking score", "lower p95 standing-episode world_xy_max_excursion", "lower batch1_forward_p99", "fewer deployment_parameters"],
+    "always_report": ["all training seeds", "failures and incomplete runs", "jitter and drift tradeoffs", "actual samples and accepted/attempted optimizer steps", "same-sample and same-resource views"],
+    "statistical_unit": "independent training run; environments and episodes are nested observations",
+    "no_eligible_candidate": "report no task-valid winner; diagnose shared setup before expanding architecture search"
+  },
+  "execution": {
+    "max_parallel": 1,
+    "train_max_seconds_screening": 21600,
+    "job_timeout_seconds_screening": 43200,
+    "train_max_seconds_confirmation": 43200,
+    "job_timeout_seconds_confirmation": 86400,
+    "evaluation_startup_cost_is_separate": true,
+    "interruption": "new output root with lineage, restored optimizer(s), discarded partial samples counted; environment reset disclosed",
+    "global_guard": "bounded queue timeout derived from job count and limits; stop only owned workers",
+    "no_automatic_launch_from_protocol": true
+  },
+  "implementation_requirements": [
+    "detached estimator actor plus separate optimizer checkpoint/restore/export",
+    "version-stable PPO rollout and estimator-induced policy KL audit with transactional retries",
+    "owned same-time state targets and next-observation context targets with reset masks",
+    "paired-family configuration validation and estimator metadata",
+    "saved-checkpoint evaluation orchestration without silently using only final checkpoint",
+    "per-episode physical failure, steady MAE, world displacement and estimate-error reporting",
+    "per-step evaluation traces and source/config/checkpoint lineage",
+    "CPU contracts then bounded real simulator wiring audit before full matrix"
+  ],
+  "optional_followups": [
+    "matched five-frame versus sixteen-frame estimator pairs",
+    "matched joint-gradient versus detached estimator pairs",
+    "matched velocity-only versus velocity-plus-height supervision",
+    "DreamWaQ-style variational context only with explicit latent replay likelihood contract",
+    "equal-budget architecture-specific hyperparameter tuning, reported separately from common-recipe comparison"
+  ]
+}

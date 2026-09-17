@@ -90,13 +90,13 @@ def _verification_cases(config: ModelConfig) -> list[tuple[str, HistoryBatch]]:
         config, [1, max(1, config.history_length // 2), config.history_length]
     )
     reset = _synthetic_history(
-        config, [1 if config.readout_type == "last" else 0, 1, config.history_length]
+        config, [1 if config.requires_current_frame else 0, 1, config.history_length]
     )
     poisoned = reset.clone()
     poisoned.frames[~poisoned.valid] = float("nan")
     poisoned.times[~poisoned.valid] = float("inf")
     changed_command = replace(full, command=full.command + 0.7)
-    if config.readout_type == "last":
+    if config.requires_current_frame:
         changed_command = changed_command.clone()
         start = config.proprio_dim
         changed_command.frames[:, -1, start : start + config.command_dim] = changed_command.command
@@ -240,7 +240,7 @@ def export_policy(checkpoint_path: str | Path, output_path: str | Path) -> dict:
     import onnx
 
     graph = onnx.load_model_from_string(data)
-    if config.readout_type == "last":
+    if config.requires_current_frame:
         # The separate command is a checked-API consistency assertion, not a
         # second computational command path. Preserve the common deployment
         # signature explicitly instead of injecting dummy arithmetic in the actor.
@@ -273,6 +273,10 @@ def export_policy(checkpoint_path: str | Path, output_path: str | Path) -> dict:
             "indices": list(config.auxiliary_indices),
             "coefficient": trainer.config.auxiliary_coef,
             "exported": False,
+            "estimator_type": config.estimator_type,
+            "state_indices": list(config.state_indices),
+            "detached_estimator_exported": config.estimator_type != "none",
+            "context_target_and_prototypes_exported": False,
         },
         "model_config": _config_payload(config), "model_dtype": "float32",
         "inputs": _input_contract(config),
@@ -315,7 +319,7 @@ def export_policy(checkpoint_path: str | Path, output_path: str | Path) -> dict:
     }
     if config.actor_type != "transformer" or config.time_encoding != "elapsed":
         sidecar["time_encoding"] = actor.describe()["time_encoding"]
-    if config.readout_type == "last":
+    if config.requires_current_frame:
         sidecar["history_contract"].update({
             "order": "oldest to newest, left padding, valid current complete frame required last",
             "valid_times": "strictly increasing and <= now; last frame time must equal now exactly",

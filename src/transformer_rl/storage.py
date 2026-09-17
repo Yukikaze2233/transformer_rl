@@ -89,7 +89,7 @@ class PPOBatch:
             if not 0 <= index < len(self):
                 raise IndexError("PPOBatch index out of range")
             index = slice(index, index + 1)
-        return PPOBatch(**{
+        return type(self)(**{
             f.name: (self.history.index(index) if f.name == "history"
                      else getattr(self, f.name)[index])
             for f in fields(self)
@@ -102,6 +102,26 @@ class PPOBatch:
             {name: getattr(self, name) for name in
              ("old_log_prob", "old_value", "advantages", "returns")},
         )
+
+
+@dataclass(frozen=True)
+class EstimatorBatch(PPOBatch):
+    """Owned next-observation targets; invalid pairs never cross episode resets."""
+
+    next_proprio: torch.Tensor
+    next_valid: torch.Tensor
+
+    def validate(self):
+        super().validate()
+        if (self.next_proprio.ndim != 2 or self.next_proprio.shape[0] != len(self)
+            or self.next_proprio.shape[1] < 1 or self.next_proprio.dtype != self.history.frames.dtype
+            or self.next_proprio.device != self.history.frames.device):
+            raise ValueError("next_proprio requires [B, D] with the history dtype/device")
+        if (self.next_valid.shape != (len(self),) or self.next_valid.dtype != torch.bool
+            or self.next_valid.device != self.history.frames.device):
+            raise ValueError("next_valid requires bool [B] on the history device")
+        if not torch.isfinite(self.next_proprio[self.next_valid]).all():
+            raise FloatingPointError("valid next_proprio contains nonfinite values")
 
 
 @dataclass(frozen=True)

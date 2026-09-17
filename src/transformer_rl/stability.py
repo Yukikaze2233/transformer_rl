@@ -26,6 +26,7 @@ class _EpisodeSignal:
     max_abs: float = 0.0
     previous: float = 0.0
     derivative_norm: float = 0.0
+    absolute_total: float = 0.0
 
     def add(self, value: float, delta_t: float | None) -> None:
         if self.moments.count:
@@ -35,6 +36,7 @@ class _EpisodeSignal:
                 raise FloatingPointError("evaluation signal derivative must be finite")
             self.derivative_norm = math.hypot(self.derivative_norm, derivative)
         self.moments.add(value)
+        self.absolute_total += abs(value)
         self.max_abs = max(self.max_abs, abs(value))
         self.previous = value
 
@@ -63,6 +65,7 @@ class _SignalSummary:
     max_abs: float = 0.0
     derivative_norm: float = 0.0
     derivative_count: int = 0
+    absolute_total: float = 0.0
     episode_means: _Moments = field(default_factory=_Moments)
     episode_mean_min: float = math.inf
     episode_mean_max: float = -math.inf
@@ -84,6 +87,7 @@ class _SignalSummary:
         self.mean += (signal.moments.mean - self.mean) * (count / self.count)
         # Deliberately omit between-episode mean offsets from the pooled M2.
         self.within_m2 += signal.moments.m2
+        self.absolute_total += signal.absolute_total
         self.max_abs = max(self.max_abs, signal.max_abs)
         self.derivative_norm = math.hypot(self.derivative_norm, signal.derivative_norm)
         self.derivative_count += count - 1
@@ -94,6 +98,7 @@ class _SignalSummary:
     def report(self) -> dict:
         return {
             "mean": self.mean if self.count else None,
+            "mean_abs": self.absolute_total / self.count if self.count else None,
             "within_episode_std": math.sqrt(max(0.0, self.within_m2) / self.count)
             if self.count else None,
             "derivative_rms": self.derivative_norm / math.sqrt(self.derivative_count)
