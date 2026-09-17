@@ -1,0 +1,106 @@
+{
+  "observed_at": "2026-09-17T19:36:59.956833+00:00",
+  "source": "/home/kaiser/robot-rl-sim60/transformer-estimator-20260918",
+  "root": "/home/kaiser/robot-rl-sim60/estimator-study-20260918",
+  "commit": "5f38d0db8f273aa7f89ea6560eb361a4ad39d44d",
+  "git_status": "",
+  "tmux": "estimator-study-20260918",
+  "status": {
+    "started_at": "2026-09-17T19:24:35.821591+00:00",
+    "pid": 300724,
+    "status": "running",
+    "stage": "wiring",
+    "job": "direct_transformer/seed_2003",
+    "phase": "evaluate_80_stand_mid_3003",
+    "worker_pid": 306482,
+    "completed": [
+      "wiring/direct_mlp/seed_2003"
+    ],
+    "abort_reason": null,
+    "observed_at": "2026-09-17T19:36:55.880185+00:00",
+    "available_memory_bytes": 6320029696,
+    "latest_update": 80,
+    "collected_transitions": 1310720,
+    "optimizer_steps": 8,
+    "estimator_accepted_steps": null
+  },
+  "stage_plan_hashes": {
+    "wiring": "19555f17234952beb0ad13adcbef687b618a28a1843d591355ad75eab191cd63",
+    "feasibility": "3e1ae54a252c0bc98f48f9fa999e87bf6e0da3b9b918e138723eb35046b3818d",
+    "screening": "acf9d205854d0a0e0ebaa8f92d76f13a9b383d2c8063c6549066c5f05846e784"
+  },
+  "package_sha256": "902bd3c7f54dd952f017fdf82599f781965a91350b7e49d746261c64ac2054c0",
+  "parameters": {
+    "direct_mlp": 74694,
+    "direct_transformer": 69446,
+    "velocity_mlp": 89001,
+    "velocity_transformer": 84265,
+    "context_mlp": 92282,
+    "context_transformer": 87546
+  },
+  "initial_completed_wiring_jobs": [
+    {
+      "job": "direct_mlp/seed_2003",
+      "updates": 80,
+      "checkpoint": {
+        "path": "/home/kaiser/robot-rl-sim60/estimator-study-20260918/wiring/plan/jobs/direct_mlp/seed_2003/train/checkpoints/checkpoint_000080.pt",
+        "sha256": "ae37bdf62f0e582f4ce1f79a501f218b31dc88a6ede93e80d9a8bb969ab79880",
+        "update": 80
+      },
+      "train_samples": 1310720,
+      "evaluation_samples": 8000,
+      "trajectory": {
+        "path": "/home/kaiser/robot-rl-sim60/estimator-study-20260918/wiring/plan/jobs/direct_mlp/seed_2003/evaluation_000080/stand_mid_3003.npz",
+        "sha256": "cb145d244a4c3296f41049933b098522aa03e3e3c5518a0a7e1dcf79a23d1d27",
+        "bytes": 1516723,
+        "steps": 1000,
+        "fields": [
+          "angular_velocity",
+          "angular_velocity_x",
+          "angular_velocity_y",
+          "command",
+          "effort_0",
+          "effort_1",
+          "effort_2",
+          "effort_3",
+          "effort_4",
+          "effort_5",
+          "env_id",
+          "episode_id",
+          "estimated_state_t",
+          "frame",
+          "height",
+          "height_error",
+          "issued_action",
+          "leg_target_0",
+          "leg_target_1",
+          "leg_target_2",
+          "leg_target_3",
+          "linear_velocity",
+          "observation_time",
+          "raw_mean_action",
+          "signal_time",
+          "state_target_t",
+          "terminated",
+          "tilt",
+          "truncated",
+          "vx_error",
+          "wheel_target_0",
+          "wheel_target_1",
+          "world_position",
+          "wz_error"
+        ],
+        "time_alignment": "observation_time/state estimates/targets precede action; signal_time/physical states are PRE-reset transition endpoints"
+      },
+      "onnx_export_passed": true,
+      "physical_gate": [
+        "healthy_episode_fraction",
+        "censored_sample_fraction",
+        "height_error_mae"
+      ]
+    }
+  ],
+  "cuda_acceptance_sha256": "c523b8bde0cc8c7ca90247c1d26fecf793a1f052bb2a2eddef2c99e0f04adf0c",
+  "gpu": "90 %, 9997 MiB",
+  "scope": "Startup and wiring evidence; remaining wiring and feasibility are scheduled, not yet accepted."
+}

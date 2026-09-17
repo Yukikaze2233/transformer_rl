@@ -93,6 +93,7 @@ python -m transformer_rl.experiment_cli summarize \
 
 - [训练预算与网络选型计划](docs/TRAINING_EVALUATION_PLAN.md)
 - [估计器与控制网络训练方案](docs/ESTIMATOR_TRAINING_PLAN.md) / [华南虎、复旦与Transformer设计复核](docs/TRANSFORMER_APPLICATIONS.md)
+- [Kaiser估计器队列启动与暂停方法](docs/KAISER_ESTIMATOR_RUN.md)
 - [实验配置、并发和结果汇总](docs/EXPERIMENTS.md)
 - [MLP稳态基线](docs/MLP_STEADY_STATE_BASELINE.md) / [稳定性统计口径](docs/STABILITY_METRICS.md)
 - [优化敏感性复验](docs/KAISER_SENSITIVITY_RECHECK.md) / [浮点一致性问题](docs/BEHAVIOR_PRECISION.md)
