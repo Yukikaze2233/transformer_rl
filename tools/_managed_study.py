@@ -30,21 +30,7 @@ def sha(path):
     return digest.hexdigest()
 
 
-def latest_metric(path):
-    if not path.is_file():
-        return None
-    with path.open('rb') as stream:
-        size = os.fstat(stream.fileno()).st_size
-        stream.seek(max(0, size - 65536))
-        lines = stream.read().splitlines()
-    for line in reversed(lines):
-        try:
-            value = json.loads(line)
-            if 'update' in value and 'collection' in value:
-                return value
-        except ValueError:
-            continue
-    return None
+latest_metric = control.latest_metric
 
 
 class ManagedStudy:

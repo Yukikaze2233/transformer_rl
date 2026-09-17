@@ -130,6 +130,17 @@ def test_review_gate_is_not_bypassed_by_start(registration):
     assert not (Path(value['root']) / 'control/current.json').exists()
 
 
+def test_paused_legacy_status_reports_saved_update_without_loading_model(registration):
+    _, value = registration
+    root = Path(value['root'])
+    trainctl.save_json(root / 'status.json', {'status': 'stopped', 'stage': 'wiring', 'job': 'm/seed_1'})
+    trainctl.save_json(root / 'wiring/plan/jobs/m/seed_1/train/completion.json',
+                      {'cumulative_update': 80, 'collected_transitions': 1310720})
+    state = trainctl.status(value)
+    assert not state['active'] and state['latest_saved_update'] == 80
+    assert state['collected_transitions'] == 1310720
+
+
 def test_pause_intent_before_supervisor_boot_never_imports_training_source(registration):
     _, value = registration
     root = Path(value['root'])

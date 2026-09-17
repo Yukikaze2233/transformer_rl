@@ -36,6 +36,43 @@ def read_json(path, default=None):
         return default
 
 
+def latest_metric(path):
+    if not path.is_file():
+        return None
+    with path.open('rb') as stream:
+        size = os.fstat(stream.fileno()).st_size
+        stream.seek(max(0, size - 65536))
+        lines = stream.read().splitlines()
+    for line in reversed(lines):
+        try:
+            value = json.loads(line)
+            if 'update' in value and 'collection' in value:
+                return value
+        except ValueError:
+            continue
+    return None
+
+
+def with_progress(root, state, *, legacy=False):
+    state = dict(state)
+    metric_path = state.get('metric_path')
+    if not metric_path and legacy and state.get('stage') and state.get('job'):
+        metric_path = root / state['stage'] / 'plan/jobs' / state['job'] / 'train/metrics.jsonl'
+    if metric_path:
+        metric_path = inside(root, metric_path)
+        completion = read_json(metric_path.parent / 'completion.json')
+        if completion:
+            state.update(latest_update=completion['cumulative_update'],
+                         latest_saved_update=completion['cumulative_update'],
+                         collected_transitions=completion['collected_transitions'])
+        else:
+            metric = latest_metric(metric_path)
+            if metric:
+                state.update(latest_update=metric['update'],
+                             collected_transitions=metric['collection']['total_transitions'])
+    return state
+
+
 def save_json(path, data, *, replace=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,11 +251,12 @@ def status(value):
         orphans = orphan_workers(root) if not live else []
         if orphans:
             reported = 'orphaned_worker'
-        return {**state, **(receipt or {}), 'status': reported, 'active': live or bool(orphans),
+        progress = with_progress(root, {**state, **(receipt or {})})
+        return {**progress, 'status': reported, 'active': live or bool(orphans),
                 'supervisor_active': live, 'orphaned_workers': orphans,
                 'identity': launch.get('identity'), 'attempt': str(attempt), 'root': str(root),
                 'log': state.get('worker_log') or str(attempt / 'control.log'), 'managed': True}
-    original = read_json(root / 'status.json', {})
+    original = with_progress(root, read_json(root / 'status.json', {}), legacy=True)
     identity = legacy_identity(root)
     reported = original.get('status', 'prepared')
     if reported == 'running' and not identity:
