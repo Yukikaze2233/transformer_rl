@@ -1,0 +1,34 @@
+{
+  "verified_at": "2026-09-17T20:43:02.262358+00:00",
+  "controller_commit": "b54a76aa4f3fd9f45138804bda7a9e6761129e9d",
+  "controller_source": "/home/kaiser/robot-rl-sim60/train-control-20260918",
+  "training_source": "/home/kaiser/robot-rl-sim60/transformer-estimator-20260918",
+  "entrypoint": "/home/kaiser/trainctl",
+  "registry": "/home/kaiser/robot-rl-sim60/control/registry.json",
+  "real_study_status": "stopped",
+  "real_study_active": false,
+  "latest_saved_update": 80,
+  "registration": {
+    "root": "/home/kaiser/robot-rl-sim60/estimator-study-20260918",
+    "source": "/home/kaiser/robot-rl-sim60/transformer-estimator-20260918",
+    "python": "/home/kaiser/robot-rl-sim60/env/bin/python",
+    "runtime": "/home/kaiser/robot-rl-sim60/bin/sim60-runtime.sh"
+  },
+  "native_fixture": {
+    "passed": true,
+    "native_tmux": true,
+    "duplicate_start_idempotent": true,
+    "pause_idempotent": true,
+    "resume_new_attempt": true,
+    "first_attempt": "/home/kaiser/robot-rl-sim60/control/native-smoke-current/study/control/attempts/20260917T204301Z-72bc44d1",
+    "second_attempt": "/home/kaiser/robot-rl-sim60/control/native-smoke-current/study/control/attempts/20260917T204301Z-c95a6e3b",
+    "final_status": "stopped",
+    "scope": "standard-library sleeping fixture; no neural network, simulator or CUDA"
+  },
+  "controller_sha256": {
+    "trainctl.py": "991e1bd4fe0156799926f6e37d41ff49ba41add94e0c9f80c176ee1d9ae18f46",
+    "_managed_study.py": "e5a81622fbf8409999f812db3d3618b293ea2ab6216d2cd0f1db924b732e7c99"
+  },
+  "real_training_resumed": false,
+  "ssh_terminal_menu_checked": true
+}

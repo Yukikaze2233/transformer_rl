@@ -110,3 +110,15 @@ STUDY/control/attempts/GENERATION/STAGE/jobs/VARIANT/seed_SEED/...
 四项训练均已有update80检查点：direct MLP、direct Transformer、velocity MLP、velocity Transformer。
 前三项完整接线已完成；第四项的评估中断。之后恢复应从该评估继续，再处理尚未开始的任务。
 控制工具的开发与部署验证使用测试进程及只读CPU检查，真实训练保持暂停。
+
+## 部署验证
+
+- 当前Kaiser控制器提交：`b54a76aa4f3fd9f45138804bda7a9e6761129e9d`，GitHub CI通过。
+- 控制器源码：`/home/kaiser/robot-rl-sim60/train-control-20260918`；学习源码仍为原冻结快照。
+- 全量CPU检查1101项通过，随后进度显示修订的启停/恢复专项17项通过。
+- Kaiser原生tmux测试覆盖启动、重复启动幂等、暂停幂等和新attempt恢复，全部通过。
+  该测试只运行标准库睡眠进程，未启动神经网络、仿真或CUDA。
+- 实际study的`status/check/pause`及SSH终端菜单已验证；真实任务为`stopped / active=false`。
+
+收据：[training-control-deployment.json](evidence/training-control-deployment.json)、
+[estimator-study-stop.json](evidence/estimator-study-stop.json)。

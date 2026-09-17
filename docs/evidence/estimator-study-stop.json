@@ -1,0 +1,17 @@
+{
+  "started_at": "2026-09-17T19:24:35.821591+00:00",
+  "pid": 300724,
+  "status": "stopped",
+  "stage": "wiring",
+  "job": "velocity_transformer/seed_2003",
+  "phase": "evaluate_80_stand_mid_3003",
+  "worker_pid": null,
+  "completed": [
+    "wiring/direct_mlp/seed_2003",
+    "wiring/direct_transformer/seed_2003",
+    "wiring/velocity_mlp/seed_2003"
+  ],
+  "abort_reason": "SIGTERM",
+  "error": "study stop requested",
+  "finished_at": "2026-09-17T19:49:28.145556+00:00"
+}
