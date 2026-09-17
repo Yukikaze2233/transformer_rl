@@ -52,6 +52,10 @@ Transformer默认使用64维、2层、4个注意力头。辅助监督单独分�
 
 ## 快速开始
 
+Kaiser已提供终端启停入口：`~/trainctl status`、`~/trainctl pause estimator`、
+`~/trainctl resume estimator`，以及`~/trainctl menu estimator`菜单。
+使用方法及续训边界见[训练启停控制](docs/TRAINING_CONTROL.md)。
+
 需要 Python 3.11 或更新版本，建议使用独立环境：
 
 ```bash
@@ -94,6 +98,7 @@ python -m transformer_rl.experiment_cli summarize \
 - [训练预算与网络选型计划](docs/TRAINING_EVALUATION_PLAN.md)
 - [估计器与控制网络训练方案](docs/ESTIMATOR_TRAINING_PLAN.md) / [华南虎、复旦与Transformer设计复核](docs/TRANSFORMER_APPLICATIONS.md)
 - [Kaiser估计器队列启动与暂停方法](docs/KAISER_ESTIMATOR_RUN.md)
+- [本机与SSH训练启停控制](docs/TRAINING_CONTROL.md)
 - [实验配置、并发和结果汇总](docs/EXPERIMENTS.md)
 - [MLP稳态基线](docs/MLP_STEADY_STATE_BASELINE.md) / [稳定性统计口径](docs/STABILITY_METRICS.md)
 - [优化敏感性复验](docs/KAISER_SENSITIVITY_RECHECK.md) / [浮点一致性问题](docs/BEHAVIOR_PRECISION.md)

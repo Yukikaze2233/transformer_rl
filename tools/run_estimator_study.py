@@ -376,17 +376,19 @@ def main():
             return
         launch = read(root / 'launch.json')
         pid = launch['pid']
-        descriptor = os.pidfd_open(pid)
-        try:
-            command = Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')
-            ticks = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
-            if (str(Path(__file__).resolve()).encode() not in command or str(root).encode() not in command
-                or b'run' not in command or ticks != launch['process_start_ticks']):
-                raise ValueError('PID identity differs from the study launcher')
-            signal.pidfd_send_signal(descriptor, signal.SIGTERM)
-            print('Study stop requested; wait for its exit receipt and saved checkpoint')
-        finally:
-            os.close(descriptor)
+        if __package__:
+            from . import trainctl
+        else:
+            import trainctl
+        identity = trainctl.process_identity(pid)
+        if identity is None:
+            print('Study process already exited; inspect its receipt and checkpoints')
+            return
+        if (str(Path(__file__).resolve()) not in identity['argv'] or str(root) not in identity['argv']
+            or 'run' not in identity['argv'] or identity['start_ticks'] != launch['process_start_ticks']):
+            raise ValueError('PID identity differs from the study launcher')
+        trainctl.signal_checked(identity)
+        print('Study stop requested; wait for its exit receipt and saved checkpoint')
 
 
 if __name__ == '__main__':
