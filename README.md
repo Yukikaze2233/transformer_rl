@@ -1,6 +1,6 @@
 # transformer_rl
 
-这个项目想把一件事做清楚：**在轮腿机器人的控制任务里，什么形式的 Transformer 更合适？**
+这个项目研究的是：**在机器人的控制任务里，什么形式的 Transformer 更合适？**
 
 我们关心的不只是机器人能不能动起来，还包括站立时会不会慢慢漂走、不同高度能不能保持、动作是否抖动，以及这些表现需要多少训练和推理开销。MLP 和 GRU 都是值得认真对待的对照，Transformer 是否有优势，要靠同条件下的结果说明。
 
@@ -97,12 +97,10 @@ python -m transformer_rl.experiment_cli summarize \
 
 - [训练预算与网络选型计划](docs/TRAINING_EVALUATION_PLAN.md)
 - [估计器与控制网络训练方案](docs/ESTIMATOR_TRAINING_PLAN.md) / [华南虎、复旦与Transformer设计复核](docs/TRANSFORMER_APPLICATIONS.md)
-- [Kaiser估计器队列启动与暂停方法](docs/KAISER_ESTIMATOR_RUN.md)
+- [训练方法](docs/KAISER_ESTIMATOR_RUN.md)
 - [本机与SSH训练启停控制](docs/TRAINING_CONTROL.md)
 - [实验配置、并发和结果汇总](docs/EXPERIMENTS.md)
 - [MLP稳态基线](docs/MLP_STEADY_STATE_BASELINE.md) / [稳定性统计口径](docs/STABILITY_METRICS.md)
 - [优化敏感性复验](docs/KAISER_SENSITIVITY_RECHECK.md) / [浮点一致性问题](docs/BEHAVIOR_PRECISION.md)
 - [检查点与ONNX导出](docs/EXPORT.md)
 - [视觉修复审查](docs/CHASSIS_GEOMETRY_REVIEW.md)
-
-维护者：`yukikaze2233 <yingziyuw@gmail.com>`。
