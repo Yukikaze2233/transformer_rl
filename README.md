@@ -2,6 +2,11 @@
 
 这个项目研究的是：**在机器人的控制任务里，什么形式的 Transformer 更合适？**
 
+**本轮研究已于2026年9月19日收尾，Transformer训练已停止。** 当前实验没有显示出
+足以支持工程替换的Transformer优势，低层实时控制优先采用短历史MLP／轻量估计器。
+这是当前任务与实验预算下的选型决定；历史长度消融和完整估计器长训尚未完成。
+结果、适用范围与代码索引见[研究结论与归档](docs/RESEARCH_CONCLUSION.md)。
+
 我们关心的不只是机器人能不能动起来，还包括站立时会不会慢慢漂走、不同高度能不能保持、动作是否抖动，以及这些表现需要多少训练和推理开销。MLP 和 GRU 都是值得认真对待的对照，Transformer 是否有优势，要靠同条件下的结果说明。
 
 代码使用 PyTorch，实现了自己的 PPO、历史管理和实验调度，没有依赖 RSL-RL。仿真通过环境接口接入；目前已在 Kaiser 的 Isaac Lab 环境跑通真实训练与评估。
@@ -44,17 +49,17 @@ Transformer默认使用64维、2层、4个注意力头。辅助监督单独分�
 
 多架构的训练、检查点恢复、ONNX导出、命名场景评估和批量汇总已经接通。Kaiser上完成了六种网络的短训试验，以及学习率、输出初始化和探索标准差的敏感性研究。
 
-目前采用的工作配方是 `learning_rate=3e-5`、`mean_init_scale=0.1`、`initial_std=0.2`。它让 Transformer 在三个新 seed 上都能充分使用优化预算，但短训的高度和接触表现还不好，不能据此选出赢家。
+本轮采用的工作配方是 `learning_rate=3e-5`、`mean_init_scale=0.1`、`initial_std=0.2`。它让 Transformer 在三个新 seed 上都能充分使用优化预算，但短训的高度和接触表现还不好，不能据此选出赢家。
 
-已完成首轮为 **7种网络 × 3个训练 seed**，每项累计977次更新，对应完整rollout预算 **16,007,168个样本**；两个分段续训任务另保留中断和采样计数。[估计器对照方案](docs/ESTIMATOR_TRAINING_PLAN.md)的六种网络现已实现并通过CPU验证，主档部署参数均在10万以内，配对比较MLP与Transformer。分阶段队列先验证接线和16M任务可行性，通过后再进入18项64M主对照，保存并评估16M/32M/64M检查点。
+已完成首轮为 **7种网络 × 3个训练 seed**，每项累计977次更新，对应完整rollout预算 **16,007,168个样本**；两个分段续训任务另保留中断和采样计数。[估计器对照方案](docs/ESTIMATOR_TRAINING_PLAN.md)的六种网络已实现，主档部署参数均在10万以内。实际执行到接线阶段：三个任务完整完成，第四个训练完成但评估中断，两个context任务未启动。16M特权诊断、18项64M主对照及更长预算实验取消执行，计划和实现保留供复查。
 
-机械模型本次只做了视觉随动修复。训练继续采用同一研究动力学，视觉组件数量不会自动变成新的物理自由度。模型和驱动仍有研究近似，当前对照也没有覆盖非零通信延迟或推扰，结果会按这个范围解释。
+机械模型本次只做了视觉随动修复。这些训练采用同一研究动力学，视觉组件数量不会自动变成新的物理自由度。模型和驱动仍有研究近似，本轮对照没有覆盖非零通信延迟或推扰，结果按这个范围解释。
 
 ## 快速开始
 
-Kaiser已提供终端启停入口：`~/trainctl status`、`~/trainctl pause estimator`、
-`~/trainctl resume estimator`，以及`~/trainctl menu estimator`菜单。
-使用方法及续训边界见[训练启停控制](docs/TRAINING_CONTROL.md)。
+当前队列已停止，可用 `~/trainctl status estimator` 查看状态。
+终端控制工具及恢复机制保留，使用方法见[训练启停控制](docs/TRAINING_CONTROL.md)；
+本轮收尾不安排恢复训练。
 
 需要 Python 3.11 或更新版本，建议使用独立环境：
 
@@ -95,6 +100,7 @@ python -m transformer_rl.experiment_cli summarize \
 
 ## 文档
 
+- [研究结论、实时控制取舍与代码索引](docs/RESEARCH_CONCLUSION.md)
 - [训练预算与网络选型计划](docs/TRAINING_EVALUATION_PLAN.md)
 - [估计器与控制网络训练方案](docs/ESTIMATOR_TRAINING_PLAN.md) / [华南虎、复旦与Transformer设计复核](docs/TRANSFORMER_APPLICATIONS.md)
 - [训练方法](docs/KAISER_ESTIMATOR_RUN.md)

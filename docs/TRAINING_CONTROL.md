@@ -1,5 +1,9 @@
 # 本机与SSH训练启停
 
+**状态：2026-09-19本轮研究收尾，`estimator`已确认停止，后续训练计划取消。**
+以下是保留的工具说明，启动／恢复命令不代表当前运行安排。
+最终结论见[研究结论与归档](RESEARCH_CONCLUSION.md)。
+
 `trainctl`提供命令行和终端菜单，控制已经规划好的估计器study。
 控制入口只依赖Linux系统Python；学习过程继续使用该study登记的Python、runtime和冻结源码。
 

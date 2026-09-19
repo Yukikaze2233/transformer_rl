@@ -1,9 +1,12 @@
-# Kaiser：估计器对照的分阶段启动记录
+# 训练方法
+
+**本轮研究已于2026-09-19收尾，队列确认停止，后续训练计划取消。**
+结论与最终执行范围见[研究结论与归档](RESEARCH_CONCLUSION.md)。以下保留训练方法及历史记录。
 
 ## 实际启动
 
-**最新状态：用户于03:49要求暂停以训练其他任务，本队列已在03:49:28正常停止。**
-后续使用[trainctl](TRAINING_CONTROL.md)控制启动/暂停/继续。以下保留本批首次启动的历史记录。
+2026-09-18用户于03:49要求暂停以训练其他任务，本队列已在03:49:28正常停止。
+[trainctl](TRAINING_CONTROL.md)提供启动／暂停／继续机制；本轮不安排恢复。
 
 队列于 **2026-09-18 03:24:35 +08:00** 启动，单任务串行。
 运行源码提交为 `5f38d0db8f273aa7f89ea6560eb361a4ad39d44d`，工作树clean；
@@ -47,15 +50,12 @@
 在Kaiser上：
 
 ```bash
-source /home/kaiser/robot-rl-sim60/bin/sim60-runtime.sh
-SOURCE=/home/kaiser/robot-rl-sim60/transformer-estimator-20260918
-ROOT=/home/kaiser/robot-rl-sim60/estimator-study-20260918
-export PYTHONPATH="$SOURCE/src:$SOURCE"
-python -m json.tool "$ROOT/status.json"
-python "$SOURCE/tools/run_estimator_study.py" stop --root "$ROOT"
+~/trainctl status estimator --json
+~/trainctl pause estimator --wait 180
 ```
 
-`stop`核对launcher PID、启动tick、脚本和root，再用pidfd发送SIGTERM。所属worker有
+控制器使用系统Python，避免旧SDK缺少`pidfd_open`的问题；核对launcher PID、启动tick、
+脚本和root，再用pidfd发送SIGTERM。所属worker有
 120s清理宽限；最终以`execution-receipt.json`及checkpoint为准。仅有`launch.json`
 不能证明后续阶段完成。回收继续使用`tools/recover_study.py`的快照/逐文件SHA流程。
 
@@ -73,4 +73,4 @@ Last-token约−86.95mm；前进vx MAE分别约0.5051和0.5024m/s，两者都尚
 5帧历史、同样frame30与时间特征的速度估计MLP，加相同控制头，实际参数量为：
 encoder `[64,64]`时29,545，`[128,64]`时43,945（均不含探索参数与critic）。
 这是值得优先研究的工程基线，但改变历史长度属于新的信息窗口实验，需要独立配置
-和预算；不能在正在运行的冻结队列中静默替换。
+和预算；不能将它视为已完成的冻结矩阵对照结果。

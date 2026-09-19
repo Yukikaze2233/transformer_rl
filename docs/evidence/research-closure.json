@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-09-19T14:28:45.318225+00:00",
+  "decision": "Close the current Transformer study; prioritize short-history MLP or lightweight estimators for low-level control.",
+  "decision_scope": "Engineering selection under current evidence, not universal architecture superiority.",
+  "user_requested_stop": true,
+  "stop_command": "~/trainctl pause estimator --wait 180",
+  "status_command": "~/trainctl status --json",
+  "study": "estimator",
+  "root": "/home/kaiser/robot-rl-sim60/estimator-study-20260918",
+  "status": "stopped",
+  "active": false,
+  "supervisor_active": false,
+  "orphaned_workers": [],
+  "original_finished_at": "2026-09-17T19:49:28.145556+00:00",
+  "stage": "wiring",
+  "job": "velocity_transformer/seed_2003",
+  "phase": "evaluate_80_stand_mid_3003",
+  "latest_saved_update": 80,
+  "current_job_collected_transitions": 1310720,
+  "completed_jobs": [
+    "wiring/direct_mlp/seed_2003",
+    "wiring/direct_transformer/seed_2003",
+    "wiring/velocity_mlp/seed_2003"
+  ],
+  "process_scan": {
+    "source": "/proc/*/cmdline",
+    "excluded": "The scanner and its invoking shell",
+    "markers": ["transformer_rl.cli", "transformer_rl.experiment_cli", "run_estimator_study.py", "_managed_study.py", "transformer-estimator-20260918"],
+    "matching_processes": []
+  },
+  "remaining_training_plan": "cancelled_by_user",
+  "automatic_resume_scheduled": false,
+  "policy_quality_verified": false,
+  "analysis": {
+    "path": "artifacts/analysis/training-results-20260918/results.json",
+    "sha256": "58a7fe4efbb0c888906afd4d3e3b08080e57563fa49560fdcff54d5373402c7b"
+  },
+  "wiring_archive": {
+    "path": "artifacts/recovered/estimator-results-20260918T1010Z/snapshot.tar.gz",
+    "sha256": "65435ce3d980837bf4a4a9e02e21a3e723174252ddda7834479744a673179b66",
+    "verified_file_count": 260
+  }
+}

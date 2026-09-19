@@ -47,8 +47,8 @@ CPU加载使用本地有限float32频率兼容修复，详见 [CHECKPOINT_PORTAB
 小型核验收据：[architecture-complete-recovery.json](evidence/architecture-complete-recovery.json)。
 大归档、权重和原始日志位于被Git忽略的artifacts目录。
 
-## 后续训练
+## 后续研究状态
 
-首轮到此归档，后续按 [估计器训练方案](ESTIMATOR_TRAINING_PLAN.md) 建立独立实验。
-新主档部署参数限制10万以内，轻量档6万以内，网络与估计器的规模按容量表审计。
-这不是把旧模型强制裁剪或沿用旧优化器训练新结构；新结构使用新配置、初始化和检查点来源。
+首轮已归档。随后按[估计器训练方案](ESTIMATOR_TRAINING_PLAN.md)建立的独立实验仅部分
+完成接线，于2026-09-19结束后续安排。最终证据范围和工程选型见
+[研究结论与归档](RESEARCH_CONCLUSION.md)。
