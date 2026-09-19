@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820" role="img" aria-labelledby="title desc">
+  <title id="title">历史估计器与当前帧控制器分离的网络架构</title>
+  <desc id="desc">历史帧加入elapsed age和valid后形成16乘32的估计器输入。MLP或Transformer输出速度或速度高度与上下文，与当前帧拼接后输入128、64、32的ELU控制器输出六维动作。独立监督训练估计器，PPO冻结估计器；独立critic只在训练时使用。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#263746"/></marker>
+    <marker id="aux" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#a46b35"/></marker>
+    <style>
+      text { font-family: 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif; fill:#263746; }
+      .title { font-size:34px; font-weight:700; }
+      .label { font-size:22px; text-anchor:middle; font-weight:500; }
+      .small { font-size:18px; text-anchor:middle; fill:#536775; }
+      .note { font-size:19px; fill:#536775; }
+      .box { stroke:#263746; stroke-width:2.2; rx:12; }
+      .flow { stroke:#263746; stroke-width:2.4; fill:none; marker-end:url(#arrow); }
+      .aux { stroke:#a46b35; stroke-width:2.3; stroke-dasharray:7 6; fill:none; marker-end:url(#aux); }
+    </style>
+  </defs>
+  <rect width="1280" height="820" fill="white"/>
+  <text x="55" y="58" class="title">历史负责估计，当前帧负责反馈</text>
+  <text x="55" y="95" class="note">EstimatorActor · 四种估计器变体共用同一控制头 · 实线为部署计算路径</text>
+  <text x="55" y="144" class="note">DEPLOYMENT</text>
+
+  <rect x="55" y="215" width="230" height="102" class="box" fill="#edf1f6"/>
+  <text x="170" y="250" class="label">历史观测 · 16 × 30</text>
+  <text x="170" y="280" class="small">+ elapsed age + valid</text>
+  <text x="170" y="305" class="small">估计器特征 · 16 × 32</text>
+  <path d="M288 266 H335" class="flow"/>
+  <rect x="338" y="197" width="290" height="138" class="box" fill="#dceef1"/>
+  <text x="483" y="236" class="label">History Estimator</text>
+  <text x="483" y="270" class="small">MLP · [128, 64] + ELU</text>
+  <text x="483" y="298" class="small">或 Transformer · 2层 / d64 / 4头</text>
+  <text x="483" y="324" class="small">独立优化 · 推理时仍需运行</text>
+  <path d="M630 266 H677" class="flow"/>
+  <rect x="680" y="206" width="260" height="120" class="box" fill="#dfeee2"/>
+  <text x="810" y="243" class="label">估计状态 / 上下文</text>
+  <text x="810" y="277" class="small">Velocity：3 维线速度</text>
+  <text x="810" y="306" class="small">Context：速度 + 高度 + 16维 z</text>
+  <path d="M942 266 H1060 V385" class="flow"/>
+  <text x="1140" y="337" class="small">detach</text>
+  <text x="1140" y="364" class="small">PPO 时</text>
+
+  <rect x="55" y="385" width="290" height="76" class="box" fill="#edf1f6"/>
+  <text x="200" y="418" class="label">当前帧 · 30 维</text>
+  <text x="200" y="448" class="small">含当前指令，时间量已缩放</text>
+  <path d="M346 423 H966" class="flow"/>
+  <text x="645" y="408" class="small">直接反馈路径</text>
+  <rect x="969" y="388" width="182" height="70" class="box" fill="#e8e4f0"/>
+  <text x="1060" y="432" class="label">Concatenate</text>
+  <path d="M1060 461 V509" class="flow"/>
+  <rect x="816" y="512" width="406" height="86" class="box" fill="#f8e6c7"/>
+  <text x="1019" y="548" class="label">Controller · [128, 64, 32] + ELU</text>
+  <text x="1019" y="581" class="small">输入 33 / 50 维 → Linear → 6 维动作均值</text>
+  <path d="M1019 600 V646" class="flow"/>
+  <text x="1019" y="680" class="label">6 维动作均值 → 环境动作映射</text>
+
+  <path d="M55 490 H749" stroke="#dbe3e8" stroke-width="1.5"/>
+  <text x="55" y="528" class="note">TRAINING ONLY</text>
+  <rect x="55" y="554" width="310" height="99" class="box" fill="#fcf5eb"/>
+  <text x="210" y="591" class="label">特权标签 / 辅助目标</text>
+  <text x="210" y="623" class="small">状态监督；Context 另加 swap loss</text>
+  <path d="M367 600 H483 V338" class="aux"/>
+  <text x="574" y="510" class="small">独立 Adam</text>
+  <rect x="520" y="554" width="235" height="99" class="box" fill="#f1efda"/>
+  <text x="637" y="591" class="label">独立 Critic</text>
+  <text x="637" y="623" class="small">29 → 256 → 128 → 64 → V</text>
+
+  <path d="M55 715 H1225" stroke="#dbe3e8" stroke-width="1.5"/>
+  <text x="55" y="751" class="note">PPO 冻结估计器；辅助更新单独执行，并由 KL 门槛决定接受或回滚。Critic 与 target/prototypes 不部署。</text>
+  <text x="55" y="784" class="note">实现已具备；实际实验仅部分完成接线，完整估计器长训未执行。来源：model.py / estimation.py</text>
+</svg>

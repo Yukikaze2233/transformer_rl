@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1110" viewBox="0 0 1280 1110" role="img" aria-labelledby="title desc">
+  <title id="title">机器人控制 Transformer：Last-token 主路径与 Pre-LN 因果层</title>
+  <desc id="desc">16帧30维观测经过时间缩放、线性投影和位置编码，进入两层因果自注意力。最终LayerNorm后读取当前帧，线性输出六维动作均值。右侧展示LayerNorm、四头注意力、残差加法、LayerNorm、GELU前馈和残差加法。环境负责动作映射。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#263746"/></marker>
+    <style>
+      text { font-family: 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif; fill: #263746; }
+      .title { font-size: 34px; font-weight: 700; }
+      .label { font-size: 23px; font-weight: 500; text-anchor: middle; }
+      .small { font-size: 18px; fill: #536775; text-anchor: middle; }
+      .note { font-size: 19px; fill: #536775; }
+      .box { stroke: #263746; stroke-width: 2.2; rx: 12; }
+      .flow { fill: none; stroke: #263746; stroke-width: 2.4; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1280" height="1110" fill="#fff"/>
+  <text x="60" y="58" class="title">从历史观测到连续动作</text>
+  <text x="60" y="96" class="note">TimeAwareActor · 图示为 Last-token / Index / Additive 配置 · 100 Hz 策略</text>
+
+  <text x="280" y="143" class="label">动作均值 μ · 6 维</text>
+  <rect x="130" y="167" width="300" height="64" class="box" fill="#dfeee2"/>
+  <text x="280" y="207" class="label">Linear · 64 → 6</text>
+  <path d="M280 166 V150" class="flow"/>
+  <path d="M280 268 V233" class="flow"/>
+  <rect x="130" y="270" width="300" height="64" class="box" fill="#e8e4f0"/>
+  <text x="280" y="310" class="label">读取当前帧 · Last token</text>
+  <path d="M280 369 V336" class="flow"/>
+  <rect x="130" y="371" width="300" height="56" class="box" fill="#f1efda"/>
+  <text x="280" y="407" class="label">LayerNorm</text>
+  <path d="M280 481 V429" class="flow"/>
+
+  <rect x="112" y="490" width="334" height="140" class="box" fill="#f4f7f8"/>
+  <rect x="102" y="480" width="334" height="140" class="box" fill="#edf3f6"/>
+  <text x="269" y="529" class="label">Causal Transformer</text>
+  <text x="269" y="565" class="label">2 layers · d = 64</text>
+  <text x="269" y="597" class="small">4 heads · FFN = 128</text>
+  <path d="M280 685 V635" class="flow"/>
+  <circle cx="280" cy="705" r="19" fill="#fff" stroke="#263746" stroke-width="2.2"/>
+  <text x="280" y="713" class="label">+</text>
+  <path d="M280 764 V727" class="flow"/>
+  <rect x="130" y="766" width="300" height="65" class="box" fill="#f3e1df"/>
+  <text x="280" y="807" class="label">Linear · 30 → 64</text>
+  <path d="M280 884 V834" class="flow"/>
+  <text x="363" y="865" class="small">时间量缩放</text>
+  <rect x="82" y="887" width="396" height="80" class="box" fill="#edf1f6"/>
+  <text x="280" y="921" class="label">历史观测 · 16 × 30</text>
+  <text x="280" y="951" class="small">本体量 / 指令 / 上条动作 / 时间特征</text>
+  <rect x="449" y="674" width="238" height="64" class="box" fill="#f1efda"/>
+  <text x="568" y="713" class="label">Sin / Cos 位置编码</text>
+  <path d="M448 705 H302" class="flow"/>
+  <text x="561" y="774" class="small">时间戳与 valid mask</text>
+  <text x="561" y="801" class="small">另用于历史有效性检查</text>
+
+  <path d="M467 550 H718" fill="none" stroke="#90a3af" stroke-width="2" stroke-dasharray="7 6"/>
+  <text x="587" y="528" class="small">单层展开 →</text>
+  <text x="979" y="184" class="label">Pre-LN 因果层</text>
+  <text x="979" y="216" class="small">先归一化，再计算，再残差相加</text>
+  <rect x="747" y="245" width="465" height="722" rx="25" fill="#f7f9fa" stroke="#263746" stroke-width="2.3"/>
+  <text x="980" y="280" class="small">每层保持 token 宽度 64</text>
+  <path d="M980 347 V302" class="flow"/>
+  <circle cx="980" cy="369" r="19" fill="#fff" stroke="#263746" stroke-width="2.2"/>
+  <text x="980" y="377" class="label">+</text>
+  <path d="M980 421 V390" class="flow"/>
+  <rect x="829" y="423" width="301" height="87" class="box" fill="#dceef1"/>
+  <text x="980" y="459" class="label">Feed Forward</text>
+  <text x="980" y="491" class="small">64 → 128 · GELU · 128 → 64</text>
+  <path d="M980 546 V512" class="flow"/>
+  <rect x="829" y="548" width="301" height="54" class="box" fill="#f1efda"/>
+  <text x="980" y="583" class="label">LayerNorm</text>
+  <path d="M980 643 V604" class="flow"/>
+  <path d="M980 623 H1174 V369 H1002" class="flow"/>
+  <circle cx="980" cy="665" r="19" fill="#fff" stroke="#263746" stroke-width="2.2"/>
+  <text x="980" y="673" class="label">+</text>
+  <path d="M980 716 V686" class="flow"/>
+  <rect x="829" y="718" width="301" height="93" class="box" fill="#f8e6c7"/>
+  <text x="980" y="752" class="label">Masked Self-Attention</text>
+  <text x="980" y="779" class="small">Q / K / V · 4 heads · output proj.</text>
+  <text x="980" y="801" class="small">causal + padding mask</text>
+  <path d="M980 842 V814" class="flow"/>
+  <rect x="829" y="844" width="301" height="54" class="box" fill="#f1efda"/>
+  <text x="980" y="879" class="label">LayerNorm</text>
+  <path d="M980 946 V900" class="flow"/>
+  <path d="M980 921 H785 V665 H958" class="flow"/>
+  <circle cx="980" cy="921" r="4" fill="#263746"/>
+  <circle cx="980" cy="623" r="4" fill="#263746"/>
+  <text x="800" y="951" class="small">x</text>
+
+  <path d="M60 996 H1220" stroke="#dbe3e8" stroke-width="1.5"/>
+  <text x="60" y="1030" class="note">部署取确定性均值；训练从 Gaussian(μ, σ) 采样。动作缩放、限幅与电机目标映射由环境负责。</text>
+  <text x="60" y="1062" class="note">变体：Query 追加指令 token；Time 改用 elapsed-time 编码；Gated 以 GRU-style 门控替换残差加法。</text>
+  <text x="60" y="1092" class="note">每次重新计算有限窗口，无跨调用 KV cache。来源：src/transformer_rl/model.py</text>
+</svg>
