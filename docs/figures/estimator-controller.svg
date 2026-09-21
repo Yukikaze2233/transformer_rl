@@ -66,5 +66,5 @@
 
   <path d="M55 715 H1225" stroke="#dbe3e8" stroke-width="1.5"/>
   <text x="55" y="751" class="note">PPO 冻结估计器；辅助更新单独执行，并由 KL 门槛决定接受或回滚。Critic 与 target/prototypes 不部署。</text>
-  <text x="55" y="784" class="note">实现已具备；实际实验仅部分完成接线，完整估计器长训未执行。来源：model.py / estimation.py</text>
+  <text x="55" y="784" class="note">历史估计与当前反馈分离，特权监督信息仅在训练端提供。来源：model.py / estimation.py</text>
 </svg>

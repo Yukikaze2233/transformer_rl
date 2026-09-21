@@ -244,8 +244,8 @@ def render():
     ax.set(xlabel="重置后的时间（s）", ylabel="实测高度（m）", xlim=(0, 10),
            ylim=(.20, max(.31, height_max) + .005))
     fig.legend(*ax.get_legend_handles_labels(), loc="upper left", bbox_to_anchor=(.06, .79), ncol=4, frameon=False, fontsize=11)
-    finish(fig, [ax], "估计器接线短训：有响应，但还没跟住高度", "Seed 2003 · 每项 80 updates / 1,310,720 samples · 仅展示三个已完成评估的网络",
-           "曲线为 8 个评估环境的高度均值，每 5 步展示一个点；灰区为前 2 秒。单 seed，10 秒片段，未覆盖完整 20 秒 episode。\nVelocity Transformer 评估中断，两个 Context 网络未启动；这组图用于接线诊断，不能推断长训效果或架构优劣。",
+    finish(fig, [ax], "短训练预算下的高度响应", "Seed 2003 · 每项 80 updates / 1,310,720 samples · Direct MLP / Direct Transformer / Velocity MLP",
+           "曲线为 8 个评估环境的高度均值，每 5 步展示一个点；灰区为前 2 秒。单 seed，10 秒片段，未覆盖完整 20 秒 episode。\n短期响应用于检查信号与优化接口；比较长期控制能力仍需同预算、多 seed 的独立评估。",
            "wiring-height.png")
     print("Rendered three README figures from hash-verified CSVs.")
 
