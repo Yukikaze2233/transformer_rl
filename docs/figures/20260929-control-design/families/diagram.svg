@@ -1,0 +1,174 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1170" viewBox="0 0 1680 1170">
+<rect width="1680" height="1170" fill="#FFFFFF"/>
+<text x="60" y="88" font-family="Noto Sans CJK SC" font-size="54" font-weight="700" text-anchor="start" fill="#2E648F"><tspan font-family="Noto Sans CJK SC" font-style="normal">策略网络结构对照</tspan></text>
+<text x="64" y="137" font-family="Noto Sans CJK SC" font-size="25" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">当前</tspan><tspan font-family="Times New Roman" font-style="normal">35D</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">接口：单帧、堆帧与</tspan><tspan font-family="Times New Roman" font-style="normal">Transformer</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">；</tspan><tspan font-family="Times New Roman" font-style="normal">GRU</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">和</tspan><tspan font-family="Times New Roman" font-style="normal">TCN</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">需区分旧接口与候选状态。</tspan></text>
+<text x="65" y="226" font-family="Noto Sans CJK SC" font-size="29" font-weight="500" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">(a) </tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">单帧</tspan><tspan font-family="Times New Roman" font-style="normal"> / </tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">更宽</tspan><tspan font-family="Times New Roman" font-style="normal"> MLP</tspan></text>
+<text x="65" y="268" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">已实现</tspan><tspan font-family="Times New Roman" font-style="normal"> · </tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">信息集合不变</tspan></text>
+<text x="65" y="308" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">只比较函数容量</tspan></text>
+<rect x="572" y="179" width="380" height="179" rx="14" fill="#FCFAED" stroke="#CABF8E" stroke-width="1.7" stroke-dasharray="10 7"/>
+<rect x="410" y="221" width="126" height="70" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<text x="473" y="267" font-family="Times New Roman" font-size="34" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">o</tspan><tspan font-family="Times New Roman" font-style="italic" baseline-shift="sub" font-size="70%">t</tspan></text>
+<text x="473" y="340" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">当前</tspan><tspan font-family="Times New Roman" font-style="normal">35D</tspan></text>
+<polyline points="536,256 595,256" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="595,256 585,251.5 585,260.5" fill="#000000"/>
+<polyline points="641,225 751,210" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,225 751,241" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,225 751,272" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,225 751,303" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,256 751,210" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,256 751,241" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,256 751,272" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,256 751,303" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,287 751,210" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,287 751,241" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,287 751,272" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="641,287 751,303" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,210 879,225" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,210 879,256" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,210 879,287" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,241 879,225" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,241 879,256" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,241 879,287" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,272 879,225" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,272 879,256" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,272 879,287" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,303 879,225" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,303 879,256" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<polyline points="769,303 879,287" fill="none" stroke="#6D6D6D" stroke-width="0.65" stroke-linejoin="miter"/>
+<circle cx="632" cy="225" r="9" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="632" cy="256" r="9" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="632" cy="287" r="9" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="760" cy="210" r="9" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="760" cy="241" r="9" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="760" cy="272" r="9" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="760" cy="303" r="9" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="888" cy="225" r="9" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="888" cy="256" r="9" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="888" cy="287" r="9" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<text x="760" y="338" font-family="Noto Sans CJK SC" font-size="23" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">256 → 128 → 64</tspan></text>
+<polyline points="950,256 1050,256" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="1050,256 1040,251.5 1040,260.5" fill="#000000"/>
+<rect x="1071" y="222" width="124" height="68" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<text x="1133" y="267" font-family="Times New Roman" font-size="34" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">μ</tspan><tspan font-family="Times New Roman" font-style="italic" baseline-shift="sub" font-size="70%">t</tspan></text>
+<text x="1133" y="340" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">6D</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">动作均值</tspan></text>
+<text x="1274" y="232" font-family="Noto Sans CJK SC" font-size="25" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">基线：</tspan><tspan font-family="Times New Roman" font-style="normal">50,758</tspan></text>
+<text x="1274" y="273" font-family="Noto Sans CJK SC" font-size="25" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">扩宽：</tspan><tspan font-family="Times New Roman" font-style="normal">183,430</tspan></text>
+<text x="1274" y="315" font-family="Noto Sans CJK SC" font-size="21" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">动作均值参数</tspan></text>
+<text x="65" y="436" font-family="Noto Sans CJK SC" font-size="29" font-weight="500" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">(b) </tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">堆帧</tspan><tspan font-family="Times New Roman" font-style="normal"> MLP</tspan></text>
+<text x="65" y="478" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">已实现</tspan><tspan font-family="Times New Roman" font-style="normal"> · 16</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">帧公共观测</tspan></text>
+<text x="65" y="518" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">作为简单历史对照</tspan></text>
+<rect x="391" y="391" width="919" height="179" rx="14" fill="#FCF0F3" stroke="#CEABB5" stroke-width="1.7" stroke-dasharray="10 7"/>
+<rect x="414" y="422" width="48" height="65" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<polyline points="423,439 453,439" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="423,454 453,454" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="423,469 453,469" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<text x="438" y="523" font-family="Times New Roman" font-size="22" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">t</tspan><tspan font-family="Times New Roman" font-style="normal" baseline-shift="baseline" font-size="100%">−15</tspan></text>
+<rect x="482" y="422" width="48" height="65" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<polyline points="491,439 521,439" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="491,454 521,454" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="491,469 521,469" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<text x="506" y="523" font-family="Times New Roman" font-size="22" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="normal" baseline-shift="baseline" font-size="100%">…</tspan><tspan font-family="Times New Roman" font-style="normal" baseline-shift="baseline" font-size="100%"></tspan></text>
+<rect x="550" y="422" width="48" height="65" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<polyline points="559,439 589,439" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="559,454 589,454" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="559,469 589,469" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<text x="574" y="523" font-family="Times New Roman" font-size="22" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">t</tspan><tspan font-family="Times New Roman" font-style="normal" baseline-shift="baseline" font-size="100%">−1</tspan></text>
+<rect x="618" y="422" width="48" height="65" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<polyline points="627,439 657,439" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="627,454 657,454" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="627,469 657,469" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<text x="642" y="523" font-family="Times New Roman" font-size="22" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">t</tspan><tspan font-family="Times New Roman" font-style="normal" baseline-shift="baseline" font-size="100%"></tspan></text>
+<polyline points="686,455 748,455" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="748,455 738,450.5 738,459.5" fill="#000000"/>
+<rect x="768" y="422" width="161" height="66" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<text x="848" y="464" font-family="Noto Sans CJK SC" font-size="24" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">展平</tspan><tspan font-family="Times New Roman" font-style="normal"> 560D</tspan></text>
+<polyline points="929,455 992,455" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="992,455 982,450.5 982,459.5" fill="#000000"/>
+<rect x="1012" y="422" width="128" height="66" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<text x="1076" y="464" font-family="Noto Sans CJK SC" font-size="27" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">MLP</tspan></text>
+<polyline points="1140,455 1193,455" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="1193,455 1183,450.5 1183,459.5" fill="#000000"/>
+<text x="1243" y="466" font-family="Times New Roman" font-size="34" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">μ</tspan><tspan font-family="Times New Roman" font-style="italic" baseline-shift="sub" font-size="70%">t</tspan></text>
+<text x="927" y="537" font-family="Noto Sans CJK SC" font-size="24" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">560 → 256 → 128 → 64 → 6</tspan></text>
+<text x="1371" y="438" font-family="Noto Sans CJK SC" font-size="27" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">185,158</tspan></text>
+<text x="1371" y="478" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">均值参数</tspan></text>
+<text x="1371" y="521" font-family="Noto Sans CJK SC" font-size="21" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">参数随窗口增长</tspan></text>
+<text x="65" y="675" font-family="Noto Sans CJK SC" font-size="29" font-weight="500" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">(c) GRU / TCN</tspan></text>
+<text x="65" y="717" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">新</tspan><tspan font-family="Times New Roman" font-style="normal">35D</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">接口尚未实现</tspan></text>
+<text x="65" y="757" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">门控记忆</tspan><tspan font-family="Times New Roman" font-style="normal"> / </tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">因果卷积</tspan></text>
+<rect x="391" y="611" width="919" height="220" rx="14" fill="#F5F0FA" stroke="#BBA8CF" stroke-width="1.7" stroke-dasharray="10 7"/>
+<text x="418" y="648" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">GRU</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">：逐帧门控压缩</tspan></text>
+<circle cx="480" cy="687" r="23" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<text x="480" y="696" font-family="Times New Roman" font-size="29" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">h</tspan></text>
+<circle cx="620" cy="687" r="23" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<text x="620" y="696" font-family="Times New Roman" font-size="29" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">h</tspan></text>
+<circle cx="760" cy="687" r="23" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<text x="760" y="696" font-family="Times New Roman" font-size="29" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">h</tspan></text>
+<polyline points="503,687 597,687" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="597,687 587,682.5 587,691.5" fill="#000000"/>
+<polyline points="643,687 737,687" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="737,687 727,682.5 727,691.5" fill="#000000"/>
+<polyline points="784,687 896,687 896,710 970,710" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="970,710 960,705.5 960,714.5" fill="#000000"/>
+<text x="418" y="748" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">TCN</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">：局部动态滤波</tspan></text>
+<circle cx="450" cy="793" r="8" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="503" cy="793" r="8" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="556" cy="793" r="8" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="609" cy="793" r="8" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="662" cy="793" r="8" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="715" cy="793" r="8" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<circle cx="768" cy="793" r="8" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<polyline points="450,784 450,773 556,773 556,784" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="556,784 556,767 662,767 662,784" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="662,784 662,761 768,761 768,784" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="miter"/>
+<polyline points="786,793 896,793 896,748 970,748" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="970,748 960,743.5 960,752.5" fill="#000000"/>
+<circle cx="1012" cy="729" r="28" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<text x="1012" y="739" font-family="Times New Roman" font-size="32" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">z</tspan></text>
+<polyline points="1040,729 1108,729" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="1108,729 1098,724.5 1098,733.5" fill="#000000"/>
+<rect x="1128" y="697" width="139" height="66" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<text x="1197" y="739" font-family="Noto Sans CJK SC" font-size="24" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">动作头</tspan></text>
+<text x="1354" y="666" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">GRU</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">：旧接口已有</tspan></text>
+<text x="1354" y="708" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">TCN</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">：当前为候选</tspan></text>
+<text x="1354" y="759" font-family="Noto Sans CJK SC" font-size="21" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">旧默认</tspan><tspan font-family="Times New Roman" font-style="normal">30D</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">参数</tspan></text>
+<text x="1354" y="797" font-family="Noto Sans CJK SC" font-size="21" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">不计入</tspan><tspan font-family="Times New Roman" font-style="normal">35D</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">对照</tspan></text>
+<text x="65" y="929" font-family="Noto Sans CJK SC" font-size="29" font-weight="500" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">(d) </tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">历史</tspan><tspan font-family="Times New Roman" font-style="normal"> Transformer</tspan></text>
+<text x="65" y="971" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">已实现</tspan><tspan font-family="Times New Roman" font-style="normal"> · </tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">当前帧直连</tspan></text>
+<text x="65" y="1011" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">末</tspan><tspan font-family="Times New Roman" font-style="normal">token</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">读出历史表示</tspan></text>
+<rect x="391" y="871" width="919" height="216" rx="14" fill="#EEF4FC" stroke="#A1B6CE" stroke-width="1.7" stroke-dasharray="10 7"/>
+<rect x="414" y="910" width="57" height="66" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<text x="442" y="951" font-family="Noto Sans CJK SC" font-size="23" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">35D</tspan></text>
+<text x="442" y="896" font-family="Noto Sans CJK SC" font-size="19" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">过去</tspan></text>
+<rect x="492" y="910" width="57" height="66" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<text x="520" y="951" font-family="Noto Sans CJK SC" font-size="23" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">35D</tspan></text>
+<text x="520" y="896" font-family="Noto Sans CJK SC" font-size="19" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">当前</tspan></text>
+<polyline points="550,940 599,940" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="599,940 589,935.5 589,944.5" fill="#000000"/>
+<rect x="619" y="901" width="242" height="85" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<text x="740" y="938" font-family="Noto Sans CJK SC" font-size="25" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">因果</tspan><tspan font-family="Times New Roman" font-style="normal"> Transformer</tspan></text>
+<text x="647" y="968" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">2</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">层</tspan><tspan font-family="Times New Roman" font-style="normal"> ·</tspan></text>
+<text x="743" y="968" font-family="Times New Roman" font-size="22" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">d</tspan><tspan font-family="Times New Roman" font-style="normal" baseline-shift="baseline" font-size="100%"> = 96</tspan></text>
+<text x="794" y="968" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">· 4</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">头</tspan></text>
+<polyline points="861,940 906,940" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="906,940 896,935.5 896,944.5" fill="#000000"/>
+<circle cx="946" cy="940" r="24" fill="#FFFFFF" stroke="#000000" stroke-width="1.5"/>
+<text x="946" y="949" font-family="Times New Roman" font-size="29" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">z</tspan><tspan font-family="Times New Roman" font-style="italic" baseline-shift="sub" font-size="70%">t</tspan></text>
+<text x="946" y="998" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">96D</tspan></text>
+<polyline points="970,940 1030,940" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="1030,940 1020,935.5 1020,944.5" fill="#000000"/>
+<rect x="1050" y="908" width="212" height="77" rx="0" fill="#FFFFFF" stroke="#000000" stroke-width="1.6"/>
+<text x="1156" y="939" font-family="Noto Sans CJK SC" font-size="23" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">拼接</tspan><tspan font-family="Times New Roman" font-style="normal"> → MLP</tspan></text>
+<text x="1156" y="970" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Times New Roman" font-style="normal">131→128→64→6</tspan></text>
+<polyline points="520,976 520,1046 1012,1046 1012,968 1050,968" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="1050,968 1040,963.5 1040,972.5" fill="#000000"/>
+<text x="751" y="1076" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="middle" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">当前</tspan><tspan font-family="Times New Roman" font-style="normal">35D</tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">直接反馈</tspan></text>
+<polyline points="1262,943 1325,943" fill="none" stroke="#000000" stroke-width="1.7" stroke-linejoin="miter"/>
+<polygon points="1325,943 1315,938.5 1315,947.5" fill="#000000"/>
+<text x="1370" y="955" font-family="Times New Roman" font-size="34" fill="#000000" text-anchor="middle"><tspan font-family="Times New Roman" font-style="italic" baseline-shift="baseline" font-size="100%">μ</tspan><tspan font-family="Times New Roman" font-style="italic" baseline-shift="sub" font-size="70%">t</tspan></text>
+<text x="1450" y="912" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">普通：</tspan><tspan font-family="Times New Roman" font-style="normal">178,758</tspan></text>
+<text x="1450" y="954" font-family="Noto Sans CJK SC" font-size="22" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">门控：</tspan><tspan font-family="Times New Roman" font-style="normal">401,094</tspan></text>
+<text x="1345" y="1015" font-family="Noto Sans CJK SC" font-size="21" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">门控发生在深度方向</tspan></text>
+<text x="1345" y="1054" font-family="Noto Sans CJK SC" font-size="21" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">不是跨调用时间状态</tspan></text>
+<text x="65" y="1140" font-family="Noto Sans CJK SC" font-size="24" font-weight="400" text-anchor="start" fill="#000000"><tspan font-family="Noto Sans CJK SC" font-style="normal">历史记忆</tspan><tspan font-family="Times New Roman" font-style="normal"> ≠ </tspan><tspan font-family="Noto Sans CJK SC" font-style="normal">技能保持；当前帧直连仍等待历史分支计算，并非独立的异步快速通路。</tspan></text>
+</svg>

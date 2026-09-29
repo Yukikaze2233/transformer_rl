@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+<title>训练框架：在线PPO与不可微环境交互</title>
+<desc>中文使用黑体，数学使用 Times New Roman / STIX。科研流程图；实线为数据流，虚线为参数更新或分组边界。</desc>
+<rect width="1920" height="1080" fill="#FFFFFF"/>
+<text x="58" y="99" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="62" font-weight="700" text-anchor="start" fill="#2E648F">训练框架</text>
+<text x="61" y="154" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="31" font-weight="400" text-anchor="start" fill="#111111">在线 PPO：采样交互与网络更新</text>
+<rect x="64" y="258" width="1105" height="294" rx="32" fill="#FFFDF3" stroke="#D9C884" stroke-width="2" stroke-dasharray="12 9"/>
+<text x="95" y="300" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="start" fill="#111111">策略与探索分布</text>
+<rect x="1218" y="258" width="637" height="294" rx="32" fill="#F2F7FB" stroke="#A5BED4" stroke-width="2" stroke-dasharray="12 9"/>
+<text x="1250" y="300" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="start" fill="#111111">环境交互 · 不可微仿真</text>
+<rect x="93" y="367" width="164" height="111" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="175" y="408" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="400" text-anchor="middle" fill="#111111">公共观测</text>
+<text x="175" y="450" font-family="Times New Roman, STIXGeneral, serif" font-size="28" text-anchor="middle" fill="#111111"><tspan font-style="italic">o</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan> ∈ ℝ<tspan baseline-shift="super" font-size="70%">35</tspan></text>
+<rect x="303" y="367" width="205" height="111" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="405.5" y="408" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="400" text-anchor="middle" fill="#111111">历史缓存</text>
+<text x="405.5" y="450" font-family="Times New Roman, STIXGeneral, serif" font-size="30" text-anchor="middle" fill="#111111">16 × 35D</text>
+<rect x="554" y="344" width="260" height="156" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="684" y="385" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="400" text-anchor="middle" fill="#111111">Actor</text>
+<text x="684" y="426" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="400" text-anchor="middle" fill="#111111">历史 Transformer</text>
+<text x="684" y="468" font-family="Times New Roman, STIXGeneral, serif" font-size="32" text-anchor="middle" fill="#111111"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">θ</tspan>(<tspan font-style="italic">H</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan>),  <tspan font-style="italic">σ</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">θ</tspan></text>
+<rect x="860" y="367" width="265" height="111" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="992.5" y="408" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="middle" fill="#111111">对角高斯采样</text>
+<text x="992.5" y="451" font-family="Times New Roman, STIXGeneral, serif" font-size="27" text-anchor="middle" fill="#111111"><tspan font-style="italic">a</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan><tspan baseline-shift="super" font-size="70%">raw</tspan> ∼ N(<tspan font-style="italic">μ</tspan>, diag(<tspan font-style="italic">σ</tspan><tspan baseline-shift="super" font-size="70%">2</tspan>))</text>
+<rect x="1251" y="367" width="234" height="111" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1368" y="408" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="middle" fill="#111111">执行与控制</text>
+<text x="1368" y="451" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" text-anchor="middle" fill="#111111">限幅 → 目标 → PD</text>
+<rect x="1534" y="367" width="288" height="111" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1678" y="408" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="middle" fill="#111111">物理环境</text>
+<text x="1678" y="451" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="400" text-anchor="middle" fill="#111111">动力学与接触</text>
+<polyline points="257,422 303,422" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="303,422 291,415 291,429" fill="#111111"/>
+<polyline points="508,422 554,422" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="554,422 542,415 542,429" fill="#111111"/>
+<polyline points="814,422 860,422" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="860,422 848,415 848,429" fill="#111111"/>
+<polyline points="1125,422 1251,422" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1251,422 1239,415 1239,429" fill="#111111"/>
+<polyline points="1485,422 1534,422" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1534,422 1522,415 1522,429" fill="#111111"/>
+<text x="1359" y="527" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" text-anchor="middle" fill="#111111">策略 50 Hz / PD 1 kHz</text>
+<polyline points="1678,367 1678,214 35,214 35,422 93,422" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="93,422 81,415 81,429" fill="#111111"/>
+<rect x="723" y="176" width="379" height="40" fill="#FFFFFF"/>
+<text x="912.5" y="205" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="400" text-anchor="middle" fill="#111111">下一步公共观测</text>
+<rect x="65" y="669" width="1104" height="287" rx="32" fill="#F8F3FA" stroke="#AA91C3" stroke-width="2" stroke-dasharray="12 9"/>
+<text x="97" y="711" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="start" fill="#111111">Rollout 缓存、优势估计与参数优化</text>
+<rect x="1218" y="669" width="637" height="287" rx="32" fill="#FDF3F5" stroke="#D5ABB5" stroke-width="2" stroke-dasharray="12 9"/>
+<text x="1250" y="711" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="start" fill="#111111">独立 Critic · 仅训练使用</text>
+<rect x="107" y="768" width="269" height="145" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="241.5" y="809" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="middle" fill="#111111">PPO 优化</text>
+<text x="241.5" y="851" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">策略 / 价值损失</text>
+<text x="241.5" y="891" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">＋ 熵正则</text>
+<rect x="502" y="768" width="331" height="145" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="667.5" y="809" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="middle" fill="#111111">fresh rollout</text>
+<text x="667.5" y="850" font-family="Times New Roman, STIXGeneral, serif" font-size="27" text-anchor="middle" fill="#111111"><tspan font-style="italic">H</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan>, <tspan font-style="italic">a</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan><tspan baseline-shift="super" font-size="70%">raw</tspan>, log <tspan font-style="italic">π</tspan><tspan baseline-shift="sub" font-size="70%" font-style="normal">old</tspan></text>
+<text x="667.5" y="890" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" text-anchor="middle" fill="#111111">奖励、终止与终态信息</text>
+<rect x="922" y="768" width="218" height="145" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1031" y="809" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="400" text-anchor="middle" fill="#111111">GAE / Return</text>
+<text x="1031" y="850" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" text-anchor="middle" fill="#111111">优势与回报目标</text>
+<text x="1031" y="890" font-family="Times New Roman, STIXGeneral, serif" font-size="30" text-anchor="middle" fill="#111111"><tspan font-style="italic">A</tspan>, <tspan font-style="italic">R</tspan></text>
+<rect x="1260" y="768" width="520" height="145" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1520" y="809" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="middle" fill="#111111">Critic 价值网络</text>
+<text x="1520" y="851" font-family="Times New Roman, STIXGeneral, serif" font-size="30" text-anchor="middle" fill="#111111">81 → 256 → 128 → 64 → 1</text>
+<text x="1520" y="891" font-family="Times New Roman, STIXGeneral, serif" font-size="31" text-anchor="middle" fill="#111111"><tspan font-style="italic">V</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">φ</tspan>(<tspan font-style="italic">s</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan>)</text>
+<polyline points="992,478 992,590 714,590 714,768" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="714,768 707,756 721,756" fill="#111111"/>
+<polyline points="1655,478 1655,620 627,620 627,768" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="627,768 620,756 634,756" fill="#111111"/>
+<rect x="822" y="541" width="355" height="40" fill="#FFFFFF"/>
+<text x="999.5" y="570" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" text-anchor="middle" fill="#111111">动作与 old log-prob</text>
+<rect x="1141" y="582" width="300" height="40" fill="#FFFFFF"/>
+<text x="1291.0" y="611" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">奖励 / 终止信号</text>
+<polyline points="1768,478 1768,768" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1768,768 1761,756 1775,756" fill="#111111"/>
+<rect x="1585" y="622" width="261" height="40" fill="#FFFFFF"/>
+<text x="1715.5" y="651" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">特权状态 81D</text>
+<polyline points="833,839 922,839" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="922,839 910,832 910,846" fill="#111111"/>
+<polyline points="1260,839 1140,839" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1140,839 1152,832 1152,846" fill="#111111"/>
+<text x="1201" y="826" font-family="Times New Roman, STIXGeneral, serif" font-size="26" text-anchor="middle" fill="#111111"><tspan font-style="italic">V</tspan></text>
+<polyline points="502,839 376,839" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="376,839 388,832 388,846" fill="#111111"/>
+<text x="440" y="826" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" text-anchor="middle" fill="#111111">采样数据</text>
+<polyline points="1031,913 1031,946 427,946 427,882 376,882" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="376,882 388,875 388,889" fill="#111111"/>
+<polyline points="241,768 241,635 684,635 684,500" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter" stroke-dasharray="8 6"/>
+<polygon points="684,500 677,512 691,512" fill="#111111"/>
+<rect x="333" y="597" width="310" height="40" fill="#FFFFFF"/>
+<text x="488.0" y="626" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">更新策略参数 θ</text>
+<polyline points="241,913 241,1004 1520,1004 1520,913" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter" stroke-dasharray="8 6"/>
+<polygon points="1520,913 1513,925 1527,925" fill="#111111"/>
+<rect x="735" y="966" width="376" height="40" fill="#FFFFFF"/>
+<text x="923.0" y="995" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">更新 Critic 参数 φ</text>
+<text x="60" y="1048" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="start" fill="#111111">实线：数据流；虚线：参数更新。PPO 不对物理环境反向传播；图示为接入设计。</text>
+</svg>

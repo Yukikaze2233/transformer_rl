@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+<title>历史编码器展开：两层Pre-LN因果Transformer</title>
+<desc>中文使用黑体，数学使用 Times New Roman / STIX。科研流程图；实线为数据流，虚线为参数更新或分组边界。</desc>
+<rect width="1920" height="1080" fill="#FFFFFF"/>
+<text x="58" y="101" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="60" font-weight="700" text-anchor="start" fill="#2E648F">历史编码器展开</text>
+<text x="61" y="157" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="400" text-anchor="start" fill="#111111">逐帧嵌入 → 两层因果 Transformer → 最后 token 的 96D 表示</text>
+<rect x="624" y="247" width="806" height="416" rx="32" fill="#F8F3FA" stroke="#AA91C3" stroke-width="2" stroke-dasharray="12 9"/>
+<text x="657" y="292" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="start" fill="#111111">两层独立参数，结构相同</text>
+<rect x="78" y="389" width="214" height="145" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="185" y="430" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="middle" fill="#111111">公共观测历史</text>
+<text x="185" y="478" font-family="Times New Roman, STIXGeneral, serif" font-size="29" text-anchor="middle" fill="#111111"><tspan font-style="italic">H</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan> ∈ ℝ<tspan baseline-shift="super" font-size="70%">16×35</tspan></text>
+<text x="185" y="515" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">旧 → 新</text>
+<rect x="355" y="370" width="238" height="183" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="474" y="412" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="middle" fill="#111111">逐帧 Linear</text>
+<text x="474" y="457" font-family="Times New Roman, STIXGeneral, serif" font-size="32" text-anchor="middle" fill="#111111">35 → 96</text>
+<text x="474" y="500" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">＋ 索引位置编码</text>
+<text x="474" y="535" font-family="Times New Roman, STIXGeneral, serif" font-size="26" text-anchor="middle" fill="#111111">16 × 96</text>
+<rect x="656" y="329" width="338" height="281" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="825" y="372" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="middle" fill="#111111">第 1 层</text>
+<rect x="679" y="399" width="292" height="76" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="825" y="428" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" text-anchor="middle" fill="#111111">Pre-LN → 因果 MHA</text>
+<text x="825" y="458" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" text-anchor="middle" fill="#111111">4 头，head_dim = 24</text>
+<text x="825" y="505" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" text-anchor="middle" fill="#111111">＋ 残差连接</text>
+<rect x="679" y="523" width="292" height="66" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="825" y="550" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" text-anchor="middle" fill="#111111">Pre-LN → FFN → 残差</text>
+<text x="825" y="577" font-family="Times New Roman, STIXGeneral, serif" font-size="25" text-anchor="middle" fill="#111111">96 → 192 → 96</text>
+<rect x="1059" y="329" width="338" height="281" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1228" y="372" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="middle" fill="#111111">第 2 层</text>
+<rect x="1082" y="399" width="292" height="76" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1228" y="428" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" text-anchor="middle" fill="#111111">Pre-LN → 因果 MHA</text>
+<text x="1228" y="458" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" text-anchor="middle" fill="#111111">4 头，head_dim = 24</text>
+<text x="1228" y="505" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" text-anchor="middle" fill="#111111">＋ 残差连接</text>
+<rect x="1082" y="523" width="292" height="66" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1228" y="550" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" text-anchor="middle" fill="#111111">Pre-LN → FFN → 残差</text>
+<text x="1228" y="577" font-family="Times New Roman, STIXGeneral, serif" font-size="25" text-anchor="middle" fill="#111111">96 → 192 → 96</text>
+<rect x="1490" y="371" width="340" height="182" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1660" y="413" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="middle" fill="#111111">最后 token 读出</text>
+<text x="1660" y="455" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="middle" fill="#111111">LayerNorm</text>
+<text x="1660" y="505" font-family="Times New Roman, STIXGeneral, serif" font-size="36" text-anchor="middle" fill="#111111"><tspan font-style="italic">z</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan> ∈ ℝ<tspan baseline-shift="super" font-size="70%">96</tspan></text>
+<polyline points="292,461 355,461" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="355,461 343,454 343,468" fill="#111111"/>
+<polyline points="593,461 656,461" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="656,461 644,454 644,468" fill="#111111"/>
+<polyline points="994,461 1059,461" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1059,461 1047,454 1047,468" fill="#111111"/>
+<polyline points="1397,461 1490,461" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1490,461 1478,454 1478,468" fill="#111111"/>
+<rect x="77" y="730" width="816" height="239" rx="32" fill="#FFFDF3" stroke="#D9C884" stroke-width="2" stroke-dasharray="12 9"/>
+<text x="108" y="778" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="400" text-anchor="start" fill="#111111">因果注意力约束</text>
+<text x="111" y="827" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="400" text-anchor="start" fill="#111111">每个 token 只读取当前位置及过去：</text>
+<text x="470" y="877" font-family="Times New Roman, STIXGeneral, serif" font-size="37" text-anchor="middle" fill="#111111"><tspan font-style="italic">j</tspan> ≤ <tspan font-style="italic">i</tspan></text>
+<text x="111" y="931" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="400" text-anchor="start" fill="#111111">无未来观测；dropout = 0；无跨调用 KV 缓存。</text>
+<rect x="978" y="730" width="851" height="239" rx="32" fill="#F2F7FB" stroke="#A5BED4" stroke-width="2" stroke-dasharray="12 9"/>
+<text x="1010" y="778" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="400" text-anchor="start" fill="#111111">输出的物理含义</text>
+<text x="1010" y="830" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="start" fill="#111111">96D latent 是为控制学习的隐表示，</text>
+<text x="1010" y="878" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="400" text-anchor="start" fill="#111111">不预设为 3D 速度，首版无速度真值监督。</text>
+<text x="1010" y="931" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="400" text-anchor="start" fill="#111111">随后与当前 35D 拼接，形成 131D 动作头输入。</text>
+<text x="77" y="1034" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="start" fill="#111111">FFN 使用 GELU；动作头使用 ELU。50 Hz 下 16 帧首尾跨度为 0.30 s，不等待未来帧。</text>
+</svg>

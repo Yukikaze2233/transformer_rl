@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1200" viewBox="0 0 1920 1200">
+<title>网络架构：历史编码、当前观测直连与独立价值网络</title>
+<desc>中文使用黑体，数学使用 Times New Roman / STIX。科研流程图；实线为数据流，虚线为参数更新或分组边界。</desc>
+<rect width="1920" height="1200" fill="#FFFFFF"/>
+<text x="58" y="102" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="62" font-weight="700" text-anchor="start" fill="#2E648F">网络架构</text>
+<text x="61" y="157" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="400" text-anchor="start" fill="#111111">历史编码与当前观测直连：部署边界与训练边界</text>
+<rect x="44" y="198" width="1832" height="878" rx="32" fill="#FFFDF3" stroke="#D9AD47" stroke-width="2" stroke-dasharray="12 9"/>
+<text x="79" y="239" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="start" fill="#111111">训练范围：Actor、独立 Critic 与 PPO 参数更新</text>
+<rect x="76" y="266" width="1768" height="418" rx="32" fill="#F8F3FA" stroke="#8261AA" stroke-width="2" stroke-dasharray="12 9"/>
+<text x="109" y="310" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="start" fill="#111111">部署侧：历史缓存 ＋ 历史编码器 ＋ 动作头</text>
+<rect x="115" y="377" width="271" height="130" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="250.5" y="417" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="middle" fill="#111111">历史公共观测</text>
+<text x="250.5" y="455" font-family="Times New Roman, STIXGeneral, serif" font-size="26" text-anchor="middle" fill="#111111"><tspan font-style="italic">H</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan> = [<tspan font-style="italic">o</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan>−15</tspan>, …, <tspan font-style="italic">o</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan>]</text>
+<text x="250.5" y="489" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">16 × 35D（560 个数）</text>
+<rect x="451" y="363" width="391" height="161" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="646.5" y="406" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="400" text-anchor="middle" fill="#111111">历史编码器</text>
+<text x="646.5" y="449" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="middle" fill="#111111">2 层因果 Transformer</text>
+<text x="646.5" y="493" font-family="Times New Roman, STIXGeneral, serif" font-size="28" text-anchor="middle" fill="#111111"><tspan font-style="italic">d</tspan> = 96,  <tspan font-style="italic">h</tspan> = 4,  <tspan font-style="italic">d</tspan><tspan baseline-shift="sub" font-size="70%" font-style="normal">ff</tspan> = 192</text>
+<rect x="907" y="377" width="211" height="130" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1012.5" y="430" font-family="Times New Roman, STIXGeneral, serif" font-size="43" text-anchor="middle" fill="#111111"><tspan font-style="italic">z</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan></text>
+<text x="1012.5" y="478" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="400" text-anchor="middle" fill="#111111">96 维隐表示</text>
+<circle cx="1200" cy="442" r="38" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1200" y="451" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">拼接</text>
+<rect x="1294" y="363" width="356" height="161" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1472" y="406" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="400" text-anchor="middle" fill="#111111">Actor 动作头</text>
+<text x="1472" y="452" font-family="Times New Roman, STIXGeneral, serif" font-size="31" text-anchor="middle" fill="#111111">131 → 128 → 64 → 6</text>
+<text x="1472" y="495" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">ELU 隐层，线性输出</text>
+<text x="1752" y="443" font-family="Times New Roman, STIXGeneral, serif" font-size="43" text-anchor="middle" fill="#111111"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan></text>
+<text x="1752" y="487" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" text-anchor="middle" fill="#111111">6D 动作均值</text>
+<polyline points="386,442 451,442" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="451,442 439,435 439,449" fill="#111111"/>
+<polyline points="842,442 907,442" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="907,442 895,435 895,449" fill="#111111"/>
+<polyline points="1118,442 1162,442" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1162,442 1150,435 1150,449" fill="#111111"/>
+<polyline points="1238,442 1294,442" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1294,442 1282,435 1282,449" fill="#111111"/>
+<polyline points="1650,442 1715,442" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1715,442 1703,435 1703,449" fill="#111111"/>
+<rect x="157" y="559" width="260" height="89" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="287" y="593" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="400" text-anchor="middle" fill="#111111">当前公共观测</text>
+<text x="287" y="630" font-family="Times New Roman, STIXGeneral, serif" font-size="29" text-anchor="middle" fill="#111111"><tspan font-style="italic">o</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan> ∈ ℝ<tspan baseline-shift="super" font-size="70%">35</tspan></text>
+<polyline points="417,604 1200,604 1200,480" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1200,480 1193,492 1207,492" fill="#111111"/>
+<rect x="650" y="566" width="313" height="40" fill="#F8F3FA"/>
+<text x="806.5" y="595" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">当前 35D 直接通路</text>
+<text x="999" y="654" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">latent 不预设为 3D 速度</text>
+<text x="111" y="787" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="start" fill="#111111">独立价值网络 · 仅训练使用</text>
+<rect x="117" y="827" width="275" height="114" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="254.5" y="868" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="400" text-anchor="middle" fill="#111111">特权观测</text>
+<text x="254.5" y="913" font-family="Times New Roman, STIXGeneral, serif" font-size="30" text-anchor="middle" fill="#111111"><tspan font-style="italic">s</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan><tspan baseline-shift="super" font-size="70%">priv</tspan> ∈ ℝ<tspan baseline-shift="super" font-size="70%">81</tspan></text>
+<rect x="452" y="827" width="587" height="114" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="745.5" y="869" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="middle" fill="#111111">Critic：独立 MLP</text>
+<text x="745.5" y="914" font-family="Times New Roman, STIXGeneral, serif" font-size="32" text-anchor="middle" fill="#111111">81 → 256 → 128 → 64 → 1</text>
+<polyline points="392,884 452,884" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="452,884 440,877 440,891" fill="#111111"/>
+<polyline points="1039,884 1096,884" fill="none" stroke="#111111" stroke-width="1.9" stroke-linejoin="miter"/>
+<polygon points="1096,884 1084,877 1084,891" fill="#111111"/>
+<text x="1166" y="883" font-family="Times New Roman, STIXGeneral, serif" font-size="37" text-anchor="middle" fill="#111111"><tspan font-style="italic">V</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">φ</tspan>(<tspan font-style="italic">s</tspan><tspan baseline-shift="sub" font-size="70%" font-style="italic">t</tspan>)</text>
+<text x="1166" y="927" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">1D 价值</text>
+<rect x="1457" y="810" width="334" height="145" fill="#FFFFFF" stroke="#111111" stroke-width="1.8"/>
+<text x="1624" y="851" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="400" text-anchor="middle" fill="#111111">PPO 参数更新</text>
+<text x="1624" y="892" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">策略损失 ＋ 价值损失</text>
+<text x="1624" y="931" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" text-anchor="middle" fill="#111111">fresh rollout / GAE</text>
+<polyline points="1624,810 1624,742 646,742 646,524" fill="none" stroke="#BE9430" stroke-width="2.1" stroke-linejoin="miter" stroke-dasharray="8 6"/>
+<polygon points="646,524 639,536 653,536" fill="#BE9430"/>
+<polyline points="1472,742 1472,524" fill="none" stroke="#BE9430" stroke-width="2.1" stroke-linejoin="miter" stroke-dasharray="8 6"/>
+<polygon points="1472,524 1465,536 1479,536" fill="#BE9430"/>
+<rect x="790" y="704" width="617" height="40" fill="#FFFDF3"/>
+<text x="1098.5" y="733" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">Actor 梯度：更新编码器与动作头</text>
+<polyline points="1624,955 1624,1023 745,1023 745,941" fill="none" stroke="#BE9430" stroke-width="2.1" stroke-linejoin="miter" stroke-dasharray="8 6"/>
+<polygon points="745,941 738,953 752,953" fill="#BE9430"/>
+<rect x="983" y="985" width="364" height="40" fill="#FFFDF3"/>
+<text x="1165.0" y="1014" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="middle" fill="#111111">更新 Critic 参数</text>
+<text x="64" y="1120" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" text-anchor="start" fill="#111111">96D latent 无显式速度标签；特权信息不输入 Actor。Actor 均值网络共 178,758 个参数。</text>
+<text x="64" y="1163" font-family="SimHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" text-anchor="start" fill="#111111">此图为接入设计。部署不保留 Critic / PPO；探索 σ 与执行限幅由接入层管理。</text>
+</svg>
