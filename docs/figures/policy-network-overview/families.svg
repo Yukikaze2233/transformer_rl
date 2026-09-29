@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1190" viewBox="0 0 1800 1190">
+<rect width="1800" height="1190" fill="white"/>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="black"/></marker></defs>
+<text x="55" y="85" font-size="54" fill="#2E648F" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">策略网络结构对照</tspan></text>
+<text x="60" y="138" font-size="28" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">从当前观测到历史表示：五种时间信息处理方式</tspan></text>
+<text x="60" y="240" font-size="30" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Times New Roman">(a) </tspan><tspan font-family="Noto Sans CJK SC">单帧</tspan><tspan font-family="Times New Roman"> MLP</tspan></text>
+<text x="65" y="283" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前状态映射</tspan></text>
+<rect x="350" y="200" width="1080" height="135" fill="#FCFAED" stroke="#CABC83" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<rect x="375" y="225" width="225" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="487" y="256" font-size="23" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前观测</tspan></text>
+<text x="487" y="292" font-family="Times New Roman" font-size="31" text-anchor="middle"><tspan font-style="italic">o</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<polyline points="600,268 665,268" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="670" y="225" width="470" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="905" y="259" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">全连接网络</tspan></text>
+<text x="905" y="294" font-size="23" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">非线性映射</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">动作头</tspan></text>
+<polyline points="1140,268 1205,268" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="1210" y="225" width="190" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="1305" y="268" font-family="Times New Roman" font-size="34" text-anchor="middle"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="1305" y="299" font-size="22" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">动作均值</tspan></text>
+<text x="1470" y="256" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">计算路径简单</tspan></text>
+<text x="1470" y="299" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">信息来自当前输入</tspan></text>
+<text x="60" y="417" font-size="30" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Times New Roman">(b) </tspan><tspan font-family="Noto Sans CJK SC">堆帧</tspan><tspan font-family="Times New Roman"> MLP</tspan></text>
+<text x="65" y="460" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">固定窗口展开</tspan></text>
+<rect x="350" y="377" width="1080" height="135" fill="#FCF0F3" stroke="#D0ACBA" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<rect x="375" y="402" width="225" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="487" y="433" font-size="23" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">观测历史</tspan></text>
+<text x="487" y="469" font-family="Times New Roman" font-size="31" text-anchor="middle"><tspan font-style="italic">H</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<polyline points="600,445 665,445" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="670" y="402" width="470" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="905" y="436" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">展平</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">全连接网络</tspan></text>
+<text x="905" y="471" font-size="23" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">固定时间槽</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">动作头</tspan></text>
+<polyline points="1140,445 1205,445" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="1210" y="402" width="190" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="1305" y="445" font-family="Times New Roman" font-size="34" text-anchor="middle"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="1305" y="476" font-size="22" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">动作均值</tspan></text>
+<text x="1470" y="433" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">短时动态基线</tspan></text>
+<text x="1470" y="476" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">首层规模随窗口增长</tspan></text>
+<text x="60" y="594" font-size="30" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Times New Roman">(c) GRU / LSTM</tspan></text>
+<text x="65" y="637" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">递归状态压缩</tspan></text>
+<rect x="350" y="554" width="1080" height="135" fill="#F5F0FA" stroke="#B49ACA" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<rect x="375" y="579" width="225" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="487" y="610" font-size="23" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">新观测＋旧记忆</tspan></text>
+<text x="487" y="646" font-family="Times New Roman" font-size="31" text-anchor="middle"><tspan font-style="italic">o</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan>, <tspan font-style="italic">h</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan><tspan font-style="normal">−</tspan><tspan font-style="normal">1</tspan></tspan></text>
+<polyline points="600,622 665,622" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="670" y="579" width="470" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="905" y="613" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">门控递归更新</tspan></text>
+<text x="905" y="648" font-size="23" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">新记忆</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">动作头</tspan></text>
+<polyline points="1140,622 1205,622" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="1210" y="579" width="190" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="1305" y="622" font-family="Times New Roman" font-size="34" text-anchor="middle"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="1305" y="653" font-size="22" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">动作均值</tspan></text>
+<text x="1470" y="610" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">可逐步增量更新</tspan></text>
+<text x="1470" y="653" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">需维护内部状态</tspan></text>
+<text x="60" y="771" font-size="30" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Times New Roman">(d) TCN</tspan></text>
+<text x="65" y="814" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">时间局部性</tspan></text>
+<rect x="350" y="731" width="1080" height="135" fill="#F0F7F3" stroke="#A3C3AF" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<rect x="375" y="756" width="225" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="487" y="787" font-size="23" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">观测历史</tspan></text>
+<text x="487" y="823" font-family="Times New Roman" font-size="31" text-anchor="middle"><tspan font-style="italic">H</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<polyline points="600,799 665,799" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="670" y="756" width="470" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="905" y="790" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">多层因果膨胀卷积</tspan></text>
+<text x="905" y="825" font-size="23" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">末时刻特征</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">动作头</tspan></text>
+<polyline points="1140,799 1205,799" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="1210" y="756" width="190" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="1305" y="799" font-family="Times New Roman" font-size="34" text-anchor="middle"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="1305" y="830" font-size="22" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">动作均值</tspan></text>
+<text x="1470" y="787" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">共享时间权重</tspan></text>
+<text x="1470" y="830" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">感受野由卷积决定</tspan></text>
+<text x="60" y="948" font-size="30" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Times New Roman">(e) Transformer</tspan></text>
+<text x="65" y="991" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">内容关联</tspan></text>
+<rect x="350" y="908" width="1080" height="135" fill="#EEF4FC" stroke="#9DB8D8" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<rect x="375" y="933" width="225" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="487" y="964" font-size="23" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史＋时间编码</tspan></text>
+<text x="487" y="1000" font-family="Times New Roman" font-size="31" text-anchor="middle"><tspan font-style="italic">H</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<polyline points="600,976 665,976" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="670" y="933" width="470" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="905" y="967" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">因果注意力＋前馈网络</tspan></text>
+<text x="905" y="1002" font-size="23" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史表示</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">动作头</tspan></text>
+<polyline points="1140,976 1205,976" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="1210" y="933" width="190" height="85" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="1305" y="976" font-family="Times New Roman" font-size="34" text-anchor="middle"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="1305" y="1007" font-size="22" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">动作均值</tspan></text>
+<text x="1470" y="964" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">选择相关历史</tspan></text>
+<text x="1470" y="1007" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">成本随窗口增长</tspan></text>
+<text x="65" y="1138" font-size="23" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">图示以连续控制的动作均值为例；各历史编码器均可与当前观测直连、独立</tspan><tspan font-family="Times New Roman"> Critic </tspan><tspan font-family="Noto Sans CJK SC">或辅助估计组合。</tspan></text>
+</svg>

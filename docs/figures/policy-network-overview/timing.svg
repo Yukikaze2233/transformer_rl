@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1130" viewBox="0 0 1800 1130">
+<rect width="1800" height="1130" fill="white"/>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="black"/></marker></defs>
+<text x="55" y="85" font-size="54" fill="#2E648F" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">历史跨度与实时控制成本</tspan></text>
+<text x="60" y="140" font-size="28" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">参数容量、每次计算和控制链路时延，需要分别衡量</tspan></text>
+<rect x="55" y="195" width="820" height="440" fill="#FCFAED" stroke="#CABC83" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<text x="85" y="248" font-size="31" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">历史窗口按物理时间比较</tspan></text>
+<text x="465" y="313" font-family="Times New Roman" font-size="39" text-anchor="middle"><tspan font-style="italic">T</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">s</tspan><tspan font-style="italic">p</tspan><tspan font-style="italic">a</tspan><tspan font-style="italic">n</tspan></tspan> = (<tspan font-style="italic">L</tspan> − 1) / <tspan font-style="italic">f</tspan></text>
+<text x="200" y="390" font-size="29" fill="black" text-anchor="middle" font-weight="700"><tspan font-family="Noto Sans CJK SC">采样频率</tspan></text>
+<text x="475" y="390" font-size="29" fill="black" text-anchor="middle" font-weight="700"><tspan font-family="Noto Sans CJK SC">窗口帧数</tspan></text>
+<text x="725" y="390" font-size="29" fill="black" text-anchor="middle" font-weight="700"><tspan font-family="Noto Sans CJK SC">首尾跨度</tspan></text>
+<text x="200" y="453" font-size="29" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">50 Hz</tspan></text>
+<text x="475" y="453" font-size="29" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">16</tspan></text>
+<text x="725" y="453" font-size="29" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">0.30 s</tspan></text>
+<text x="200" y="512" font-size="29" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">100 Hz</tspan></text>
+<text x="475" y="512" font-size="29" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">16</tspan></text>
+<text x="725" y="512" font-size="29" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">0.15 s</tspan></text>
+<text x="200" y="571" font-size="29" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">100 Hz</tspan></text>
+<text x="475" y="571" font-size="29" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">31</tspan></text>
+<text x="725" y="571" font-size="29" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">0.30 s</tspan></text>
+<rect x="925" y="195" width="820" height="440" fill="#F5F0FA" stroke="#B49ACA" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<text x="955" y="248" font-size="31" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">窗口增长如何影响网络</tspan></text>
+<text x="960" y="320" font-size="27" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">堆帧</tspan><tspan font-family="Times New Roman"> MLP</tspan></text>
+<text x="960" y="354" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">输入层参数随</tspan><tspan font-family="Times New Roman"> LF </tspan><tspan font-family="Noto Sans CJK SC">增长</tspan></text>
+<text x="960" y="405" font-size="27" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">流式</tspan><tspan font-family="Times New Roman"> GRU / LSTM</tspan></text>
+<text x="960" y="439" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">递归状态大小固定，逐步更新</tspan></text>
+<text x="960" y="490" font-size="27" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">整窗</tspan><tspan font-family="Times New Roman"> Transformer</tspan></text>
+<text x="960" y="524" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">参数共享；密集注意力含</tspan><tspan font-family="Times New Roman"> L</tspan><tspan font-family="Noto Sans CJK SC">²</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">项</tspan></text>
+<text x="960" y="575" font-size="27" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">控制频率提高</tspan></text>
+<text x="960" y="609" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">每秒计算量＝每次计算量</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">×</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">频率</tspan></text>
+<rect x="55" y="685" width="1690" height="310" fill="#EEF4FC" stroke="#9DB8D8" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<text x="85" y="742" font-size="31" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">完整控制链路</tspan></text>
+<rect x="90" y="795" width="275" height="80" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="227" y="846" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">采样与时间戳</tspan></text>
+<polyline points="365,835 416,835" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="422" y="795" width="275" height="80" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="559" y="846" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">预处理与历史</tspan></text>
+<polyline points="697,835 748,835" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="754" y="795" width="275" height="80" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="891" y="846" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">网络推理</tspan></text>
+<polyline points="1029,835 1080,835" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="1086" y="795" width="275" height="80" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="1223" y="846" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">通信与调度</tspan></text>
+<polyline points="1361,835 1412,835" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="1418" y="795" width="275" height="80" fill="white" stroke="black" stroke-width="1.8"/>
+<text x="1555" y="846" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">执行器生效</tspan></text>
+<text x="90" y="934" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">分别记录：推理耗时、周期释放到动作生效的时延、执行时的数据年龄、全部周期中的超时率。</tspan></text>
+<text x="65" y="1046" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">表中数值是窗口换算示例。更高频率的控制收益取决于对象动态、传感器更新和底层控制器。</tspan></text>
+<text x="65" y="1089" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">过去帧无需等待未来；缓存可减少重算，但必须与位置编码、窗口截断和状态重置语义一致。</tspan></text>
+</svg>
