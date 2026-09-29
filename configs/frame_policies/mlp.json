@@ -1,0 +1,7 @@
+{
+  "architecture": "mlp",
+  "frame_dim": 35,
+  "action_dim": 6,
+  "history_length": 1,
+  "actor_hidden_dims": [256, 128, 64]
+}
