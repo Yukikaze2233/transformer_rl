@@ -167,7 +167,10 @@ class PPOTrainer:
                 "std_mean": (totals[4] / batch.old_mean.numel()).item()}
 
     @torch.enable_grad()
-    def update(self, batch: PPOBatch, *, diagnostics: bool = False) -> dict[str, float | int | bool | None]:
+    def update(self, batch: PPOBatch, *, diagnostics: bool = False,
+               regularizer=None) -> dict[str, float | int | bool | None]:
+        if regularizer is not None and not callable(regularizer):
+            raise TypeError("regularizer must be callable")
         self.model.eval()  # Deterministic dropout behavior; this does not disable autograd.
         self.optimizer.zero_grad(set_to_none=True)
         batch.validate()
@@ -247,6 +250,13 @@ class PPOTrainer:
                 if self.config.auxiliary_coef > 0:
                     auxiliary_loss = self._auxiliary_loss(minibatch)
                     loss = loss + self.config.auxiliary_coef * auxiliary_loss
+                if regularizer is not None:
+                    retention_loss = regularizer()
+                    if (not isinstance(retention_loss, torch.Tensor) or retention_loss.shape != ()
+                            or retention_loss.device != loss.device):
+                        raise ValueError("regularizer must return a scalar tensor on the model device")
+                    self._require_finite("retention loss", retention_loss)
+                    loss = loss + retention_loss
                 for name, component in (("actor loss", actor_loss), ("value loss", value_loss),
                                         ("entropy", entropy), ("loss", loss)):
                     self._require_finite(name, component)
@@ -273,6 +283,9 @@ class PPOTrainer:
                     diagnostic_metrics.update({f"first_step_{name}": first_step[name]
                                                for name in first_step_fields})
                 count = len(minibatch)
+                if regularizer is not None:
+                    totals.setdefault("retention_loss", 0.0)
+                    totals["retention_loss"] += retention_loss.detach().item() * count
                 for name, metric in dict(actor_loss=actor_loss, value_loss=value_loss,
                                          entropy=entropy, kl=kl, clip_fraction=clip_fraction,
                                          loss=loss, auxiliary_loss=auxiliary_loss).items():

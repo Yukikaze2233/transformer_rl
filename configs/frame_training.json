@@ -1,0 +1,142 @@
+{
+  "control": {
+    "action_bounds": [
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      9.0,
+      9.0
+    ],
+    "action_names": [
+      "L_joint1",
+      "LL_joint1",
+      "R_joint1",
+      "RR_joint1",
+      "L_joint3",
+      "R_joint3"
+    ],
+    "feature_names": [
+      "command_vx",
+      "command_vy",
+      "command_yaw",
+      "command_height_x5",
+      "gyro_x_x0_5",
+      "gyro_y_x0_5",
+      "gyro_z_x0_5",
+      "gravity_x",
+      "gravity_y",
+      "gravity_z",
+      "q_relative_L_joint1",
+      "q_relative_LL_joint1",
+      "q_relative_R_joint1",
+      "q_relative_RR_joint1",
+      "q_relative_L_joint3",
+      "q_relative_R_joint3",
+      "dq_x0_1_L_joint1",
+      "dq_x0_1_LL_joint1",
+      "dq_x0_1_R_joint1",
+      "dq_x0_1_RR_joint1",
+      "dq_x0_1_L_joint3",
+      "dq_x0_1_R_joint3",
+      "previous_issued_L_joint1",
+      "previous_issued_LL_joint1",
+      "previous_issued_R_joint1",
+      "previous_issued_RR_joint1",
+      "previous_issued_L_joint3",
+      "previous_issued_R_joint3",
+      "mode_normal",
+      "mode_stair",
+      "mode_slope_reserved",
+      "mode_recover",
+      "mode_jump",
+      "request_height_x5",
+      "command_clock_s"
+    ],
+    "observation_schema": "manual_scaled35",
+    "policy_dt_s": 0.01,
+    "target_offset": [
+      -0.42,
+      0.13742282595395358,
+      0.42,
+      -0.1374155762580851,
+      0.0,
+      0.0
+    ],
+    "target_scale": [
+      0.25,
+      0.25,
+      0.25,
+      0.25,
+      10.0,
+      10.0
+    ],
+    "target_units": [
+      "rad",
+      "rad",
+      "rad",
+      "rad",
+      "rad/s",
+      "rad/s"
+    ]
+  },
+  "environment": {},
+  "model": {
+    "command_indices": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "critic_dim": 81,
+    "critic_hidden": [
+      256,
+      128,
+      64
+    ],
+    "initial_std": 1.0,
+    "policy": {
+      "action_dim": 6,
+      "actor_hidden_dims": [
+        256,
+        128
+      ],
+      "architecture": "transformer",
+      "d_model": 128,
+      "encoder_hidden_dims": [
+        128,
+        128
+      ],
+      "ffn_dim": 512,
+      "frame_dim": 35,
+      "history_latent_dim": 3,
+      "history_length": 31,
+      "mean_init_scale": 1.0,
+      "num_heads": 4,
+      "num_layers": 2,
+      "readout_type": "last",
+      "residual_type": "add"
+    }
+  },
+  "ppo": {
+    "auxiliary_coef": 0.0,
+    "clip_ratio": 0.2,
+    "entropy_coef": 0.005,
+    "epochs": 5,
+    "estimator_context_coef": 1.0,
+    "estimator_epochs": 2,
+    "estimator_learning_rate": 0.001,
+    "estimator_max_grad_norm": 1.0,
+    "estimator_minibatches": 4,
+    "estimator_target_kl": 0.0025,
+    "gae_lambda": 0.9746794344808963,
+    "gamma": 0.99498743710662,
+    "learning_rate": 0.0001,
+    "max_grad_norm": 1.0,
+    "normalize_advantage": true,
+    "num_minibatches": 32,
+    "target_kl": 0.01,
+    "value_clip": 0.2,
+    "value_coef": 4.0
+  }
+}

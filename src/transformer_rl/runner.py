@@ -44,7 +44,7 @@ class RolloutCollector:
         self._contract = _TensorEnvContract(model.config, env.num_envs, env.device)
         self.num_envs = self._contract.num_envs
         self.device = self._contract.device
-        self._history = HistoryBuffer(model.config, self.num_envs, self.device)
+        self._history = self._new_history()
         self._observation: VectorObservation | None = None
         self.total_steps = 0
         self.last_metrics: dict[str, float | int | bool] = {}
@@ -53,11 +53,18 @@ class RolloutCollector:
     def total_transitions(self) -> int:
         return self.total_steps * self.num_envs
 
+    def _new_history(self):
+        return HistoryBuffer(self.model.config, self.num_envs, self.device)
+
+    def _issued_action(self, raw_action):
+        return (raw_action.clone() if self.action_clip is None
+                else raw_action.clamp(-self.action_clip, self.action_clip))
+
     @torch.no_grad()
     def reset(self, seed: int | None = None) -> VectorObservation:
         self._observation = None
         observation = self._contract.observation(self.env.reset(seed=seed))
-        history = HistoryBuffer(self.model.config, self.num_envs, self.device)
+        history = self._new_history()
         history.append(observation)
         self._history = history
         self._observation = observation
@@ -123,8 +130,7 @@ class RolloutCollector:
                 raw_action = self._contract.tensor(
                     "raw_action", sample.action, (self.num_envs, self.model.config.action_dim),
                 )
-                issued_action = (raw_action.clone() if self.action_clip is None
-                                 else raw_action.clamp(-self.action_clip, self.action_clip))
+                issued_action = self._issued_action(raw_action)
                 old_log_prob = self._contract.tensor("old_log_prob", sample.evaluation.log_prob, (self.num_envs,))
                 old_mean = self._contract.tensor("old_mean", sample.evaluation.mean, tuple(raw_action.shape))
                 old_std = self._contract.tensor("old_std", sample.evaluation.std, tuple(raw_action.shape))

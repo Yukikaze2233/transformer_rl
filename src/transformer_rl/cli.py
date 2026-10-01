@@ -241,8 +241,13 @@ def _train(args, model_config: ModelConfig, ppo_config: PPOConfig, environment: 
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "frame":
+        from .frame_cli import main as frame_main
+        return frame_main(argv[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="operation", required=True)
+    subparsers.add_parser("frame", help="Packed-frame network training, comparison and deployment")
     inspect = subparsers.add_parser("inspect", help="Inspect architecture without environment interaction")
     inspect.add_argument("--config", type=Path)
     train = subparsers.add_parser("train", help="Train using an explicitly provided vector environment")

@@ -12,10 +12,12 @@ dependencies = ["torch>=2.7,<3", "numpy>=1.26"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+train = ["tensorboard>=2.18"]
 export = ["onnx>=1.18", "onnxruntime>=1.20", "numpy>=1.26"]
 
 [project.scripts]
 transformer-rl = "transformer_rl.cli:main"
+transformer-rl-frame = "transformer_rl.frame_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

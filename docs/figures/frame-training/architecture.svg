@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1150" viewBox="0 0 1800 1150">
+<rect width="1800" height="1150" fill="white"/>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="black"/></marker></defs>
+<text x="55" y="82" font-size="54" fill="#2E648F" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">网络架构：三个家族的统一对照</tspan></text>
+<text x="60" y="137" font-size="28" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">公共观测</tspan><tspan font-family="Times New Roman"> 35D </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">策略</tspan><tspan font-family="Times New Roman"> 100 Hz </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">历史</tspan><tspan font-family="Times New Roman"> 31 </tspan><tspan font-family="Noto Sans CJK SC">帧</tspan><tspan font-family="Times New Roman"> / 0.30 s </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">独立特权</tspan><tspan font-family="Times New Roman"> Critic 81D</tspan></text>
+<rect x="55" y="168" width="1690" height="755" fill="#FBFAFD" stroke="#8254B7" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<text x="1705" y="207" font-size="29" fill="#8254B7" text-anchor="end" font-weight="400"><tspan font-family="Times New Roman">Actor / </tspan><tspan font-family="Noto Sans CJK SC">部署</tspan></text>
+<text x="85" y="246" font-size="31" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">华南虎式</tspan></text>
+<text x="85" y="280" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">单帧</tspan><tspan font-family="Times New Roman"> MLP</tspan></text>
+<rect x="275" y="229" width="215" height="90" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="382.5" y="267.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前观测</tspan></text>
+<text x="382.5" y="299.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">35D</tspan></text>
+<rect x="590" y="229" width="565" height="90" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="872.5" y="267.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">Actor</tspan><tspan font-family="Noto Sans CJK SC">：全连接网络</tspan></text>
+<text x="872.5" y="299.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">35 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 256 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 128 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 64 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 6</tspan></text>
+<rect x="1365" y="229" width="270" height="90" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1500.0" y="267.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">动作均值</tspan></text>
+<text x="1500.0" y="299.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">四路腿位</tspan><tspan font-family="Times New Roman"> / </tspan><tspan font-family="Noto Sans CJK SC">两路轮速</tspan></text>
+<polyline points="490,274 590,274" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1155,274 1365,274" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="1240" y="260" font-family="Times New Roman" font-size="32" text-anchor="middle"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="85" y="435" font-size="31" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">复旦式</tspan></text>
+<text x="85" y="471" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史编码</tspan></text>
+<rect x="275" y="418" width="215" height="90" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="382.5" y="456.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史观测</tspan></text>
+<text x="382.5" y="488.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">31 </tspan><tspan font-family="Noto Sans CJK SC">×</tspan><tspan font-family="Times New Roman"> 35</tspan></text>
+<rect x="575" y="418" width="420" height="90" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="785.0" y="456.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史</tspan><tspan font-family="Times New Roman"> MLP </tspan><tspan font-family="Noto Sans CJK SC">编码器</tspan></text>
+<text x="785.0" y="488.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">1085 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 128 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 64 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 3</tspan></text>
+<rect x="1090" y="418" width="145" height="90" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1162.5" y="456.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">latent</tspan></text>
+<text x="1162.5" y="488.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">3D</tspan></text>
+<rect x="1320" y="418" width="360" height="90" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1500.0" y="456.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前帧</tspan><tspan font-family="Times New Roman"> + latent </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> Actor</tspan></text>
+<text x="1500.0" y="488.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">38 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 128 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 64 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 32 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 6</tspan></text>
+<polyline points="490,463 575,463" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="995,463 1090,463" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1235,463 1320,463" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="575" y="546" width="255" height="55" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="702.5" y="582.5" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前观测</tspan><tspan font-family="Times New Roman"> 35D</tspan></text>
+<polyline points="830,573 1270,573 1270,488 1320,488" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="865" y="560" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前帧直连</tspan></text>
+<text x="1090" y="550" font-size="23" fill="#555555" text-anchor="start" font-weight="400"><tspan font-family="Times New Roman">PPO </tspan><tspan font-family="Noto Sans CJK SC">学习隐式表示</tspan></text>
+<text x="85" y="693" font-size="31" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">我们的</tspan></text>
+<text x="85" y="729" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Times New Roman">Transformer</tspan></text>
+<rect x="275" y="672" width="215" height="90" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="382.5" y="710.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史观测</tspan></text>
+<text x="382.5" y="742.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">31 </tspan><tspan font-family="Noto Sans CJK SC">×</tspan><tspan font-family="Times New Roman"> 35</tspan></text>
+<rect x="575" y="660" width="420" height="114" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="785.0" y="694.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">逐帧投影</tspan><tspan font-family="Times New Roman"> + </tspan><tspan font-family="Noto Sans CJK SC">位置编码</tspan></text>
+<text x="785.0" y="726.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">2 </tspan><tspan font-family="Noto Sans CJK SC">层因果</tspan><tspan font-family="Times New Roman"> Pre-LN Transformer</tspan></text>
+<text x="785.0" y="758.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">d = 128</tspan><tspan font-family="Noto Sans CJK SC">，</tspan><tspan font-family="Times New Roman">4 </tspan><tspan font-family="Noto Sans CJK SC">头，</tspan><tspan font-family="Times New Roman">FFN = 512</tspan></text>
+<rect x="1090" y="660" width="145" height="114" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1162.5" y="710.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史读出</tspan></text>
+<text x="1162.5" y="742.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">128D</tspan></text>
+<rect x="1320" y="660" width="360" height="114" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1500.0" y="710.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前帧</tspan><tspan font-family="Times New Roman"> + latent </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> Actor</tspan></text>
+<text x="1500.0" y="742.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">163 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 256 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 128 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 6</tspan></text>
+<polyline points="490,717 575,717" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="995,717 1090,717" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1235,717 1320,717" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="575" y="825" width="255" height="55" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="702.5" y="861.5" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前观测</tspan><tspan font-family="Times New Roman"> 35D</tspan></text>
+<polyline points="830,852 1270,852 1270,749 1320,749" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="860" y="839" font-size="24" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前帧直连</tspan></text>
+<text x="1090" y="811" font-size="23" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">末帧</tspan><tspan font-family="Times New Roman"> / </tspan><tspan font-family="Noto Sans CJK SC">当前帧</tspan><tspan font-family="Times New Roman"> Query</tspan></text>
+<text x="1320" y="863" font-size="22" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">普通</tspan><tspan font-family="Times New Roman"> / </tspan><tspan font-family="Noto Sans CJK SC">门控残差；宽度与层数可扩展</tspan></text>
+<rect x="55" y="965" width="1690" height="136" fill="#FFFCF0" stroke="#D9AA27" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<rect x="120" y="993" width="260" height="75" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="250.0" y="1039.5" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前特权观测</tspan><tspan font-family="Times New Roman"> 81D</tspan></text>
+<rect x="460" y="993" width="545" height="75" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="732.5" y="1039.5" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">独立</tspan><tspan font-family="Times New Roman"> Critic</tspan><tspan font-family="Noto Sans CJK SC">：</tspan><tspan font-family="Times New Roman">81 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 256 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 128 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 64 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 1</tspan></text>
+<rect x="1100" y="993" width="195" height="75" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1197.5" y="1039.5" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">价值</tspan><tspan font-family="Times New Roman"> / GAE</tspan></text>
+<rect x="1395" y="993" width="270" height="75" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1530.0" y="1039.5" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">统一</tspan><tspan font-family="Times New Roman"> PPO </tspan><tspan font-family="Noto Sans CJK SC">更新</tspan></text>
+<polyline points="380,1030 460,1030" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1005,1030 1100,1030" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1295,1030 1395,1030" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1665,1029 1720,1029 1720,924" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="7 5"/>
+<text x="1380" y="954" font-size="24" fill="#AC2727" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">策略梯度更新</tspan><tspan font-family="Times New Roman"> Actor</tspan></text>
+<text x="60" y="1135" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">固定任务、奖励、</tspan><tspan font-family="Times New Roman">Critic </tspan><tspan font-family="Noto Sans CJK SC">与采样预算；先完成任务，再比较平稳性、遗忘、吞吐与部署延迟。</tspan></text>
+</svg>
