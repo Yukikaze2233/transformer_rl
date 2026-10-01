@@ -1,10 +1,9 @@
 {
-  "architecture": "mlp",
+  "architecture": "transformer",
   "frame_dim": 35,
   "action_dim": 6,
-  "history_length": 1,
+  "history_length": 31,
   "actor_hidden_dims": [
-    256,
     128,
     64
   ],

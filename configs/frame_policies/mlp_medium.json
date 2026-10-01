@@ -3,5 +3,21 @@
   "frame_dim": 35,
   "action_dim": 6,
   "history_length": 1,
-  "actor_hidden_dims": [512, 256, 128]
+  "actor_hidden_dims": [
+    512,
+    256,
+    128
+  ],
+  "d_model": 96,
+  "num_layers": 2,
+  "num_heads": 4,
+  "ffn_dim": 192,
+  "residual_type": "add",
+  "mean_init_scale": 1.0,
+  "encoder_hidden_dims": [
+    128,
+    128
+  ],
+  "history_latent_dim": 3,
+  "readout_type": "last"
 }

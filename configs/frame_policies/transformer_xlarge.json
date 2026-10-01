@@ -1,17 +1,16 @@
 {
-  "architecture": "mlp",
+  "architecture": "transformer",
   "frame_dim": 35,
   "action_dim": 6,
-  "history_length": 1,
+  "history_length": 31,
   "actor_hidden_dims": [
     256,
-    128,
-    64
+    128
   ],
-  "d_model": 96,
-  "num_layers": 2,
-  "num_heads": 4,
-  "ffn_dim": 192,
+  "d_model": 192,
+  "num_layers": 4,
+  "num_heads": 6,
+  "ffn_dim": 1024,
   "residual_type": "add",
   "mean_init_scale": 1.0,
   "encoder_hidden_dims": [

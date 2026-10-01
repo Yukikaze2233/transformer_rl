@@ -2,11 +2,21 @@
   "architecture": "transformer",
   "frame_dim": 35,
   "action_dim": 6,
-  "history_length": 16,
-  "d_model": 96,
+  "history_length": 31,
+  "actor_hidden_dims": [
+    256,
+    128
+  ],
+  "d_model": 128,
   "num_layers": 2,
   "num_heads": 4,
-  "ffn_dim": 192,
-  "actor_hidden_dims": [128, 64],
-  "residual_type": "add"
+  "ffn_dim": 512,
+  "residual_type": "add",
+  "mean_init_scale": 1.0,
+  "encoder_hidden_dims": [
+    128,
+    128
+  ],
+  "history_latent_dim": 3,
+  "readout_type": "last"
 }

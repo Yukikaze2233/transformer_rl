@@ -15,7 +15,7 @@ from transformer_rl.model import TimeAwareActor
 from transformer_rl.types import HistoryBatch
 
 
-ARCHITECTURES = ("mlp", "frame_stack_mlp", "transformer")
+ARCHITECTURES = ("mlp", "frame_stack_mlp", "history_mlp", "transformer")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -133,9 +133,12 @@ def test_transformer_prefix_has_no_access_to_future_frames(residual_type):
     torch.testing.assert_close(gradient[:, 3:], torch.zeros_like(gradient[:, 3:]), atol=0, rtol=0)
 
 
-@pytest.mark.parametrize("residual_type", ("add", "gated"))
-def test_current_frame_bypass_works_with_history_branch_zeroed(residual_type):
-    config = small_config("transformer", residual_type=residual_type)
+@pytest.mark.parametrize("architecture,overrides", (
+    ("history_mlp", {}), ("transformer", {}),
+    ("transformer", {"readout_type": "query"}), ("transformer", {"residual_type": "gated"}),
+))
+def test_current_frame_bypass_works_with_history_branch_zeroed(architecture, overrides):
+    config = small_config(architecture, **overrides)
     policy = FramePolicy(config)
     with torch.no_grad():
         for name, parameter in policy.named_parameters():
@@ -241,12 +244,15 @@ def test_wrong_input_rank_or_fixed_window_dimensions_are_rejected(architecture):
 
 
 @pytest.mark.parametrize("fields", [
-    {"architecture": "gru"}, {"frame_dim": 0}, {"frame_dim": True},
+    {"architecture": "unknown"}, {"frame_dim": 0}, {"frame_dim": True},
     {"action_dim": -1}, {"history_length": 0}, {"history_length": 1.5},
     {"history_length": 2}, {"actor_hidden_dims": ()}, {"actor_hidden_dims": (24, 0)},
     {"d_model": 15}, {"d_model": 18, "num_heads": 4}, {"num_heads": 0},
     {"num_layers": 0}, {"ffn_dim": 0}, {"residual_type": "unknown"},
     {"residual_type": "gated"}, {"mean_init_scale": float("nan")}, {"mean_init_scale": -1},
+    {"history_latent_dim": 0}, {"history_latent_dim": True}, {"encoder_hidden_dims": []},
+    {"readout_type": "unknown"}, {"readout_type": "query"},
+    {"architecture": "gru"}, {"architecture": "lstm"}, {"architecture": "tcn"},
 ])
 def test_invalid_configuration_is_rejected(fields):
     with pytest.raises((ValueError, TypeError)):
@@ -261,7 +267,8 @@ def test_unknown_saved_configuration_field_is_rejected():
 
 
 @pytest.mark.parametrize("architecture,residual_type", [
-    ("mlp", "add"), ("frame_stack_mlp", "add"), ("transformer", "add"), ("transformer", "gated"),
+    ("mlp", "add"), ("frame_stack_mlp", "add"), ("history_mlp", "add"),
+    ("transformer", "add"), ("transformer", "gated"),
 ])
 def test_torchscript_save_load_matches_single_and_multiple_environment_outputs(architecture, residual_type):
     config = small_config(architecture, residual_type=residual_type)
@@ -277,7 +284,8 @@ def test_torchscript_save_load_matches_single_and_multiple_environment_outputs(a
 
 
 @pytest.mark.parametrize("architecture,residual_type", [
-    ("mlp", "add"), ("frame_stack_mlp", "add"), ("transformer", "add"), ("transformer", "gated"),
+    ("mlp", "add"), ("frame_stack_mlp", "add"), ("history_mlp", "add"),
+    ("transformer", "add"), ("transformer", "gated"),
 ])
 def test_onnx_dynamic_batch_outputs_match_pytorch(architecture, residual_type, tmp_path):
     onnx = pytest.importorskip("onnx")
@@ -304,6 +312,22 @@ def test_onnx_dynamic_batch_outputs_match_pytorch(architecture, residual_type, t
             expected = policy(frames).numpy()
         actual, = session.run(["actions"], {"frames": frames.numpy()})
         np.testing.assert_allclose(actual, expected, atol=2e-6, rtol=2e-5)
+
+
+def test_current_query_readout_uses_the_complete_observed_history_without_cross_call_state():
+    policy = FramePolicy(small_config("transformer", readout_type="query"))
+    frames = torch.randn(3, 5, 35, requires_grad=True)
+    latent = policy.forward_features(frames)
+    expected = policy.query_readout(frames[:, -1], policy.encode(frames))
+    torch.testing.assert_close(latent, expected, atol=0, rtol=0)
+    assert latent.shape == (3, 16)
+    gradient, = torch.autograd.grad((latent * torch.randn_like(latent)).sum(), frames)
+    assert (gradient.abs().sum(-1) > 0).all()
+    actions = policy(frames)
+    policy(torch.randn_like(frames))
+    torch.testing.assert_close(policy(frames), actions, atol=0, rtol=0)
+    scripted = torch.jit.script(policy)
+    torch.testing.assert_close(scripted(frames), actions, atol=1e-6, rtol=1e-5)
 
 
 def test_original_time_aware_30d_interface_and_preprocessing_remain_independent():

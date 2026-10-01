@@ -1,8 +1,8 @@
 {
-  "architecture": "mlp",
+  "architecture": "history_mlp",
   "frame_dim": 35,
   "action_dim": 6,
-  "history_length": 1,
+  "history_length": 31,
   "actor_hidden_dims": [
     256,
     128,
@@ -15,9 +15,10 @@
   "residual_type": "add",
   "mean_init_scale": 1.0,
   "encoder_hidden_dims": [
+    256,
     128,
-    128
+    64
   ],
-  "history_latent_dim": 3,
+  "history_latent_dim": 16,
   "readout_type": "last"
 }
