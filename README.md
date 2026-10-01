@@ -14,7 +14,7 @@
 
 完整使用说明见 [35D 训练、对比与部署](docs/FRAME_TRAINING.md)，理论见 [历史网络与能力保持设计](docs/FRAME_POLICY_DESIGN.md)。`frame` 入口管理该路径；下述 30D 时间编码接口是独立研究路径，两者的观测与检查点格式各自验证。
 
-图文说明见[35D策略网络架构](docs/POLICY_ARCHITECTURE.md)和[网络结构比较与实验设计](docs/NETWORK_COMPARISON.md)。前者展开历史编码器、Actor、独立Critic与部署边界，附录记录V6的Reward及课程；后者区分信息量、参数容量、训练机制和实时成本。
+图文说明见[35D 策略网络架构](docs/FRAME_ARCHITECTURE.md)，展开两类 MLP、Transformer 编码器与读出、独立 Critic 和 100 Hz 部署数据流。[网络结构比较与实验设计](docs/NETWORK_COMPARISON.md)介绍更广泛的结构特点。
 
 ### 时间编码对照结构
 
@@ -125,6 +125,7 @@ python -m transformer_rl.experiment_cli summarize \
 
 ## 文档
 
+- [35D 策略网络架构与部署数据流](docs/FRAME_ARCHITECTURE.md)
 - [35D 训练、课程保持、选型与部署](docs/FRAME_TRAINING.md)
 
 - [研究结论、实时控制取舍与代码索引](docs/RESEARCH_CONCLUSION.md)

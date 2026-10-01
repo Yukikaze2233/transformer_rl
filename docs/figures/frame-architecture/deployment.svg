@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="930" viewBox="0 0 1800 930">
+<rect width="1800" height="930" fill="white"/>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="black"/></marker></defs>
+<text x="55" y="83" font-size="54" fill="#2E648F" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">部署结构：历史缓存与确定性</tspan><tspan font-family="Times New Roman"> Actor</tspan></text>
+<text x="60" y="138" font-size="28" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">策略周期</tspan><tspan font-family="Times New Roman"> 10 ms</tspan><tspan font-family="Noto Sans CJK SC">；历史窗口保存过去数据；完整</tspan><tspan font-family="Times New Roman"> Actor </tspan><tspan font-family="Noto Sans CJK SC">导出为</tspan><tspan font-family="Times New Roman"> TorchScript / ONNX</tspan></text>
+<rect x="55" y="190" width="1690" height="575" fill="#FBFAFD" stroke="#8254B7" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<rect x="100" y="261" width="280" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="240.0" y="301.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">观测组装与缩放</tspan></text>
+<text x="240.0" y="335.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前</tspan><tspan font-family="Times New Roman"> 35D</tspan></text>
+<rect x="475" y="261" width="295" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="622.5" y="301.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">外部历史缓存</tspan></text>
+<text x="622.5" y="335.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">31 </tspan><tspan font-family="Noto Sans CJK SC">×</tspan><tspan font-family="Times New Roman"> 35 </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">旧</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">新</tspan></text>
+<rect x="865" y="261" width="355" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1042.5" y="301.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">Transformer </tspan><tspan font-family="Noto Sans CJK SC">编码器</tspan></text>
+<text x="1042.5" y="335.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史表示</tspan><tspan font-family="Times New Roman"> 128D</tspan></text>
+<rect x="1315" y="261" width="330" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1480.0" y="301.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前帧</tspan><tspan font-family="Times New Roman"> + </tspan><tspan font-family="Noto Sans CJK SC">历史表示</tspan></text>
+<text x="1480.0" y="335.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">Actor</tspan><tspan font-family="Noto Sans CJK SC">：</tspan><tspan font-family="Times New Roman">163D </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 6D</tspan></text>
+<polyline points="380,308 475,308" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="770,308 865,308" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1220,308 1315,308" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="420,308 420,413 1270,413 1270,333 1315,333" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="865" y="443" font-size="27" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前帧直连</tspan></text>
+<rect x="1280" y="551" width="350" height="112" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1455.0" y="582" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">确定性动作均值</tspan></text>
+<text x="1455.0" y="620" font-family="Times New Roman" font-size="33" text-anchor="middle"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="1455.0" y="650" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">6D</tspan></text>
+<rect x="805" y="560" width="380" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="995.0" y="600.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">执行限幅与物理量映射</tspan></text>
+<text x="995.0" y="634.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">四路腿位</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">两路轮速</tspan></text>
+<rect x="300" y="560" width="400" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="500.0" y="600.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">目标接口</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">底层控制器</tspan></text>
+<text x="500.0" y="634.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">100 Hz </tspan><tspan font-family="Noto Sans CJK SC">目标</tspan><tspan font-family="Times New Roman"> / 1 kHz PD</tspan></text>
+<polyline points="1480,355 1480,551" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1280,607 1185,607" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="805,607 700,607" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="805,656 763,656 763,725 100,725 100,355" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="7 5"/>
+<text x="135" y="707" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">上一条</tspan><tspan font-family="Times New Roman"> issued </tspan><tspan font-family="Noto Sans CJK SC">动作回填到下一帧；控制器接收与物理响应由各自接口记录。</tspan></text>
+<text x="90" y="497" font-size="27" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">缓存初始化：重复首帧；网络前向无可变</tspan><tspan font-family="Times New Roman"> KV cache </tspan><tspan font-family="Noto Sans CJK SC">或跨调用隐状态。</tspan></text>
+<rect x="55" y="810" width="1690" height="75" fill="#FFFCF0" stroke="#D5A724" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<text x="90" y="858" font-size="27" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Times New Roman">Critic</tspan><tspan font-family="Noto Sans CJK SC">、探索标准差不进入部署图；输入</tspan><tspan font-family="Times New Roman"> float32</tspan><tspan font-family="Noto Sans CJK SC">，历史长度与特征顺序由模型元数据确定。</tspan></text>
+</svg>

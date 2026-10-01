@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1100" viewBox="0 0 1800 1100">
+<rect width="1800" height="1100" fill="white"/>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="black"/></marker></defs>
+<text x="55" y="83" font-size="54" fill="#2E648F" text-anchor="start" font-weight="700"><tspan font-family="Times New Roman">Transformer</tspan><tspan font-family="Noto Sans CJK SC">：从历史窗口到动作</tspan></text>
+<text x="60" y="138" font-size="28" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">默认结构：</tspan><tspan font-family="Times New Roman">31 </tspan><tspan font-family="Noto Sans CJK SC">帧</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> 128D </tspan><tspan font-family="Noto Sans CJK SC">表示</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> 2 </tspan><tspan font-family="Noto Sans CJK SC">层</tspan><tspan font-family="Times New Roman"> Pre-LN </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> 4 </tspan><tspan font-family="Noto Sans CJK SC">头注意力</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">末帧读出</tspan></text>
+<rect x="55" y="177" width="1690" height="268" fill="#FBFAFD" stroke="#8254B7" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<rect x="90" y="236" width="235" height="112" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="207.5" y="267" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史输入</tspan></text>
+<text x="207.5" y="305" font-family="Times New Roman" font-size="33" text-anchor="middle"><tspan font-style="italic">H</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="207.5" y="335" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">[B, 31, 35]</tspan></text>
+<rect x="415" y="236" width="325" height="112" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="577.5" y="285.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">逐帧</tspan><tspan font-family="Times New Roman"> Linear</tspan><tspan font-family="Noto Sans CJK SC">：</tspan><tspan font-family="Times New Roman">35 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 128</tspan></text>
+<text x="577.5" y="319.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">+ </tspan><tspan font-family="Noto Sans CJK SC">固定位置编码</tspan></text>
+<rect x="835" y="236" width="365" height="112" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1017.5" y="285.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">因果</tspan><tspan font-family="Times New Roman"> Transformer </tspan><tspan font-family="Noto Sans CJK SC">×</tspan><tspan font-family="Times New Roman"> 2</tspan></text>
+<text x="1017.5" y="319.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">[B, 31, 128]</tspan></text>
+<rect x="1295" y="236" width="345" height="112" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1467.5" y="285.0" font-size="25" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">LayerNorm </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">最后</tspan><tspan font-family="Times New Roman"> token</tspan></text>
+<text x="1467.5" y="319.0" font-size="25" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史表示</tspan><tspan font-family="Times New Roman"> 128D</tspan></text>
+<polyline points="325,292 415,292" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="740,292 835,292" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1200,292 1295,292" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="105" y="402" font-size="28" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">一个</tspan><tspan font-family="Times New Roman"> token </tspan><tspan font-family="Noto Sans CJK SC">对应一整帧观测；只关注当前位置及过去位置，不读取未来。</tspan></text>
+<rect x="55" y="495" width="1690" height="326" fill="#EEF4FC" stroke="#A2BAD4" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<text x="87" y="548" font-size="31" fill="#2E648F" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">单层编码器展开</tspan></text>
+<rect x="230" y="615" width="180" height="96" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="320.0" y="673.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">LayerNorm</tspan></text>
+<rect x="468" y="615" width="278" height="96" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="607.0" y="656.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">因果多头注意力</tspan></text>
+<text x="607.0" y="690.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">4 </tspan><tspan font-family="Noto Sans CJK SC">头</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">×</tspan><tspan font-family="Times New Roman"> 32D</tspan></text>
+<rect x="800" y="615" width="90" height="96" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="845.0" y="673.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">+</tspan></text>
+<rect x="953" y="615" width="180" height="96" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1043.0" y="673.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">LayerNorm</tspan></text>
+<rect x="1195" y="615" width="300" height="96" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1345.0" y="656.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">FFN / GELU</tspan></text>
+<text x="1345.0" y="690.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">128 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 512 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 128</tspan></text>
+<rect x="1555" y="615" width="90" height="96" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1600.0" y="673.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">+</tspan></text>
+<text x="120" y="674" font-family="Times New Roman" font-size="39" text-anchor="middle"><tspan font-style="italic">X</tspan><tspan baseline-shift="super" font-size="70%" font-style="italic">ℓ</tspan></text>
+<polyline points="155,663 230,663" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="410,663 468,663" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="746,663 800,663" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="890,663 953,663" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1133,663 1195,663" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1495,663 1555,663" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1645,663 1705,663" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="183,663 183,582 845,582 845,615" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="919,663 919,764 1600,764 1600,711" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="444" y="568" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">残差直连</tspan></text>
+<text x="1222" y="797" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">残差直连</tspan></text>
+<rect x="55" y="867" width="1690" height="177" fill="#FFFCF0" stroke="#D5A724" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<rect x="100" y="900" width="245" height="112" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="222.5" y="931" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前观测</tspan></text>
+<text x="222.5" y="969" font-family="Times New Roman" font-size="33" text-anchor="middle"><tspan font-style="italic">o</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="222.5" y="999" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">35D</tspan></text>
+<rect x="410" y="900" width="245" height="112" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="532.5" y="931" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史表示</tspan></text>
+<text x="532.5" y="969" font-family="Times New Roman" font-size="33" text-anchor="middle"><tspan font-style="italic">z</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="532.5" y="999" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">128D</tspan></text>
+<rect x="730" y="909" width="295" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="877.5" y="949.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">拼接</tspan><tspan font-family="Times New Roman"> 35 + 128</tspan></text>
+<text x="877.5" y="983.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">163D</tspan></text>
+<rect x="1100" y="909" width="335" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1267.5" y="949.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">Actor / ELU</tspan></text>
+<text x="1267.5" y="983.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">163 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 256 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 128 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 6</tspan></text>
+<rect x="1510" y="900" width="175" height="112" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1597.5" y="931" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">均值输出</tspan></text>
+<text x="1597.5" y="969" font-family="Times New Roman" font-size="33" text-anchor="middle"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
+<text x="1597.5" y="999" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">6D</tspan></text>
+<polyline points="345,956 382,956 382,884 705,884 705,932 730,932" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="655,956 730,980" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1025,956 1100,956" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1435,956 1510,956" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="60" y="1083" font-size="27" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">零</tspan><tspan font-family="Times New Roman"> Dropout</tspan><tspan font-family="Noto Sans CJK SC">；输出层为线性；完整窗口前向计算；历史缓存由调用层维护。</tspan></text>
+</svg>

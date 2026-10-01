@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1190" viewBox="0 0 1800 1190">
+<rect width="1800" height="1190" fill="white"/>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="black"/></marker></defs>
+<text x="55" y="83" font-size="54" fill="#2E648F" text-anchor="start" font-weight="700"><tspan font-family="Times New Roman">Transformer </tspan><tspan font-family="Noto Sans CJK SC">变体：读出与残差</tspan></text>
+<text x="60" y="138" font-size="28" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">共享</tspan><tspan font-family="Times New Roman"> 31 </tspan><tspan font-family="Noto Sans CJK SC">帧、</tspan><tspan font-family="Times New Roman">128D</tspan><tspan font-family="Noto Sans CJK SC">、</tspan><tspan font-family="Times New Roman">2 </tspan><tspan font-family="Noto Sans CJK SC">层、</tspan><tspan font-family="Times New Roman">4 </tspan><tspan font-family="Noto Sans CJK SC">头编码器；改变历史信息进入动作头的方式</tspan></text>
+<rect x="55" y="181" width="1690" height="233" fill="#FCFAED" stroke="#CABC83" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<text x="90" y="237" font-size="33" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">末帧读出</tspan></text>
+<rect x="90" y="273" width="350" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="265.0" y="313.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">编码后历史</tspan><tspan font-family="Times New Roman"> tokens</tspan></text>
+<text x="265.0" y="347.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">[B, 31, 128]</tspan></text>
+<rect x="530" y="273" width="330" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="695.0" y="313.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">取最后</tspan><tspan font-family="Times New Roman"> token</tspan></text>
+<text x="695.0" y="347.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">128D</tspan></text>
+<rect x="955" y="273" width="310" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1110.0" y="313.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">拼接当前帧</tspan><tspan font-family="Times New Roman"> 35D</tspan></text>
+<text x="1110.0" y="347.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">163D</tspan></text>
+<rect x="1360" y="273" width="330" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1525.0" y="313.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">Actor</tspan></text>
+<text x="1525.0" y="347.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">163 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 256 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 128 </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 6</tspan></text>
+<polyline points="440,320 530,320" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="860,320 955,320" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1265,320 1360,320" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="55" y="458" width="1690" height="337" fill="#EEF4FC" stroke="#A2BAD4" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<text x="90" y="514" font-size="33" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">当前帧</tspan><tspan font-family="Times New Roman"> Query </tspan><tspan font-family="Noto Sans CJK SC">读出</tspan></text>
+<rect x="90" y="552" width="350" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="265.0" y="592.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">编码后历史</tspan><tspan font-family="Times New Roman"> tokens</tspan></text>
+<text x="265.0" y="626.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">Key / Value</tspan><tspan font-family="Noto Sans CJK SC">：</tspan><tspan font-family="Times New Roman">128D</tspan></text>
+<rect x="90" y="693" width="350" height="62" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="265.0" y="734.0" font-size="25" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前帧</tspan><tspan font-family="Times New Roman"> 35D </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> Query 128D</tspan></text>
+<rect x="565" y="566" width="375" height="115" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="752.5" y="616.5" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">4 </tspan><tspan font-family="Noto Sans CJK SC">头</tspan><tspan font-family="Times New Roman"> Query </tspan><tspan font-family="Noto Sans CJK SC">注意力</tspan></text>
+<text x="752.5" y="650.5" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">+ Query </tspan><tspan font-family="Noto Sans CJK SC">残差</tspan><tspan font-family="Times New Roman"> / LayerNorm</tspan></text>
+<rect x="1040" y="576" width="300" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1190.0" y="616.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史读出</tspan><tspan font-family="Times New Roman"> 128D</tspan></text>
+<text x="1190.0" y="650.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">+ </tspan><tspan font-family="Noto Sans CJK SC">当前帧</tspan><tspan font-family="Times New Roman"> 35D</tspan></text>
+<rect x="1435" y="576" width="250" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1560.0" y="616.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">Actor</tspan></text>
+<text x="1560.0" y="650.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">163D </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 6D</tspan></text>
+<polyline points="440,599 565,599" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="440,724 497,724 497,650 565,650" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="940,623 1040,623" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1340,623 1435,623" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="565" y="750" font-size="26" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前观测生成</tspan><tspan font-family="Times New Roman"> Query</tspan><tspan font-family="Noto Sans CJK SC">，向已观测历史选择相关特征。</tspan></text>
+<rect x="55" y="839" width="1690" height="291" fill="#F5F0FA" stroke="#B49ACA" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
+<text x="90" y="895" font-size="33" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">门控残差</tspan></text>
+<rect x="90" y="931" width="370" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="275.0" y="971.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">输入特征</tspan></text>
+<text x="275.0" y="1005.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">注意力或</tspan><tspan font-family="Times New Roman"> FFN </tspan><tspan font-family="Noto Sans CJK SC">输出</tspan></text>
+<text x="370" y="969" font-family="Times New Roman" font-size="31" text-anchor="middle"><tspan font-style="italic">x</tspan></text>
+<text x="418" y="1003" font-family="Times New Roman" font-size="31" text-anchor="middle"><tspan font-style="italic">y</tspan></text>
+<rect x="565" y="931" width="505" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="817.5" y="971.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">深度方向门控融合</tspan></text>
+<text x="817.5" y="1005.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">保留输入</tspan><tspan font-family="Times New Roman"> + </tspan><tspan font-family="Noto Sans CJK SC">写入候选特征</tspan></text>
+<rect x="1180" y="931" width="505" height="94" fill="white" stroke="#2D6198" stroke-width="1.8"/>
+<text x="1432.5" y="971.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">下一子层</tspan><tspan font-family="Times New Roman"> / </tspan><tspan font-family="Noto Sans CJK SC">下一编码层</tspan></text>
+<text x="1432.5" y="1005.0" font-size="27" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">末帧读出</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">→</tspan><tspan font-family="Times New Roman"> 163D Actor</tspan></text>
+<polyline points="460,978 565,978" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<polyline points="1070,978 1180,978" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="920" y="1090" font-family="Times New Roman" font-size="37" text-anchor="middle">G(<tspan font-style="italic">x</tspan>, <tspan font-style="italic">y</tspan>) = (1 − <tspan font-style="italic">α</tspan>) ⊙ <tspan font-style="italic">x</tspan> + <tspan font-style="italic">α</tspan> ⊙ <tspan font-style="italic">h̃</tspan></text>
+<text x="60" y="1171" font-size="27" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">门控发生在单次前向的编码层内；各变体均使用固定历史窗口，不维护跨调用循环隐状态。</tspan></text>
+</svg>
