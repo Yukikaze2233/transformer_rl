@@ -50,7 +50,12 @@ def test_real_worker_curriculum_eval_retry_selection_and_integrity(tmp_path, mon
     monkeypatch.setenv("OMP_NUM_THREADS", "1")
     monkeypatch.setenv("MKL_NUM_THREADS", "1")
     root = tmp_path / "study"
-    study.plan_study(specification(tmp_path), root)
+    spec_path = specification(tmp_path)
+    spec = json.loads(spec_path.read_text())
+    # The environment imports the canonical worker module, as the SDK adapter does.
+    spec["environment_factory"] = "worker_packed_env:make_env"
+    spec_path.write_text(json.dumps(spec))
+    study.plan_study(spec_path, root)
     manifest = study.validate_study(root, source=True)
     variant = manifest["spec"]["variants"][0]
     real_process, interrupted_once = study._process, []

@@ -465,7 +465,8 @@ def _run_job(root, manifest, variant, seed, device, stop):
         return state
     _recover_processes(job_dir)
     bootstrap = ("import runpy, sys; sys.path.insert(0, " + repr(str(root / "policy_source"))
-                 + "); runpy.run_module(" + repr(spec["execution"]["worker_module"]) + ", run_name='__main__')")
+                 + "); runpy.run_module(" + repr(spec["execution"]["worker_module"])
+                 + ", run_name='__main__', alter_sys=True)")
     worker = [sys.executable, "-c", bootstrap]
     required = []
     for stage_index, stage in enumerate(spec["stages"]):
