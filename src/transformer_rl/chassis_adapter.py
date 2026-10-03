@@ -327,6 +327,7 @@ class ChassisFrameAdapter:
         import torch
         self.env, self.config, self.metadata = env, config, metadata
         self.enable_control_metrics = enable_control_metrics
+        self._control_motor_indices = None
         self.num_envs, self.device = env.num_envs, torch.device(env.device)
         self._previous = torch.zeros(self.num_envs, 6, device=self.device)
         self._fresh = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
@@ -362,15 +363,22 @@ class ChassisFrameAdapter:
 
     def _control_packet(self, diagnostic, velocity, omega, height, tilt, done):
         import torch
+        if self._control_motor_indices is None:
+            source_order = self.metadata.get("startup", getattr(self.env, "startup_report", {})).get("active_joint_order")
+            target_order = self.env.cfg.get("policy_action_order")
+            if (not isinstance(source_order, list) or not isinstance(target_order, list)
+                    or len(source_order) != 6 or len(target_order) != 6
+                    or len(set(source_order)) != 6 or set(source_order) != set(target_order)):
+                raise ValueError("control metrics require explicit matching active_joint_order and policy_action_order")
+            self._control_motor_indices = [source_order.index(name) for name in target_order]
+        order = self._control_motor_indices
         position = diagnostic.get("position")
         if position is None:
             position = self.env.robot.data.root_link_pose_w.torch
-        motor_position = diagnostic.get("motor_position")
-        motor_velocity = diagnostic.get("motor_velocity")
-        if motor_position is None:
-            motor_position = self.env.robot.data.joint_pos.torch[:, self.env.ids]
-        if motor_velocity is None:
-            motor_velocity = self.env.robot.data.joint_vel.torch[:, self.env.ids]
+        # Simulator joint state is the physical endpoint; diagnostics may expose
+        # delayed controller feedback. Canonical packets use four legs then wheels.
+        motor_position = self.env.robot.data.joint_pos.torch[:, self.env.ids][:, order]
+        motor_velocity = self.env.robot.data.joint_vel.torch[:, self.env.ids][:, order]
         bound = diagnostic["motor_effort_bounds"]
         limits = torch.stack((-bound, bound), -1) if bound.ndim == 2 else bound
         return {name: value.clone() for name, value in {
@@ -380,8 +388,8 @@ class ChassisFrameAdapter:
             "position_xy": position[:, :2], "tilt": tilt,
             "leg_target": diagnostic["leg_target_position"], "wheel_target": diagnostic["wheel_target_velocity"],
             "motor_position": motor_position, "motor_velocity": motor_velocity,
-            "motor_effort": diagnostic["motor_effort"],
-            "requested_motor_effort": diagnostic["requested_motor_effort"], "effort_bounds": limits,
+            "motor_effort": diagnostic["motor_effort"][:, order],
+            "requested_motor_effort": diagnostic["requested_motor_effort"][:, order], "effort_bounds": limits[:, order],
             "failure": diagnostic["terminated"].bool() & done,
             "success": diagnostic["success"].bool() & ~diagnostic["terminated"].bool() & done,
         }.items()}
@@ -497,5 +505,6 @@ def make_env(model_config, environment_config, device):
     return ChassisFrameAdapter(env, model_config, {"identity": identity["sha256"],
         "control_sha256": digest(identity["control"]), "contract_sha256": effective_sha256,
         "parent_curriculum_sha256": identity["parent_curriculum_sha256"], "startup": env.startup_report,
+        "control_packet_joint_order": list(config["policy_action_order"]),
         "physics_hz": 1000, "policy_hz": 100, "preflight": "packed_study_not_baseline_campaign",
         **({"evaluation_groups": list(env.scene_groups)} if config["evaluation_exact_cases"] else {})})

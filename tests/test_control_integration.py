@@ -35,6 +35,9 @@ class PhysicalChassis(TensorChassis):
         super().__init__()
         self.diagnostic_joint_state = diagnostic_joint_state
         self.missing = missing
+        joint_order = ["L_joint1", "LL_joint1", "R_joint1", "RR_joint1", "L_joint3", "R_joint3"]
+        self.startup_report = {"active_joint_order": joint_order}
+        self.cfg["policy_action_order"] = joint_order.copy()
         self.ids = torch.arange(6)
         self.motor_position = torch.zeros(3, 6)
         self.motor_velocity = torch.zeros(3, 6)
@@ -105,6 +108,67 @@ def test_adapter_enabled_physical_diagnostics_fail_closed(missing):
     adapter = ChassisFrameAdapter(env, FrameModelConfig(), {}, enable_control_metrics=True)
     adapter.reset(seed=71)
     with pytest.raises((ValueError, KeyError), match=missing):
+        adapter.step(torch.zeros(3, 6))
+
+
+def test_adapter_uses_physical_endpoint_and_canonical_motor_order():
+    from transformer_rl.control_metrics import ControlMetrics
+
+    source_order = ["L_joint1", "LL_joint1", "L_joint3", "R_joint1", "RR_joint1", "R_joint3"]
+    canonical_order = ["L_joint1", "LL_joint1", "R_joint1", "RR_joint1", "L_joint3", "R_joint3"]
+
+    class InterleavedChassis(PhysicalChassis):
+        def step(self, issued):
+            raw, reward, done, extras = super().step(issued)
+            self.motor_position[:] = torch.tensor([1., 2., 9., 3., 4., 8.])
+            self.motor_velocity[:] = torch.tensor([11., 12., 91., 13., 14., 81.])
+            self.motor_effort[:] = torch.tensor([.1, .2, .3, .4, .5, .6])
+            self.requested_motor_effort[:] = torch.tensor([.11, .22, .33, .44, .55, .66])
+            self.effort_limit[:] = torch.tensor([40., 40., 4.5, 40., 40., 4.5])
+            diagnostic = extras["diagnostics"]
+            # Deliberately stale feedback must not replace the physical endpoint.
+            diagnostic["motor_position"] = torch.full((3, 6), -7.)
+            diagnostic["motor_velocity"] = torch.full((3, 6), -8.)
+            diagnostic["leg_target_position"][:] = torch.tensor([1., 2., 3., 4.])
+            diagnostic["wheel_target_velocity"][:] = torch.tensor([91., 81.])
+            return raw, reward, done, extras
+
+    env = InterleavedChassis()
+    env.cfg["policy_action_order"] = canonical_order
+    metadata = {"startup": {"active_joint_order": source_order}}
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), metadata, enable_control_metrics=True)
+    adapter.reset(seed=71)
+    result = adapter.step(torch.zeros(3, 6))
+    packet = result.info["control_packet"]
+    for name, expected in (("motor_position", [1., 2., 3., 4., 9., 8.]),
+                           ("motor_velocity", [11., 12., 13., 14., 91., 81.]),
+                           ("motor_effort", [.1, .2, .4, .5, .3, .6]),
+                           ("requested_motor_effort", [.11, .22, .44, .55, .33, .66])):
+        torch.testing.assert_close(packet[name], torch.tensor(expected).expand(3, -1))
+    torch.testing.assert_close(packet["effort_bounds"][..., 1],
+        torch.tensor([40., 40., 40., 40., 4.5, 4.5]).expand(3, -1))
+    assert (env.motor_position == -99.).all()
+    metrics = ControlMetrics(3, .01, settle_steps=0, min_steady_samples=1)
+    metrics.update(packet, result.terminated | result.truncated)
+    report = metrics.report()["actuation"]
+    for name in ("leg_position_error", "wheel_velocity_error"):
+        assert all(channel["rms"] == 0. for channel in report[name]["channels"])
+
+
+@pytest.mark.parametrize("invalid", ("missing_source", "missing_target", "different_names", "duplicate_source"))
+def test_adapter_rejects_missing_or_ambiguous_motor_order(invalid):
+    env = PhysicalChassis()
+    if invalid == "missing_source":
+        env.startup_report.pop("active_joint_order")
+    elif invalid == "missing_target":
+        env.cfg.pop("policy_action_order")
+    elif invalid == "different_names":
+        env.cfg["policy_action_order"][0] = "unidentified_motor"
+    else:
+        env.startup_report["active_joint_order"][0] = "LL_joint1"
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {}, enable_control_metrics=True)
+    adapter.reset(seed=71)
+    with pytest.raises(ValueError, match="active_joint_order.*policy_action_order"):
         adapter.step(torch.zeros(3, 6))
 
 

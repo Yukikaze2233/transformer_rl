@@ -444,6 +444,7 @@ class ControlMetrics:
                 "response_min_step": list(self.response_min_step),
                 "threshold_scope": "simulation screening thresholds; not hardware acceptance limits",
                 "axis_order": list(AXES), "signal_time": "PRE-reset physical sample time",
+                "motor_order": "four leg targets followed by two wheel targets; position, velocity, effort and bounds share this order",
                 "weighting": "equal sample weights within each scenario; aggregate scenarios and training seeds separately",
                 "response_start": "first physical sample with changed effective reference; excludes unknown sub-sample latency",
                 "response_iae": "trapezoidal integral from first sample after change; censored prefixes excluded from complete_iae",

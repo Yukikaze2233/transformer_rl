@@ -238,7 +238,9 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
             trace = ControlTrace(trace_output, steps=steps, num_envs=env.num_envs, replicas=trace_replicas,
                 groups=group_labels, metadata={"checkpoint_sha256": checkpoint_sha, "checkpoint_update": update,
                     "seed": seed, "policy_dt_s": config.control["policy_dt_s"],
-                    "sampling_hz": 1 / config.control["policy_dt_s"], "control_sha256": digest(config.control)})
+                    "sampling_hz": 1 / config.control["policy_dt_s"], "control_sha256": digest(config.control),
+                    "motor_order": "four leg targets followed by two wheel targets",
+                    "motor_joint_names": env.metadata.get("control_packet_joint_order")})
         rewards, metrics = _MetricAccumulator(), {}
         names = None
         completed = successes = failures = 0

@@ -20,6 +20,8 @@
 
 轨迹使用磁盘映射写入，内存不随评测时长增长；完整成功后发布最终文件，失败保留日志而不发布完整轨迹。100 Hz 轨迹只覆盖策略采样频段，不能代表 1000 Hz 物理子步的全部峰值。没有可靠的请求时间戳时不报告传输时延。
 
+执行器数组统一采用四个腿关节、两个轮关节的顺序；位置、速度、实际与请求力矩、力矩边界使用同一映射，关节名称随元数据保存。物理关节位置和速度在环境步结束后、reset 前从仿真状态读取，避免将控制器延迟反馈当作实际响应。
+
 ```bash
 python -m transformer_rl.frame_process evaluate-suite \
   --checkpoint CHECKPOINT --configs CASE_CONFIGS --outputs CASE_REPORTS \
