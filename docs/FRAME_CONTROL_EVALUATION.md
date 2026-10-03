@@ -200,3 +200,31 @@ python tools/analyze_frame_learning.py \
 ```
 
 工具核验计划与配置来源，按完整 rollout 的共同窗口汇总实际优化量，并记录被排除的部分 rollout、续训边界和数据来源 SHA。输出用于优化诊断；没有独立旧技能跨课程评测时，遗忘和技能保持率标为不可确定。
+
+## V6 物理响应与 sim2real 对照
+
+新的 `prepare-transfer` 从已物化的 V6 平地训练合同准备独立研究任务，保留已辨识的两轮附加惯量、库仑阻力和粘滞阻力，校验资产、气簧及所有显式依赖 SHA。父合同为 50 Hz 策略、200 Hz 物理与新反馈 PD；研究统一为 100 Hz 策略、200 Hz 物理与 PD。它不宣称已经证明与真实 1 kHz 控制等价，也不把此前 100 Hz/1 kHz 名义动力学筛选与本轮混为同一实验。
+
+十种候选仍限于单帧 MLP、历史 MLP 和 Transformer。共同使用 35D 公开观测、81D 特权 critic、31 帧历史模型的 0.30 s 窗口。首轮每种从头训练 1200 次更新，1024 环境、48 步 rollout，计划 58,982,400 条环境样本；一个训练 seed 用于筛选，正式选型仍需至少三个独立训练 seed。LR=3e-5、目标 KL=.01、初始动作均值缩放与标准差均为 1。实际优化步、KL 早停和实际环境样本一起报告。
+
+保留 V6 的质量/COM、接触、观测噪声、执行强度和异步信号延迟机制。延迟人口为 75%；四组传感器和两组目标的年龄分别采样，观测最长 80 ms、目标最长 60 ms，本地 PD 使用新反馈。研究延迟渐入明确使用自身的第 200–600 次 Actor 更新，与父 V6 的 1500–2500 时钟不同，不继承旧模型的 13,000 次进度。噪声的配置人口与接触人口相交，有效人口期望约 25%；TensorBoard 的 `environment/` 标签记录实际人口、延迟强度和各组年龄，不仅记录配置开关。
+
+固定评估使用六种基础任务：站立、前进、后退、旋转、启停和换高。每种任务有名义、20/15 ms、40/30 ms、80/60 ms 观测/目标年龄、噪声、载荷/COM、低摩擦和组合八种条件；再加入站立的电机和气簧弱化单因素，共 50 个用例。固定年龄按 5 ms 物理时钟表达，不将亚物理步延迟写成精确测量。组合条件不是实物不确定度的实测分布。
+
+逐场景回读质量、COM、接触摩擦、信号年龄、噪声开关、执行强度和下行传输参数。评估的延迟模块强制使用完整课程强度；检查点缺省进度为零不能把延迟悄悄清掉。每次 reset 后恢复固定条件和清除噪声缓存。名义条件也显式关闭这些额外扰动，不因模块存在而误称已施加随机化。
+
+```bash
+python -m transformer_rl frame prepare-transfer \
+  --source-root FROZEN_V6_SOURCE --task-contract MATERIALIZED_FLAT_CONTRACT \
+  --directory PREPARED --num-envs 1024 --evaluation-replicas 8 --updates 1200
+python -m transformer_rl frame plan --spec PREPARED/study.json --root STUDY
+python tools/run_transfer_campaign.py \
+  --study-root STUDY --output-root OUTPUT --source-root FROZEN_POLICY_SOURCE \
+  --resource-lock PREDECESSOR_STUDY/.run.lock \
+  --dependency-receipt PREDECESSOR_CONTROL/summary.json \
+  --updates 1200 --seeds 8701 9701
+```
+
+控制器等待原控制评测完成并串行占用资源，训练后评测所有候选，包括验收不通过的模型。补充控制输出包含完整分项误差、稳态波动、指令响应、执行器目标到物理响应、实际与请求力矩、饱和占比及机械功率，按基础任务和扰动条件分别比较名义到受扰后的退化。失败、短回合和未到达目标单列，不用平均 reward 或存活率替代任务达标。随后导出 ONNX 并做单线程 CPU 推理基准；该测量不等于目标控制机的端到端资格。
+
+腿部动态辨识、编码器多点零位、气簧滞回、真实轮胎接触和温升模型仍需对应证据；本轮不伪造这些机制。平地研究也不借用未适配到 100 Hz 的脚本恢复 FSM。候选能否替换 V6，需要相同工况的确定性闭环结果与目标设备时序证据。
