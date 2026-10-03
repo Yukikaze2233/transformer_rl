@@ -279,12 +279,17 @@ def merge_evaluation_contracts(snapshot, environments):
 
 
 def evaluate_suite(checkpoint, configs, outputs, *, steps, seed, device, settle_steps, min_steady_samples,
-                   anchor_directory=None):
+                   anchor_directory=None, control_output=None, trace_output=None, trace_replicas=2):
     """Publish separate per-case evidence from a common vectorized rollout."""
     from .frame_checkpoint import load_frame_checkpoint
     from .frame_workflow import evaluate_frame_policy
     if len(configs) != len(outputs) or not configs:
         raise ValueError("suite configs and outputs must have equal nonzero lengths")
+    for path in (control_output, trace_output):
+        if path is not None and Path(path).exists():
+            raise FileExistsError(path)
+    if trace_output is not None and control_output is None:
+        raise ValueError("trace_output requires a control_output report")
     parsed = [FrameTrainConfig.load(path) for path in configs]
     _, _, saved, _, _, _ = load_frame_checkpoint(checkpoint)
     for config, output in zip(parsed, outputs):
@@ -301,19 +306,27 @@ def evaluate_suite(checkpoint, configs, outputs, *, steps, seed, device, settle_
     environment = {"snapshot": str(snapshot), "snapshot_sha256": environments[0]["snapshot_sha256"],
                    "contracts": environments, "num_envs": sum(e["num_envs"] for e in environments)}
     report = evaluate_frame_policy(checkpoint, make_env, environment, steps=steps, seed=seed, device=device,
-        settle_steps=settle_steps, min_steady_samples=min_steady_samples, max_anchors=256, group_anchor_directory=anchor_directory)
+        settle_steps=settle_steps, min_steady_samples=min_steady_samples, max_anchors=256, group_anchor_directory=anchor_directory,
+        control_metrics=control_output is not None, trace_output=trace_output, trace_replicas=trace_replicas)
     for config, output in zip(parsed, outputs):
         case = json.loads((_inside(snapshot, config.environment["contract"])).read_text())["evaluation"]["cases"][0]
         grouped = report["groups"][case["name"]]
         grouped["environment"] = config.environment
         _write(output, grouped)
+    if control_output is not None:
+        _write(control_output, {"format": "transformer_rl.control_evaluation", "schema_version": 1,
+            "checkpoint_sha256": report["checkpoint_sha256"], "checkpoint_update": report["checkpoint_update"],
+            "seed": seed, "steps": steps, "environment_provenance": report["environment_provenance"],
+            "control": report["control"], "groups": {name: value["control"] for name, value in report["groups"].items()},
+            "trace": report.get("trace")})
     return {"case_reports": [str(path) for path in outputs], "simulation_envs": environment["num_envs"], "seed": seed}
 
 
 class ChassisFrameAdapter:
-    def __init__(self, env, config, metadata):
+    def __init__(self, env, config, metadata, *, enable_control_metrics=False):
         import torch
         self.env, self.config, self.metadata = env, config, metadata
+        self.enable_control_metrics = enable_control_metrics
         self.num_envs, self.device = env.num_envs, torch.device(env.device)
         self._previous = torch.zeros(self.num_envs, 6, device=self.device)
         self._fresh = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
@@ -346,6 +359,32 @@ class ChassisFrameAdapter:
         self.env.stage_actor_update = updates
         self.env.global_actor_update = self.env.cfg.get("global_actor_update_offset", 0) + updates
         self.env.training_transitions = transitions
+
+    def _control_packet(self, diagnostic, velocity, omega, height, tilt, done):
+        import torch
+        position = diagnostic.get("position")
+        if position is None:
+            position = self.env.robot.data.root_link_pose_w.torch
+        motor_position = diagnostic.get("motor_position")
+        motor_velocity = diagnostic.get("motor_velocity")
+        if motor_position is None:
+            motor_position = self.env.robot.data.joint_pos.torch[:, self.env.ids]
+        if motor_velocity is None:
+            motor_velocity = self.env.robot.data.joint_vel.torch[:, self.env.ids]
+        bound = diagnostic["motor_effort_bounds"]
+        limits = torch.stack((-bound, bound), -1) if bound.ndim == 2 else bound
+        return {name: value.clone() for name, value in {
+            "time_s": diagnostic["episode_ticks"].double() * .01,
+            "command_reference": diagnostic["commands"],
+            "actual": torch.stack((velocity[:, 0], omega[:, 2], height), -1),
+            "position_xy": position[:, :2], "tilt": tilt,
+            "leg_target": diagnostic["leg_target_position"], "wheel_target": diagnostic["wheel_target_velocity"],
+            "motor_position": motor_position, "motor_velocity": motor_velocity,
+            "motor_effort": diagnostic["motor_effort"],
+            "requested_motor_effort": diagnostic["requested_motor_effort"], "effort_bounds": limits,
+            "failure": diagnostic["terminated"].bool() & done,
+            "success": diagnostic["success"].bool() & ~diagnostic["terminated"].bool() & done,
+        }.items()}
 
     def step(self, issued_action):
         import torch
@@ -380,6 +419,8 @@ class ChassisFrameAdapter:
                 "evaluation_metrics": {name: value.clone() for name, value in metrics.items()},
                 "evaluation_signals": signals,
                 "evaluation_signal_time": diagnostic["episode_ticks"].double() * .01}
+        if self.enable_control_metrics:
+            info["control_packet"] = self._control_packet(diagnostic, velocity, omega, height, tilt, done)
         self._previous.copy_(issued_action)
         self._fresh.zero_()
         ids = done.nonzero(as_tuple=False).flatten()

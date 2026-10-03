@@ -48,6 +48,9 @@ def main(argv=None):
     evaluate.add_argument("--min-steady-samples", type=_positive_int, default=200)
     evaluate.add_argument("--anchor-output", type=Path)
     evaluate.add_argument("--max-anchors", type=_positive_int, default=256)
+    evaluate.add_argument("--control-output", type=Path)
+    evaluate.add_argument("--trace-output", type=Path)
+    evaluate.add_argument("--trace-replicas", type=_positive_int, default=2)
     suite = commands.add_parser("evaluate-suite", help="Batch compatible frozen chassis scenarios into one simulation")
     suite.add_argument("--checkpoint", type=Path, required=True)
     suite.add_argument("--configs", type=Path, nargs="+", required=True)
@@ -58,6 +61,9 @@ def main(argv=None):
     suite.add_argument("--settle-steps", type=_nonnegative_int, default=200)
     suite.add_argument("--min-steady-samples", type=_positive_int, default=200)
     suite.add_argument("--anchor-directory", type=Path)
+    suite.add_argument("--control-output", type=Path)
+    suite.add_argument("--trace-output", type=Path)
+    suite.add_argument("--trace-replicas", type=_positive_int, default=2)
     export = commands.add_parser("export")
     export.add_argument("--checkpoint", type=Path, required=True)
     export.add_argument("--directory", type=Path, required=True)
@@ -118,15 +124,27 @@ def main(argv=None):
                 raise ValueError("evaluation policy/control configuration differs from checkpoint")
             if args.output.exists():
                 raise FileExistsError(args.output)
+            for path in (args.control_output, args.trace_output):
+                if path is not None and path.exists():
+                    raise FileExistsError(path)
+            if args.trace_output is not None and args.control_output is None:
+                raise ValueError("--trace-output requires --control-output")
             result = evaluate_frame_policy(args.checkpoint, _factory(args.env_factory), config.environment,
                 steps=args.steps, seed=args.seed, device=args.device, settle_steps=args.settle_steps,
-                min_steady_samples=args.min_steady_samples, anchor_output=args.anchor_output, max_anchors=args.max_anchors)
+                min_steady_samples=args.min_steady_samples, anchor_output=args.anchor_output, max_anchors=args.max_anchors,
+                control_metrics=args.control_output is not None, trace_output=args.trace_output, trace_replicas=args.trace_replicas)
             _write_json(args.output, result)
+            if args.control_output is not None:
+                _write_json(args.control_output, {"format": "transformer_rl.control_evaluation", "schema_version": 1,
+                    "checkpoint_sha256": result["checkpoint_sha256"], "checkpoint_update": result["checkpoint_update"],
+                    "seed": args.seed, "steps": args.steps, "environment_provenance": result["environment_provenance"],
+                    "control": result["control"], "trace": result.get("trace")})
         elif args.operation == "evaluate-suite":
             from .chassis_adapter import evaluate_suite
             result = evaluate_suite(args.checkpoint, args.configs, args.outputs, steps=args.steps, seed=args.seed,
                 device=args.device, settle_steps=args.settle_steps, min_steady_samples=args.min_steady_samples,
-                anchor_directory=args.anchor_directory)
+                anchor_directory=args.anchor_directory, control_output=args.control_output,
+                trace_output=args.trace_output, trace_replicas=args.trace_replicas)
         elif args.operation == "export":
             from .frame_export import export_frame_policy
             result = export_frame_policy(args.checkpoint, args.directory, onnx=not args.torchscript_only)
