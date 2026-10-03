@@ -176,6 +176,12 @@ def _context(env):
         raise ValueError("Transfer case layout is inconsistent")
     if set(env.scene_groups) != set(mapping):
         raise ValueError("Every transfer case must have actual evaluation rows")
+    clone_indices = getattr(env, "clone_indices", None)
+    if clone_indices is not None and (not isinstance(clone_indices, (list, tuple))
+            or len(clone_indices) != env.num_envs
+            or any(type(index) is not int for index in clone_indices)
+            or sorted(clone_indices) != list(range(env.num_envs))):
+        raise ValueError("Transfer contact readback requires a complete PhysX clone permutation")
     for case in cases:
         _profile(case)
     return declaration, [mapping[name] for name in env.scene_groups]
@@ -212,10 +218,17 @@ def _noise_vector(perturbations):
     return noise
 
 
+def _contact_mu(env, row):
+    # ContactDomain is created before PhysX clone order is known. Its storage
+    # stays in USD order, while scene_groups and surface_mu use solver order.
+    clone_indices = getattr(env, "clone_indices", None)
+    return env.contact_domain.mu[row if clone_indices is None else clone_indices[row]]
+
+
 def _verify_static(env, cases, selected):
     """Verify domains applied by the baseline constructor, including nominal rows."""
     import torch
-    dynamics, contact, transport = env.dynamics_randomization, env.contact_domain, env.command_transport
+    dynamics, transport = env.dynamics_randomization, env.command_transport
     for row in selected.tolist():
         case = cases[row]
         profile = case.get("dynamics_profile") or {}
@@ -229,8 +242,16 @@ def _verify_static(env, cases, selected):
         _close(dynamics.com_offset[row], profile.get("base_com_offset_m", [0., 0., 0.]),
                f"{case['name']}.com_offset")
         _close(env.body_mass[row], dynamics.masses[row], f"{case['name']}.physical_mass")
-        _close(contact.mu[row], (case.get("contact_profile") or {}).get("friction", .5),
-               f"{case['name']}.friction")
+        friction = (case.get("contact_profile") or {}).get("friction", .5)
+        _close(_contact_mu(env, row), friction, f"{case['name']}.friction")
+        if hasattr(env, "surface_mu"):
+            if (not hasattr(env, "surface_valid") or env.surface_mu.shape != env.surface_valid.shape
+                    or env.surface_mu.shape[0] != env.num_envs):
+                raise ValueError("Transfer surface friction readback has an inconsistent layout")
+            physical = env.surface_mu[row][env.surface_valid[row]]
+            if physical.numel() == 0:
+                raise ValueError("Transfer surface friction readback has no physical surfaces")
+            _close(physical, torch.full_like(physical, friction), f"{case['name']}.surface_friction")
         communication = case.get("communication_profile")
         _close(transport.enabled[row], communication is not None, f"{case['name']}.downlink_enabled", atol=0.)
         expected_delay = transport.low if communication is None else communication["delay_ms"] * .001
@@ -319,7 +340,7 @@ def apply_reset_profiles(env, rows):
             "spring_strength": float(env.spring_strength[row, 0]),
             "base_mass_scale": float(env.dynamics_randomization.mass_scale[row, env.dynamics_randomization.base_id]),
             "com_offset_m": env.dynamics_randomization.com_offset[row].cpu().tolist(),
-            "friction": float(env.contact_domain.mu[row]), "downlink_enabled": bool(env.command_transport.enabled[row]),
+            "friction": float(_contact_mu(env, row)), "downlink_enabled": bool(env.command_transport.enabled[row]),
             "downlink_delay_ms": float(env.command_transport.base_delay[row] * 1000.) if env.command_transport.enabled[row] else 0.})
     return {"version": VERSION, "scope": declaration["scope"], "physics_dt": env.dt,
             "delay_curriculum_strength": float(delay.strength), "evaluation_actor_update": end,

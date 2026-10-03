@@ -96,7 +96,10 @@ def environment():
             transport.base_delay[row] = case["communication_profile"]["delay_ms"] * .001
             transport.can_phase[row] = case["communication_profile"]["can_phase_ms"] * .001
     dynamics.masses = dynamics.mass_scale * torch.tensor([4., 1., 1., 2.])
+    surface_mu = torch.stack((contact.mu, contact.mu, torch.zeros(count)), -1)
     return SimpleNamespace(cfg=config, num_envs=count, scene_groups=[case["name"] for case in cases],
+                           clone_indices=list(range(count)), surface_mu=surface_mu,
+                           surface_valid=torch.tensor([[True, True, False]] * count),
                            dt=.005, device="cpu", signal_delay=Delay(count, config["signal_delay"]),
                            perturbations=Noise(count), dynamics_randomization=dynamics, contact_domain=contact,
                            command_transport=transport, usb_transport=None, body_mass=dynamics.masses.clone(),
@@ -196,6 +199,39 @@ def test_delay_is_full_strength_on_later_zero_update_policy_calls_and_wrapper_is
     assert env.signal_delay.begin_policy is begin
     assert set(env.signal_delay.calls) == {2500}
     assert env.cfg["signal_delay"]["schedule"] == {"start": 1500, "end": 2500}
+
+
+def test_contact_readback_tracks_solver_rows_through_nonidentity_clone_order():
+    env = environment()
+    # Move low-grip and combined scenes onto originally nominal solver rows.
+    permutation = list(range(env.num_envs))
+    permutation[0], permutation[6] = permutation[6], permutation[0]
+    permutation[1], permutation[7] = permutation[7], permutation[1]
+    env.clone_indices = permutation
+    env.scene_groups = [env.scene_groups[index] for index in permutation]
+    for name in ("mass_scale", "inertia_scale", "com_offset", "enabled", "masses"):
+        setattr(env.dynamics_randomization, name, getattr(env.dynamics_randomization, name)[permutation])
+    for name in ("enabled", "base_delay", "loss_probability", "can_phase", "jitter_half_width"):
+        setattr(env.command_transport, name, getattr(env.command_transport, name)[permutation])
+    env.body_mass = env.body_mass[permutation]
+    env.surface_mu = env.surface_mu[permutation]
+    env.surface_valid = env.surface_valid[permutation]
+    assert env.contact_domain.mu[0] == .5 and env.surface_mu[0, 0] == pytest.approx(.3)
+    metadata = configure_transfer_evaluation(env)
+    assert metadata["verified_rows"][0]["case"] == "stand_305mm__low_grip"
+    assert metadata["verified_rows"][0]["friction"] == pytest.approx(.3)
+    assert metadata["verified_rows"][6]["case"] == "stand_305mm__nominal"
+    assert metadata["verified_rows"][6]["friction"] == pytest.approx(.5)
+    env.surface_mu[0, 1] = .5
+    with pytest.raises(ValueError, match="surface_friction"):
+        apply_reset_profiles(env, torch.tensor([0]))
+
+
+def test_invalid_clone_permutation_rejects_contact_readback():
+    env = environment()
+    env.clone_indices[0] = env.clone_indices[1]
+    with pytest.raises(ValueError, match="clone permutation"):
+        configure_transfer_evaluation(env)
 
 
 def test_partial_reset_restores_only_selected_masks_strengths_and_noise_cache():
