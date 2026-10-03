@@ -215,8 +215,9 @@ def network_variants():
     return variants
 
 def _validate_contract(config, control):
+    physical_dt = .005 if config.get("contract_id") == "packed-transfer-study" else .001
     if (config["physics_dt"], config["policy_dt"], config["history_length"], config["actor_dim"],
-            config["actor_frame_dim"], config["critic_dim"], config["action_dim"]) != (.001, .01, 1, 35, 35, 81, 6):
+            config["actor_frame_dim"], config["critic_dim"], config["action_dim"]) != (physical_dt, .01, 1, 35, 35, 81, 6):
         raise ValueError("prepared environment timing/observation contract mismatch")
     settings = config["v5_control"]
     if (settings["leg_kp"], settings["leg_kd"], control["actuators"]["wheel"]["kd"]) != (160., 2.5, .6):
@@ -225,12 +226,23 @@ def _validate_contract(config, control):
         raise ValueError("adapter requires PRE-reset diagnostics and explicit resets")
     if config.get("evaluation_exact_cases") and config["jump_assist"]["enabled"]:
         raise ValueError("evaluation cannot use training jump assistance")
-    return {"physics_dt": .001, "policy_dt": .01, "decimation": 10, "pc_control_dt": .001,
+    expected = {"physics_dt": physical_dt, "policy_dt": .01, "decimation": round(.01 / physical_dt), "pc_control_dt": physical_dt,
             "leg_kp": 160., "leg_kd": 2.5, "wheel_velocity_p": .6, "precision_tracking": False,
             "dense_tracking": True, "command_reference": True,
             "modules": {name: bool(config.get(name, {}).get("enabled")) for name in
                         ("usb_transport", "command_transport", "signal_perturbations", "dynamics_randomization",
                          "contact_domain", "step_assist", "jump_assist", "training_schedule")}}
+    for name in ("actuator_response", "signal_delay"):
+        if name in config:
+            expected["modules"][name] = bool(config[name].get("enabled"))
+            expected[name] = deepcopy(config[name])
+    if config.get("command_transport", {}).get("delivery_model"):
+        expected["command_transport_model"] = config["command_transport"]["delivery_model"] if expected["modules"]["command_transport"] else None
+    if config.get("step_jump_task", {}).get("enabled"):
+        expected["modules"].update(step_jump_task=True, step_climb_task=True)
+    if config.get("recovery_training", {}).get("enabled"):
+        expected["modules"]["recovery_training"] = True
+    return expected
 
 
 def rescale_action_differences(terms, reference_dt, policy_dt):
@@ -323,10 +335,12 @@ def evaluate_suite(checkpoint, configs, outputs, *, steps, seed, device, settle_
 
 
 class ChassisFrameAdapter:
-    def __init__(self, env, config, metadata, *, enable_control_metrics=False):
+    def __init__(self, env, config, metadata, *, enable_control_metrics=False, reset_transform=None):
         import torch
         self.env, self.config, self.metadata = env, config, metadata
         self.enable_control_metrics = enable_control_metrics
+        self._reset_transform = reset_transform
+        self._last_environment_metrics = {}
         self._control_motor_indices = None
         self.num_envs, self.device = env.num_envs, torch.device(env.device)
         self._previous = torch.zeros(self.num_envs, 6, device=self.device)
@@ -350,11 +364,31 @@ class ChassisFrameAdapter:
         import torch
         if seed is not None:
             self.env.generator.manual_seed(seed)
-        self.env.reset(torch.arange(self.num_envs, device=self.device))
+        self._reset_env(torch.arange(self.num_envs, device=self.device))
         self._previous.zero_()
         self._fresh.fill_(True)
         self._origin.copy_(self.env.robot.data.root_link_pose_w.torch[:, :2])
         return self._observation(self.env.get_observations())
+
+    def _reset_env(self, rows):
+        self.env.reset(rows)
+        if self._reset_transform is not None:
+            self._reset_transform(self.env, rows)
+
+    def training_diagnostics(self):
+        """Latest observed environment diagnostics, distinct from learner statistics."""
+        import torch
+        result = {}
+        for name, value in self._last_environment_metrics.items():
+            if isinstance(value, torch.Tensor) and value.numel() == 1:
+                value = value.detach().item()
+            if type(value) in (int, float, bool):
+                if not math.isfinite(float(value)):
+                    raise ValueError(f"nonfinite environment diagnostic: {name}")
+                result[name.strip("/")] = value
+        if getattr(self.env, "perturbations", None) is not None:
+            result["transfer/noise_enabled_fraction"] = self.env.perturbations.enabled.float().mean().item()
+        return result
 
     def set_training_progress(self, updates, transitions):
         self.env.stage_actor_update = updates
@@ -398,6 +432,7 @@ class ChassisFrameAdapter:
         import torch
         from .types import StepResult
         raw, reward, done, extras = self.env.step(issued_action)
+        self._last_environment_metrics = dict(extras.get("log", {}))
         diagnostic = extras["diagnostics"]
         final_critic = raw["critic"].clone()
         truncated = extras["time_outs"].bool().clone() & done
@@ -433,7 +468,7 @@ class ChassisFrameAdapter:
         self._fresh.zero_()
         ids = done.nonzero(as_tuple=False).flatten()
         if len(ids):
-            self.env.reset(ids)
+            self._reset_env(ids)
             self._previous[ids] = 0.
             self._fresh[ids] = True
             self._origin[ids] = self.env.robot.data.root_link_pose_w.torch[ids, :2]
@@ -502,9 +537,17 @@ def make_env(model_config, environment_config, device):
             num_envs=environment_config["num_envs"], device=str(device), level=1., seed=torch.initial_seed())
     finally:
         env_module.design_preflight = original_preflight
-    return ChassisFrameAdapter(env, model_config, {"identity": identity["sha256"],
+    metadata = {"identity": identity["sha256"],
         "control_sha256": digest(identity["control"]), "contract_sha256": effective_sha256,
-        "parent_curriculum_sha256": identity["parent_curriculum_sha256"], "startup": env.startup_report,
+        "startup": env.startup_report,
+        **({"parent_task_sha256": identity["parent_task_sha256"]} if "parent_task_sha256" in identity
+           else {"parent_curriculum_sha256": identity["parent_curriculum_sha256"]}),
         "control_packet_joint_order": list(config["policy_action_order"]),
-        "physics_hz": 1000, "policy_hz": 100, "preflight": "packed_study_not_baseline_campaign",
-        **({"evaluation_groups": list(env.scene_groups)} if config["evaluation_exact_cases"] else {})})
+        "physics_hz": 1 / config["physics_dt"], "policy_hz": 1 / config["policy_dt"], "preflight": "packed_study_not_baseline_campaign",
+        **({"evaluation_groups": list(env.scene_groups)} if config["evaluation_exact_cases"] else {})}
+    reset_transform = None
+    if config.get("transfer_evaluation"):
+        from .transfer_profiles import configure_transfer_evaluation, apply_reset_profiles
+        metadata["transfer_evaluation"] = configure_transfer_evaluation(env)
+        reset_transform = apply_reset_profiles
+    return ChassisFrameAdapter(env, model_config, metadata, reset_transform=reset_transform)

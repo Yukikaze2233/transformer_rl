@@ -83,3 +83,48 @@ def test_default_study_contains_only_requested_architecture_families_and_consist
             assert config.history_length == 31
         policy = FramePolicy(config)
         assert torch.isfinite(policy(torch.zeros(1, config.history_length, 35))).all()
+
+
+def test_transfer_reset_profiles_apply_before_observation_and_after_episode_end():
+    env = TensorChassis()
+    calls = []
+    def transform(actual, rows):
+        calls.append(rows.tolist())
+        actual.value[rows] = 7.
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {}, reset_transform=transform)
+    torch.testing.assert_close(adapter.reset().frame[:, 0], torch.full((3,), 7.))
+    result = adapter.step(torch.zeros(3, 6))
+    torch.testing.assert_close(result.final_critic[:, 0], torch.tensor([1., 2., 3.]))
+    torch.testing.assert_close(result.observation.frame[:, 0], torch.full((3,), 7.))
+    assert calls == [[0, 1, 2], [0, 1, 2]]
+
+
+def test_transfer_physical_clock_requires_separate_explicit_contract():
+    from transformer_rl.chassis_adapter import _validate_contract
+    config = {"contract_id": "packed-transfer-study", "physics_dt": .005, "policy_dt": .01,
+              "history_length": 1, "actor_dim": 35, "actor_frame_dim": 35, "critic_dim": 81,
+              "action_dim": 6, "v5_control": {"leg_kp": 160., "leg_kd": 2.5},
+              "auto_reset": False, "record_diagnostics": True, "diagnostic_trace": True,
+              "actuator_response": {"enabled": True}, "signal_delay": {"enabled": True},
+              "command_transport": {"enabled": True, "delivery_model": "phase_aware_hold_v1"}}
+    control = {"actuators": {"wheel": {"kd": .6}}}
+    state = _validate_contract(config, control)
+    assert state["physics_dt"] == state["pc_control_dt"] == .005
+    assert state["decimation"] == 2 and state["modules"]["actuator_response"]
+    assert state["modules"]["signal_delay"] and state["command_transport_model"] == "phase_aware_hold_v1"
+    config["contract_id"] = "packed-policy-study"
+    with pytest.raises(ValueError, match="timing"):
+        _validate_contract(config, control)
+
+
+def test_environment_diagnostics_report_actual_mask_and_reject_nonfinite_values():
+    env = TensorChassis()
+    env.perturbations = SimpleNamespace(enabled=torch.tensor([True, False, False]))
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {})
+    adapter._last_environment_metrics = {"/delay/strength": torch.tensor(.75)}
+    diagnostics = adapter.training_diagnostics()
+    assert diagnostics["delay/strength"] == .75
+    assert diagnostics["transfer/noise_enabled_fraction"] == pytest.approx(1/3)
+    adapter._last_environment_metrics["/bad"] = float("nan")
+    with pytest.raises(ValueError, match="nonfinite"):
+        adapter.training_diagnostics()

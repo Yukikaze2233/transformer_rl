@@ -151,12 +151,18 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
                     update += 1
                     record = {"update": update, "batch_samples": len(batch), "optimization": metrics,
                               "collection": collector.last_metrics, "elapsed_s": time.monotonic() - started}
+                    diagnostics = getattr(env, "training_diagnostics", None)
+                    if diagnostics is not None:
+                        record["environment_diagnostics"] = diagnostics()
                     log.write(json.dumps(record, allow_nan=False) + "\n")
                     if writer:
                         for group, items in (("ppo", metrics), ("rollout", collector.last_metrics)):
                             for name, value in items.items():
                                 if type(value) in (float, int, bool):
                                     writer.add_scalar(f"{group}/{name}", value, update)
+                        for name, value in record.get("environment_diagnostics", {}).items():
+                            if type(value) in (float, int, bool):
+                                writer.add_scalar(f"environment/{name}", value, update)
                     print(json.dumps({"update": update, "reward_mean": collector.last_metrics["reward_mean"],
                                       "transitions": collector.total_transitions}), flush=True)
                     metadata["collected_transitions"] = prior_transitions + collector.total_transitions

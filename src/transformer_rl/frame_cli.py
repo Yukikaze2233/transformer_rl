@@ -89,6 +89,14 @@ def main(argv=None):
     prepare.add_argument("--num-envs", type=_positive_int, default=4096)
     prepare.add_argument("--evaluation-replicas", type=_positive_int, default=16)
     prepare.add_argument("--round", choices=("screen", "confirm"), default="screen")
+    transfer = commands.add_parser("prepare-transfer", help="Freeze a 100 Hz transfer study from a materialized V6 task")
+    transfer.add_argument("--source-root", type=Path, required=True)
+    transfer.add_argument("--task-contract", type=Path, required=True)
+    transfer.add_argument("--directory", type=Path, required=True)
+    transfer.add_argument("--num-envs", type=_positive_int, default=1024)
+    transfer.add_argument("--evaluation-replicas", type=_positive_int, default=8)
+    transfer.add_argument("--updates", type=_positive_int, default=1200)
+    transfer.add_argument("--seeds", type=_nonnegative_int, nargs="+", default=[1101])
     args = parser.parse_args(argv)
     try:
         if args.operation == "inspect":
@@ -173,6 +181,11 @@ def main(argv=None):
             from .chassis_adapter import prepare_study
             result = prepare_study(args.source_root, args.curriculum, args.directory,
                 num_envs=args.num_envs, evaluation_replicas=args.evaluation_replicas, round_name=args.round)
+        elif args.operation == "prepare-transfer":
+            from .transfer_study import prepare_transfer_study
+            result = prepare_transfer_study(args.source_root, args.task_contract, args.directory,
+                num_envs=args.num_envs, evaluation_replicas=args.evaluation_replicas,
+                updates=args.updates, seeds=args.seeds)
         else:
             from .frame_study import plan_study, run_study, select_transformer
             if args.operation == "plan":
