@@ -97,6 +97,12 @@ def main(argv=None):
     transfer.add_argument("--evaluation-replicas", type=_positive_int, default=8)
     transfer.add_argument("--updates", type=_positive_int, default=1200)
     transfer.add_argument("--seeds", type=_nonnegative_int, nargs="+", default=[1101])
+    curriculum = commands.add_parser("prepare-curriculum", help="Freeze matched Gated task curricula from a prepared transfer study")
+    curriculum.add_argument("--base-config", type=Path, required=True)
+    curriculum.add_argument("--directory", type=Path, required=True)
+    curriculum.add_argument("--warmup-updates", type=_positive_int, default=400)
+    curriculum.add_argument("--updates", type=_positive_int, default=1200)
+    curriculum.add_argument("--seeds", type=_nonnegative_int, nargs="+", default=[1101, 1102, 1103])
     args = parser.parse_args(argv)
     try:
         if args.operation == "inspect":
@@ -186,6 +192,10 @@ def main(argv=None):
             result = prepare_transfer_study(args.source_root, args.task_contract, args.directory,
                 num_envs=args.num_envs, evaluation_replicas=args.evaluation_replicas,
                 updates=args.updates, seeds=args.seeds)
+        elif args.operation == "prepare-curriculum":
+            from .curriculum_study import prepare_curriculum_study
+            result = prepare_curriculum_study(args.base_config, args.directory,
+                warmup_updates=args.warmup_updates, total_updates=args.updates, seeds=args.seeds)
         else:
             from .frame_study import plan_study, run_study, select_transformer
             if args.operation == "plan":
