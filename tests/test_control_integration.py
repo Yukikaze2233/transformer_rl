@@ -253,9 +253,16 @@ def test_enabled_evaluation_keeps_group_control_and_trace_provenance(tmp_path, c
     assert set(report["groups"]) == {"a", "b"}
     assert report["control"]
     assert report["control"]["full_interval"]["samples"] == 72
+    planar = report["control"]["planar_motion"]
+    assert planar["num_envs"] == 6 and planar["physical_samples"] == 72
+    assert planar["coordinate_frame"] == "world_xy"
+    assert planar["full_interval"]["mean_speed_m_s"] == pytest.approx(.1, abs=5e-5)
     for group in report["groups"].values():
         assert group["num_envs"] == 3 and group["transitions"] == 36
         assert group["control"]["full_interval"]["samples"] == 36
+        assert group["control"]["planar_motion"]["num_envs"] == 3
+        assert group["control"]["planar_motion"]["physical_samples"] == 36
+        assert group["control"]["planar_motion"]["stationary"]["mean_speed_m_s"] == pytest.approx(.1, abs=5e-5)
     good, wrong = (report["groups"][name]["control"] for name in ("a", "b"))
     assert good["full_interval"]["axes"]["height"]["rmse"] == 0.
     height = wrong["full_interval"]["axes"]["height"]

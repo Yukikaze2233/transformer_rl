@@ -10,13 +10,13 @@ from transformer_rl.control_metrics import ControlMetrics
 
 def packet(num_envs=1, *, time=0., reference=(0., 0., .3), actual=None,
            leg_target=None, wheel_target=None, effort=None, requested=None,
-           velocity=None, failure=False, success=False):
+           velocity=None, position=(0., 0.), failure=False, success=False):
     def tensor(value, shape):
         return torch.as_tensor(value, dtype=torch.float64).expand((num_envs, *shape)).clone()
     actual = reference if actual is None else actual
     effort = (0.,) * 6 if effort is None else effort
     return {"time_s": tensor(time, ()), "command_reference": tensor(reference, (3,)),
-            "actual": tensor(actual, (3,)), "position_xy": tensor((0., 0.), (2,)), "tilt": tensor(0., ()),
+            "actual": tensor(actual, (3,)), "position_xy": tensor(position, (2,)), "tilt": tensor(0., ()),
             "leg_target": tensor((0.,) * 4 if leg_target is None else leg_target, (4,)),
             "wheel_target": tensor((0.,) * 2 if wheel_target is None else wheel_target, (2,)),
             "motor_position": tensor((0.,) * 6, (6,)),
@@ -332,3 +332,124 @@ def test_constructor_rejects_invalid_protocol(arguments):
     kwargs = {"num_envs": 1, "policy_dt_s": .01, **arguments}
     with pytest.raises(ValueError):
         ControlMetrics(**kwargs)
+
+
+@pytest.mark.parametrize("num_envs", (8, 16))
+def test_planar_motion_covers_every_declared_environment_and_both_world_axes(num_envs):
+    metrics = ControlMetrics(num_envs, .01, settle_steps=0, min_steady_samples=2)
+    velocity = torch.arange(1, num_envs + 1, dtype=torch.float64)[:, None] * torch.tensor([[.03, -.04]])
+    for index in range(3):
+        add(metrics, index * .01, position=velocity * index * .01)
+    report = metrics.report()["planar_motion"]
+    full = report["full_interval"]
+    assert report["num_envs"] == num_envs
+    assert report["physical_samples"] == num_envs * 3
+    assert full["intervals"] == num_envs * 2
+    assert full["observed_duration_s"] == pytest.approx(num_envs * .02)
+    assert full["mean_speed_m_s"] == pytest.approx(.05 * (num_envs + 1) / 2)
+    assert full["rms_speed_m_s"] == pytest.approx(.05 * math.sqrt((num_envs + 1) * (2 * num_envs + 1) / 6))
+    assert full["velocity_world"]["vx"]["mean_m_s"] == pytest.approx(.03 * (num_envs + 1) / 2)
+    assert full["velocity_world"]["vy"]["mean_m_s"] == pytest.approx(-.04 * (num_envs + 1) / 2)
+    assert report["stationary"]["runs"] == num_envs
+    assert report["stationary_steady"]["mean_speed_m_s"] == pytest.approx(full["mean_speed_m_s"])
+
+
+def test_planar_speed_uses_actual_duration_and_distinguishes_path_from_net_drift():
+    metrics = ControlMetrics(1, .01, settle_steps=0, min_steady_samples=1)
+    add(metrics, 0., position=(0., 0.))
+    add(metrics, .1, position=(.1, 0.))
+    add(metrics, .3, position=(0., 0.))
+    report = metrics.report()["planar_motion"]
+    full, stationary = report["full_interval"], report["stationary"]
+    assert full["path_length_m"] == pytest.approx(.2)
+    assert full["mean_speed_m_s"] == pytest.approx(2 / 3)
+    assert full["rms_speed_m_s"] == pytest.approx(math.sqrt(.5))
+    assert full["velocity_world"]["vx"]["mean_m_s"] == pytest.approx(0.)
+    assert stationary["endpoint_displacement_m"]["mean"] == 0.
+    assert stationary["max_excursion_m"]["mean"] == pytest.approx(.1)
+    assert full["p95_bin_m_s"] == [1., 1.001]
+    assert full["p95_speed_m_s"] == pytest.approx(1.0005)
+
+
+def test_planar_motion_excludes_reset_teleports_and_reset_rows_only():
+    metrics = ControlMetrics(2, .01, settle_steps=0, min_steady_samples=2)
+    add(metrics, (0., 0.), position=((0., 0.), (0., 0.)))
+    add(metrics, (.01, .01), position=((.01, 0.), (0., .02)), done=(True, False), failure=(True, False))
+    add(metrics, (0., .02), position=((1000., -1000.), (0., .04)))
+    add(metrics, (.01, .03), position=((1000.01, -1000.), (0., .06)))
+    report = metrics.report()["planar_motion"]
+    assert report["full_interval"]["intervals"] == 5
+    assert report["full_interval"]["path_length_m"] == pytest.approx(.08)
+    assert report["full_interval"]["max_speed_m_s"] == pytest.approx(2.)
+    assert report["stationary"]["runs"] == 3
+    assert report["stationary"]["endpoint_displacement_m"]["mean"] == pytest.approx(.08 / 3)
+
+
+def test_stationary_drift_starts_when_effective_command_becomes_zero():
+    metrics = ControlMetrics(1, .01, settle_steps=0, min_steady_samples=2)
+    add(metrics, 0., reference=(1., 0., .3), position=(0., 0.))
+    add(metrics, .01, position=(10., 0.))
+    add(metrics, .02, position=(10., .003))
+    # Height changes preserve the stationary origin; motion changes end it.
+    add(metrics, .03, reference=(0., 0., .4), position=(10., .006))
+    add(metrics, .04, reference=(.5, 0., .4), position=(20., .006))
+    add(metrics, .05, reference=(0., 0., .4), position=(30., .006))
+    add(metrics, .06, reference=(0., 0., .4), position=(30., .009))
+    stationary = metrics.report()["planar_motion"]["stationary"]
+    assert stationary["samples"] == 5
+    assert stationary["runs"] == 2
+    assert stationary["intervals"] == 3
+    assert stationary["path_length_m"] == pytest.approx(.009)
+    assert stationary["mean_speed_m_s"] == pytest.approx(.3)
+    assert stationary["endpoint_displacement_m"]["mean"] == pytest.approx(.0045)
+    assert stationary["max_excursion_m"]["max_abs"] == pytest.approx(.006)
+
+
+def test_planar_steady_omits_settle_boundary_short_segments_and_command_change_edges():
+    metrics = ControlMetrics(1, .01, settle_steps=2, min_steady_samples=2)
+    for index in range(4):
+        add(metrics, index * .01, position=(float(index), 0.))
+    # New segment has only one retained point and is ineligible, despite motion.
+    for index in range(4, 7):
+        add(metrics, index * .01, reference=(.5, 0., .3), position=(float(index), 0.))
+    report = metrics.report()["planar_motion"]
+    assert report["full_interval"]["intervals"] == 6
+    assert report["steady"]["intervals"] == 1
+    assert report["steady"]["observed_duration_s"] == pytest.approx(.01)
+    assert report["steady"]["path_length_m"] == 1.
+    assert report["stationary_steady"]["intervals"] == 1
+
+
+@pytest.mark.parametrize("done,failure", ((False, False), (True, True)))
+def test_planar_steady_retains_eligible_final_partial_and_failure_segments(done, failure):
+    metrics = ControlMetrics(1, .01, settle_steps=1, min_steady_samples=2)
+    for index in range(3):
+        add(metrics, index * .01, position=(0., .005 * index), done=done and index == 2,
+            failure=failure and index == 2)
+    steady = metrics.report()["planar_motion"]["stationary_steady"]
+    assert steady["available"] is True
+    assert steady["intervals"] == 1
+    assert steady["mean_speed_m_s"] == pytest.approx(.5)
+
+
+def test_planar_speed_quantile_reports_overflow_without_clipping_mean_or_rms():
+    metrics = ControlMetrics(1, .01)
+    add(metrics, 0.)
+    add(metrics, .01, position=(.12, 0.))
+    full = metrics.report()["planar_motion"]["full_interval"]
+    assert full["mean_speed_m_s"] == full["rms_speed_m_s"] == 12.
+    assert full["p95_speed_m_s"] is None
+    assert full["p95_bin_m_s"] == [10., None]
+    assert full["overflow_duration_s"] == .01
+
+
+def test_isolated_planar_samples_do_not_fabricate_velocity_or_quantiles():
+    metrics = ControlMetrics(2, .01)
+    add(metrics, (0., 0.), position=((.1, .2), (.3, .4)), done=(True, False))
+    report = metrics.report()["planar_motion"]
+    assert report["physical_samples"] == 2
+    assert report["full_interval"]["available"] is False
+    assert report["full_interval"]["mean_speed_m_s"] is None
+    assert report["full_interval"]["p95_bin_m_s"] == [None, None]
+    assert report["stationary"]["runs"] == 2
+    json.dumps(report, allow_nan=False)

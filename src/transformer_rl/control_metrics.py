@@ -53,6 +53,78 @@ class _Scalar:
 
 
 @dataclass
+class _PlanarMotion:
+    """Mergeable, duration-weighted world-XY finite differences.
+
+    The histogram has at most 10,001 bins, including overflow. It does not
+    retain trajectories or grow with evaluation duration.
+    """
+
+    resolution: float = field(default=.001, init=False)
+    limit: float = field(default=10., init=False)
+    count: int = 0
+    duration: float = 0.
+    path: float = 0.
+    displacement: list[float] = field(default_factory=lambda: [0., 0.])
+    velocity_square_time: list[float] = field(default_factory=lambda: [0., 0.])
+    speed_square_time: float = 0.
+    maximum: float = 0.
+    histogram: dict[int, float] = field(default_factory=dict)
+
+    def add(self, previous, current, dt):
+        delta = [after - before for after, before in zip(current, previous)]
+        velocity = [value / dt for value in delta]
+        distance = math.hypot(*delta)
+        speed = distance / dt
+        self.count += 1
+        self.duration += dt
+        self.path += distance
+        self.maximum = max(self.maximum, speed)
+        self.speed_square_time += speed * speed * dt
+        for axis in range(2):
+            self.displacement[axis] += delta[axis]
+            self.velocity_square_time[axis] += velocity[axis] ** 2 * dt
+        bucket = min(int(speed / self.resolution), int(self.limit / self.resolution))
+        self.histogram[bucket] = self.histogram.get(bucket, 0.) + dt
+
+    def merge(self, other):
+        self.count += other.count
+        self.duration += other.duration
+        self.path += other.path
+        self.maximum = max(self.maximum, other.maximum)
+        self.speed_square_time += other.speed_square_time
+        for axis in range(2):
+            self.displacement[axis] += other.displacement[axis]
+            self.velocity_square_time[axis] += other.velocity_square_time[axis]
+        for bucket, duration in other.histogram.items():
+            self.histogram[bucket] = self.histogram.get(bucket, 0.) + duration
+
+    def report(self):
+        lower = upper = None
+        elapsed = 0.
+        for bucket, duration in sorted(self.histogram.items()):
+            elapsed += duration
+            if elapsed >= (.95 - 1e-12) * self.duration:
+                lower = bucket * self.resolution
+                upper = lower + self.resolution if lower < self.limit else None
+                break
+        return {"available": bool(self.count), "intervals": self.count,
+                "observed_duration_s": self.duration, "path_length_m": self.path,
+                "mean_speed_m_s": self.path / self.duration if self.duration else None,
+                "rms_speed_m_s": math.sqrt(self.speed_square_time / self.duration) if self.duration else None,
+                "max_speed_m_s": self.maximum if self.count else None,
+                "p95_speed_m_s": (lower + upper) / 2 if upper is not None else None,
+                "p95_bin_m_s": [lower, upper],
+                "p95_method": "duration-weighted histogram bin midpoint; null if the quantile is in overflow",
+                "p95_bin_width_m_s": self.resolution, "p95_overflow_from_m_s": self.limit,
+                "overflow_duration_s": self.histogram.get(int(self.limit / self.resolution), 0.),
+                "velocity_world": {name: {
+                    "mean_m_s": self.displacement[axis] / self.duration if self.duration else None,
+                    "rms_m_s": math.sqrt(self.velocity_square_time[axis] / self.duration) if self.duration else None}
+                    for axis, name in enumerate(("vx", "vy"))}}
+
+
+@dataclass
 class _Errors:
     axes: list[_Scalar] = field(default_factory=lambda: [_Scalar() for _ in AXES])
     all_in_band: int = 0
@@ -164,6 +236,7 @@ class _Segment:
     full: _Errors = field(default_factory=_Errors)
     steady: _Errors = field(default_factory=_Errors)
     responses: list[_Response | None] = field(default_factory=lambda: [None] * 3)
+    planar_steady: _PlanarMotion = field(default_factory=_PlanarMotion)
 
 
 @dataclass
@@ -176,12 +249,17 @@ class _Episode:
     previous_effort: list[float] | None = None
     origin: list[float] | None = None
     previous_error: list[float] | None = None
+    previous_position: list[float] | None = None
+    previous_stationary: bool = False
+    stationary_origin: list[float] | None = None
+    stationary_maximum: float = 0.
 
 
 class ControlMetrics:
     """Consume one vector of PRE-reset physical samples per policy step.
 
-    Memory is O(num_envs + recent_response_limit), independent of elapsed time.
+    Memory is bounded per environment, independent of elapsed time; planar
+    quantiles use at most 10,001 fixed-range histogram bins per active segment.
     Full-interval errors retain all samples, including transients and failures.
     A steady segment starts only after an unchanged reference has lasted
     settle_steps samples; continuous reference slews normally yield short,
@@ -232,6 +310,10 @@ class ControlMetrics:
         self._bounds_samples = [0] * 6
         self._actuation_samples = 0
         self._power, self._tilt, self._drift = _Scalar(), _Scalar(), _Scalar()
+        self._planar_full, self._planar_steady = _PlanarMotion(), _PlanarMotion()
+        self._planar_stationary, self._planar_stationary_steady = _PlanarMotion(), _PlanarMotion()
+        self._stationary_endpoint, self._stationary_maximum = _Scalar(), _Scalar()
+        self._stationary_samples = 0
         self._full_iae = [0.] * 3
         self._band_time = [0.] * 3
         self._joint_band_time = self._duration = 0.
@@ -324,6 +406,7 @@ class ControlMetrics:
             segment.full.add(error, self.tolerances)
             if segment.full.count > self.settle_steps:
                 segment.steady.add(error, self.tolerances)
+            self._record_planar(episode, data, timestamp)
             for response, value in zip(segment.responses, actual):
                 if response is not None:
                     response.add(timestamp, value)
@@ -337,6 +420,38 @@ class ControlMetrics:
             episode.previous_error = error
             if data["done"]:
                 self._finish_episode(index, "reset", bool(data["failure"][0]), bool(data["success"][0]))
+
+    def _finish_stationary(self, episode):
+        if episode.stationary_origin is None:
+            return
+        self._stationary_endpoint.add(math.dist(episode.stationary_origin, episode.previous_position))
+        self._stationary_maximum.add(episode.stationary_maximum)
+        episode.stationary_origin = None
+        episode.stationary_maximum = 0.
+
+    def _record_planar(self, episode, data, timestamp):
+        position = data["position_xy"]
+        stationary = all(abs(value) <= tolerance for value, tolerance in
+                         zip(data["command_reference"][:2], self.command_tolerances[:2]))
+        if not stationary:
+            self._finish_stationary(episode)
+        elif episode.stationary_origin is None:
+            episode.stationary_origin = position[:]
+        if stationary:
+            self._stationary_samples += 1
+            episode.stationary_maximum = max(episode.stationary_maximum,
+                                            math.dist(episode.stationary_origin, position))
+        if episode.previous_time is not None:
+            dt = timestamp - episode.previous_time
+            self._planar_full.add(episode.previous_position, position, dt)
+            if stationary and episode.previous_stationary:
+                self._planar_stationary.add(episode.previous_position, position, dt)
+            # Both endpoints must be retained within the same unchanged-reference
+            # segment. Never differentiate across reset, command or settle edges.
+            if episode.segment.steady.count > 1:
+                episode.segment.planar_steady.add(episode.previous_position, position, dt)
+        episode.previous_position = position[:]
+        episode.previous_stationary = stationary
 
     def _record_actuation(self, episode, data, timestamp):
         def record(name, values):
@@ -372,6 +487,10 @@ class ControlMetrics:
         if segment.steady.count >= self.min_steady_samples:
             counts["eligible"] += 1
             self._steady.merge(segment.steady)
+            self._planar_steady.merge(segment.planar_steady)
+            if all(abs(value) <= tolerance for value, tolerance in
+                   zip(segment.reference[:2], self.command_tolerances[:2])):
+                self._planar_stationary_steady.merge(segment.planar_steady)
         else:
             counts["short"] += 1
             counts["discarded_short_samples"] += segment.steady.count
@@ -405,6 +524,7 @@ class ControlMetrics:
         counts["partial_all_samples_tracking_in_band" if reason == "partial" else "completed_all_samples_tracking_in_band"] += (
             not failure and episode.errors.all_in_band == episode.errors.count)
         self._finish_segment(episode.segment, reason, failure)
+        self._finish_stationary(episode)
         self._episodes[index] = _Episode()
 
     def report(self) -> dict:
@@ -436,6 +556,20 @@ class ControlMetrics:
                          "recent_events": list(self._recent), "recent_event_capacity": self._recent.maxlen},
             "actuation": actuation, "tilt": {"unit": "rad", **self._tilt.report()},
             "distance_from_episode_origin": {"unit": "m", "scope": "path displacement; apply as drift only to stationary cases", **self._drift.report()},
+            "planar_motion": {"coordinate_frame": "world_xy", "num_envs": self.num_envs,
+                "physical_samples": self._actuation_samples,
+                "velocity_source": "consecutive PRE-reset world position_xy divided by actual within-episode time_s difference",
+                "scope": "all declared environment rows; no trace subsampling; first isolated sample has no velocity interval",
+                "weighting": "pooled observed duration; report scenarios and training seeds separately",
+                "full_interval": self._planar_full.report(), "steady": self._planar_steady.report(),
+                "stationary": {**self._planar_stationary.report(), "samples": self._stationary_samples,
+                    "runs": self._stationary_endpoint.count,
+                    "endpoint_displacement_m": self._stationary_endpoint.report(),
+                    "max_excursion_m": self._stationary_maximum.report(),
+                    "reference": "effective vx and wz both within command_tolerance of zero; height may vary",
+                    "origin": "first stationary sample; run ends at first nonzero command, reset or evaluation cut"},
+                "stationary_steady": self._planar_stationary_steady.report(),
+                "steady_eligibility": "same unchanged-reference segments and retained-sample threshold as control.steady; includes eligible failed and final partial segments"},
             "request_reference_difference": {"available": bool(self._request_available),
                   "axes": {name: signal.report() for name, signal in zip(AXES, self._request_error)}},
             "protocol": {"policy_dt_s": self.policy_dt_s, "settle_steps": self.settle_steps,
