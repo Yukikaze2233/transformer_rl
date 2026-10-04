@@ -16,7 +16,7 @@ from transformer_rl.frame_training import FrameActorCritic, FrameCollector, Fram
 from transformer_rl.frame_checkpoint import load_frame_checkpoint, restore_rng, save_frame_checkpoint
 from transformer_rl.frame_export import export_frame_policy
 from transformer_rl.frame_runtime import FrameRuntime
-from transformer_rl.frame_workflow import evaluate_frame_policy, train_frame_policy
+from transformer_rl.frame_workflow import _model_state_sha256, evaluate_frame_policy, train_frame_policy
 from transformer_rl.ppo import PPOTrainer
 from transformer_rl.retention import AnchorRegularizer, save_anchors
 
@@ -250,6 +250,8 @@ def test_learning_rollback_keeps_adam_while_stage_initialization_resets_it(tmp_p
     config = replace(configuration(), ppo=PPOConfig(epochs=1, num_minibatches=1, learning_rate=1e-3))
     original = train_frame_policy(config, make_env, "packed_env:make_env", tmp_path / "original", updates=2,
                                   rollout_steps=4, tensorboard=False)
+    original_model, *_ = load_frame_checkpoint(original["checkpoint"])
+    restore_start_sha256 = _model_state_sha256(original_model)
     stage = replace(config, environment={**config.environment, "stage": "new"})
     restored = train_frame_policy(stage, make_env, "packed_env:make_env", tmp_path / "restore", updates=1,
         rollout_steps=4, tensorboard=False, restore_learning_from=original["checkpoint"], consumed_update_offset=5)
@@ -260,3 +262,89 @@ def test_learning_rollback_keeps_adam_while_stage_initialization_resets_it(tmp_p
     _, optimizer_initialized, *_ = load_frame_checkpoint(initialized["checkpoint"])
     assert all(value["step"].item() == 3 for value in optimizer_restored.optimizer.state.values())
     assert all(value["step"].item() == 1 for value in optimizer_initialized.optimizer.state.values())
+    original_run = json.loads((tmp_path / "original" / "run.json").read_text())
+    assert restore_start_sha256 != original_run["initial_model_sha256"]
+    for name, report in (("restore", restored), ("initialize", initialized)):
+        run = json.loads((tmp_path / name / "run.json").read_text())
+        _, _, _, _, metadata, _ = load_frame_checkpoint(report["checkpoint"])
+        assert run["initial_model_sha256"] == metadata["initial_model_sha256"] == restore_start_sha256
+
+
+def test_restored_curriculum_clock_precedes_reset_and_advances_with_rollouts(tmp_path):
+    config = replace(configuration(), ppo=PPOConfig(epochs=1, num_minibatches=1, learning_rate=1e-3))
+    original = train_frame_policy(config, make_env, "packed_env:make_env", tmp_path / "original",
+                                  updates=2, rollout_steps=4, tensorboard=False)
+    events = []
+
+    def clocked_factory(model_config, environment_config, device):
+        env = make_env(model_config, environment_config, device)
+        reset = env.reset
+
+        def progress(updates, transitions):
+            events.append(("progress", updates, transitions))
+
+        def clocked_reset(seed=None):
+            events.append(("reset", seed))
+            return reset(seed=seed)
+
+        env.set_training_progress = progress
+        env.reset = clocked_reset
+        return env
+
+    changed = replace(config, environment={**config.environment, "phase": "mixed"})
+    report = train_frame_policy(changed, clocked_factory, "packed_env:make_env", tmp_path / "next",
+        updates=2, rollout_steps=4, tensorboard=False, restore_learning_from=original["checkpoint"],
+        consumed_update_offset=2)
+    assert events[0] == ("progress", 2, 24)
+    assert events[1][0] == "reset"
+    assert [event for event in events if event[0] == "progress"] == [
+        ("progress", 2, 24), ("progress", 2, 24), ("progress", 3, 36)]
+    assert report["start_update"] == 2 and report["final_update"] == 4
+    assert report["cumulative_transitions"] == 48
+
+
+def test_fresh_initialization_is_independent_of_environment_cpu_rng_consumption(tmp_path, monkeypatch):
+    config = replace(configuration(residual_type="gated"),
+                     ppo=PPOConfig(epochs=1, num_minibatches=1, learning_rate=1e-3))
+    states_before_update = []
+    update = PPOTrainer.update
+
+    def observed_update(trainer, batch, **kwargs):
+        states_before_update.append(_model_state_sha256(trainer.model))
+        return update(trainer, batch, **kwargs)
+
+    monkeypatch.setattr(PPOTrainer, "update", observed_update)
+    initialization = []
+    for index, (seed, factory_draws) in enumerate(((71, 0), (71, 4096), (72, 4096))):
+        def noisy_factory(model_config, environment_config, device):
+            torch.rand(factory_draws, device="cpu")
+            return make_env(model_config, environment_config, device)
+
+        directory = tmp_path / str(index)
+        report = train_frame_policy(config, noisy_factory, "packed_env:make_env", directory,
+                                   updates=1, rollout_steps=4, tensorboard=False, seed=seed)
+        run = json.loads((directory / "run.json").read_text())
+        _, _, _, _, metadata, _ = load_frame_checkpoint(report["checkpoint"])
+        assert run["initial_model_sha256"] == metadata["initial_model_sha256"] == states_before_update[index]
+        assert run["initial_model_hash_format"] == metadata["initial_model_hash_format"] == "sorted_named_tensor_contents_v1"
+        initialization.append(run["initial_model_sha256"])
+    assert initialization[0] == initialization[1]
+    assert initialization[0] != initialization[2]
+
+
+def test_model_state_digest_uses_names_dtype_shape_and_contents_not_storage_or_registration_order():
+    first, second = torch.nn.Module(), torch.nn.Module()
+    first.register_buffer("b", torch.tensor([1., 2.]))
+    first.register_buffer("a", torch.tensor([[True, False], [False, True]]))
+    second.register_buffer("a", first.a.clone())
+    second.register_buffer("b", first.b.clone())
+    digest = _model_state_sha256(first)
+    assert digest == _model_state_sha256(second)
+    second.b = second.b.double()
+    assert digest != _model_state_sha256(second)
+    second.b = first.b.clone()
+    second.a = second.a.flatten()
+    assert digest != _model_state_sha256(second)
+    second.a = first.a.clone()
+    second.b[0] += 1
+    assert digest != _model_state_sha256(second)

@@ -46,6 +46,19 @@ def _provenance(env, control):
     return json.loads(json.dumps(value, allow_nan=False))
 
 
+def _model_state_sha256(model):
+    """Hash named tensor contents, independently of serialization and storage."""
+    state = hashlib.sha256()
+    for name, tensor in sorted(model.state_dict().items()):
+        header = json.dumps({"name": name, "dtype": str(tensor.dtype), "shape": list(tensor.shape)},
+                            sort_keys=True, separators=(",", ":")).encode("utf-8")
+        payload = tensor.detach().cpu().contiguous().reshape(-1).view(torch.uint8).numpy().tobytes()
+        for part in (header, payload):
+            state.update(len(part).to_bytes(8, "big"))
+            state.update(part)
+    return state.hexdigest()
+
+
 def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, rollout_steps=48,
                        seed=0, device="cpu", max_seconds=3600., checkpoint_interval=40,
                        resume=None, initialize_from=None, restore_learning_from=None, anchors=(), retention_coef=0., tensorboard=True,
@@ -86,6 +99,14 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
             if parent_config.ppo != config.ppo:
                 raise ValueError("learning-state rollback requires the same optimizer recipe")
             start_update = parent_update
+    fresh_model = model is None
+    if fresh_model:
+        # Course-specific environment construction may consume the global CPU
+        # RNG. Freeze the seeded learner first, without starting CUDA before
+        # the simulator's application owns device initialization.
+        with torch.device("cpu"):
+            model = FrameActorCritic(config.model)
+    initial_model_sha256 = _model_state_sha256(model)
     run_dir = Path(run_dir).resolve()
     run_dir.mkdir(parents=True, exist_ok=False)
     checkpoint_dir = run_dir / "checkpoints"
@@ -95,6 +116,8 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
         "resume": str(resume) if resume else None, "initialize_from": str(initialize_from) if initialize_from else None,
         "restore_learning_from": str(restore_learning_from) if restore_learning_from else None,
         "episode_state_restored": False, "history_reset": "repeat_first", "retention_coef": retention_coef,
+        "initial_model_sha256": initial_model_sha256,
+        "initial_model_hash_format": "sorted_named_tensor_contents_v1",
         "max_seconds": max_seconds, "checkpoint_interval": checkpoint_interval})
     env = writer = None
     started = time.monotonic()
@@ -109,8 +132,8 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
             if restoring and parent_metadata.get("environment_provenance", {}).get("identity") != provenance["identity"]:
                 raise ValueError("resume environment source/assets differ from checkpoint")
             _write_json(run_dir / "environment.json", provenance)
-            if model is None:
-                model = FrameActorCritic(config.model).to(device)
+            if fresh_model:
+                model.to(device)
                 trainer = PPOTrainer(model, config.ppo)
             else:
                 model.to(device)
@@ -125,11 +148,19 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
                 raise ValueError("resume retention objective differs from checkpoint")
             metadata = {"environment_factory": env_reference, "environment_provenance": provenance,
                         "seed": seed, "source": source_identity(), "anchors": anchor_identity,
+                        "initial_model_sha256": initial_model_sha256,
+                        "initial_model_hash_format": "sorted_named_tensor_contents_v1",
                         "retention_coef": retention_coef, "episode_state_restored": False,
                         "runtime": {"python": platform.python_version(), "torch": str(torch.__version__),
                                     "numpy": np.__version__, "cuda": torch.version.cuda,
                                     "deterministic_algorithms": torch.are_deterministic_algorithms_enabled()}}
             collector = FrameCollector(env, model, config.ppo, config.control["action_bounds"])
+            prior_transitions = parent_metadata.get("collected_transitions", 0) if restoring else 0
+            progress = getattr(env, "set_training_progress", None)
+            if progress is not None:
+                # Reset-time task and delay sampling must use the restored
+                # curriculum clock, before the first resumed rollout starts.
+                progress(consumed_update_offset, prior_transitions)
             collector.reset(seed=seed)
             if restoring:
                 # Environment creation/reset may consume global RNG; restore the learner last.
@@ -137,7 +168,6 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
             if tensorboard:
                 from torch.utils.tensorboard import SummaryWriter
                 writer = SummaryWriter(str(run_dir / "tensorboard"))
-            prior_transitions = parent_metadata.get("collected_transitions", 0) if restoring else 0
             with (run_dir / "metrics.jsonl").open("x", buffering=1) as log:
                 while update < start_update + updates and not stop.stopped():
                     progress = getattr(env, "set_training_progress", None)
