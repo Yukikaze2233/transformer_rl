@@ -369,6 +369,7 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                 raise ValueError("no behavior samples available for anchors")
             report["anchors"] = save_anchors(anchor_output, config, torch.cat(anchor_frames), torch.cat(anchor_mean),
                                               torch.cat(anchor_std), report["checkpoint_sha256"])
+            report["anchors"]["max_samples"] = max_anchors
         if groups:
             report["groups"] = {}
             if group_anchor_directory is not None:
@@ -390,6 +391,7 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                         raise ValueError("group anchor names require safe identifiers")
                     grouped["anchors"] = save_anchors(Path(group_anchor_directory) / f"{name}.pt", config,
                         torch.cat(group["frames"]), torch.cat(group["mean"]), torch.cat(group["std"]), report["checkpoint_sha256"])
+                    grouped["anchors"]["max_samples"] = max_anchors
                 report["groups"][name] = grouped
         json.dumps(report, allow_nan=False)
         if trace is not None:

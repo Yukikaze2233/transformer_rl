@@ -291,10 +291,11 @@ def merge_evaluation_contracts(snapshot, environments):
 
 
 def evaluate_suite(checkpoint, configs, outputs, *, steps, seed, device, settle_steps, min_steady_samples,
-                   anchor_directory=None, control_output=None, trace_output=None, trace_replicas=2):
+                   anchor_directory=None, max_anchors=256, control_output=None, trace_output=None, trace_replicas=2):
     """Publish separate per-case evidence from a common vectorized rollout."""
     from .frame_checkpoint import load_frame_checkpoint
-    from .frame_workflow import evaluate_frame_policy
+    from .frame_workflow import _positive_integer, evaluate_frame_policy
+    _positive_integer(max_anchors, "max_anchors")
     if len(configs) != len(outputs) or not configs:
         raise ValueError("suite configs and outputs must have equal nonzero lengths")
     for path in (control_output, trace_output):
@@ -318,7 +319,7 @@ def evaluate_suite(checkpoint, configs, outputs, *, steps, seed, device, settle_
     environment = {"snapshot": str(snapshot), "snapshot_sha256": environments[0]["snapshot_sha256"],
                    "contracts": environments, "num_envs": sum(e["num_envs"] for e in environments)}
     report = evaluate_frame_policy(checkpoint, make_env, environment, steps=steps, seed=seed, device=device,
-        settle_steps=settle_steps, min_steady_samples=min_steady_samples, max_anchors=256, group_anchor_directory=anchor_directory,
+        settle_steps=settle_steps, min_steady_samples=min_steady_samples, max_anchors=max_anchors, group_anchor_directory=anchor_directory,
         control_metrics=control_output is not None, trace_output=trace_output, trace_replicas=trace_replicas)
     for config, output in zip(parsed, outputs):
         case = json.loads((_inside(snapshot, config.environment["contract"])).read_text())["evaluation"]["cases"][0]

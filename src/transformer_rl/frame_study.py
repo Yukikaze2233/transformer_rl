@@ -87,8 +87,11 @@ def _validate_spec(spec):
                             ("execution", {"devices", "worker_module", "job_timeout_seconds"}),
                             ("selection", {"min_training_seeds", "objectives", "std_penalty", "latency_p99_ms", "latency_max_ms",
                                            "max_deadline_misses", "retention_score_tolerance", "rollback_limit"})):
-        if not isinstance(spec[section], dict) or set(spec[section]) != fields:
+        optional = {"max_anchors"} if section == "training" else set()
+        if not isinstance(spec[section], dict) or not fields <= set(spec[section]) or set(spec[section]) - fields - optional:
             raise ValueError(f"invalid {section} fields")
+    if "max_anchors" in spec["training"]:
+        _positive(spec["training"]["max_anchors"], "max_anchors", True)
     for section, fields in (("training", ("rollout_steps", "checkpoint_interval")),
                             ("evaluation", ("steps", "min_steady_samples", "min_completed_episodes")),
                             ("selection", ("min_training_seeds",))):
@@ -363,6 +366,8 @@ def _account_training(root, entry, pending, config):
 
 def _evaluate_attempt(root, manifest, variant, required, pending, worker, device, stop, state_path, state, *, anchor_only=False, final_only=False):
     spec = manifest["spec"]
+    if anchor_only and spec["training"]["retention_coef"] <= 0:
+        raise ValueError("anchor collection requires enabled retention")
     factory = spec["environment_factory"]
     scenarios = {case["name"]: case for case in spec["scenarios"]}
     attempt = _path(root, pending["directory"])
@@ -407,6 +412,9 @@ def _evaluate_attempt(root, manifest, variant, required, pending, worker, device
             command += ["--steps", str(spec["evaluation"]["steps"]), "--seed", str(eval_seed), "--device", device,
                 "--settle-steps", str(spec["evaluation"]["settle_steps"]),
                 "--min-steady-samples", str(spec["evaluation"]["min_steady_samples"])]
+            if anchor_only and "max_anchors" in spec["training"]:
+                # Omission retains the legacy command protocol for frozen workers.
+                command.extend(("--max-anchors", str(spec["training"]["max_anchors"])))
             if not _process(command, evaluation_dir / f"{batch_name}_{eval_seed}.log", spec["execution"]["job_timeout_seconds"], stop):
                 # The trained checkpoint/budget are already sealed. A retry only evaluates.
                 state["status"] = "stopped" if stop.is_set() else "failed"
@@ -421,7 +429,17 @@ def _evaluate_attempt(root, manifest, variant, required, pending, worker, device
                 if anchor_only:
                     pending["anchor_reports"][key] = _receipt(path, root)
                     if grades[key]["passed"]:
-                        pending["anchors"].append(_receipt(report["anchors"]["path"], root))
+                        anchors = report["anchors"]
+                        capacity = spec["training"].get("max_anchors", 256)
+                        # Legacy reports omit the cap; only legacy specs may accept them.
+                        reported_capacity = anchors.get("max_samples", 256 if "max_anchors" not in spec["training"] else None)
+                        if (type(reported_capacity) is not int or reported_capacity != capacity
+                                or type(anchors.get("samples")) is not int or not 1 <= anchors["samples"] <= capacity):
+                            raise ValueError("anchor sample count/capacity differs from specification")
+                        receipt = _receipt(anchors["path"], root)
+                        if receipt["sha256"] != anchors.get("sha256"):
+                            raise ValueError("anchor artifact identity differs from evaluation")
+                        pending["anchors"].append(receipt)
                 else:
                     pending["final_evaluations" if final_only else "evaluations"][key] = _receipt(path, root)
     if anchor_only:

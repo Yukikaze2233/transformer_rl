@@ -61,6 +61,7 @@ def main(argv=None):
     suite.add_argument("--settle-steps", type=_nonnegative_int, default=200)
     suite.add_argument("--min-steady-samples", type=_positive_int, default=200)
     suite.add_argument("--anchor-directory", type=Path)
+    suite.add_argument("--max-anchors", type=_positive_int, default=256)
     suite.add_argument("--control-output", type=Path)
     suite.add_argument("--trace-output", type=Path)
     suite.add_argument("--trace-replicas", type=_positive_int, default=2)
@@ -157,7 +158,7 @@ def main(argv=None):
             from .chassis_adapter import evaluate_suite
             result = evaluate_suite(args.checkpoint, args.configs, args.outputs, steps=args.steps, seed=args.seed,
                 device=args.device, settle_steps=args.settle_steps, min_steady_samples=args.min_steady_samples,
-                anchor_directory=args.anchor_directory, control_output=args.control_output,
+                anchor_directory=args.anchor_directory, max_anchors=args.max_anchors, control_output=args.control_output,
                 trace_output=args.trace_output, trace_replicas=args.trace_replicas)
         elif args.operation == "export":
             from .frame_export import export_frame_policy
