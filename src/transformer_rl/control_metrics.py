@@ -309,6 +309,12 @@ class ControlMetrics:
         self._clipped = [0] * 6
         self._bounds_samples = [0] * 6
         self._actuation_samples = 0
+        self._scaled_nominal_available = None
+        self._scaled_nominal_samples = 0
+        self._scaled_nominal_bounds_samples = [0] * 6
+        self._scaled_nominal_at_bound = [0] * 6
+        self._scaled_nominal_requested_outside = [0] * 6
+        self._scaled_nominal_applied_outside = [0] * 6
         self._power, self._tilt, self._drift = _Scalar(), _Scalar(), _Scalar()
         self._planar_full, self._planar_steady = _PlanarMotion(), _PlanarMotion()
         self._planar_stationary, self._planar_stationary_steady = _PlanarMotion(), _PlanarMotion()
@@ -334,6 +340,16 @@ class ControlMetrics:
             raise ValueError("request availability must remain constant")
         if available:
             shapes["request"] = (3,)
+        scaled_fields = {"scaled_nominal_requested_motor_effort": (6,),
+                         "scaled_nominal_effort_bounds": (6, 2)}
+        scaled_present = [name in packet for name in scaled_fields]
+        if any(scaled_present) and not all(scaled_present):
+            raise ValueError("scaled nominal request and bounds must be provided together")
+        scaled_available = all(scaled_present)
+        if self._scaled_nominal_available is not None and self._scaled_nominal_available != scaled_available:
+            raise ValueError("scaled nominal envelope availability must remain constant")
+        if scaled_available:
+            shapes.update(scaled_fields)
         blocks, offsets, width = [], {}, 0
         for name, shape in shapes.items():
             value = packet.get(name)
@@ -360,17 +376,20 @@ class ControlMetrics:
                 raise ValueError("time_s must be nonnegative and strictly increasing within an episode")
             if any(data["effort_bounds"][i] > data["effort_bounds"][i + 1] for i in range(0, 12, 2)):
                 raise ValueError("effort_bounds lower bound exceeds upper bound")
+            if scaled_available and any(data["scaled_nominal_effort_bounds"][i] >
+                                        data["scaled_nominal_effort_bounds"][i + 1] for i in range(0, 12, 2)):
+                raise ValueError("scaled_nominal_effort_bounds lower bound exceeds upper bound")
             if (data["failure"][0] or data["success"][0]) and not data["done"]:
                 raise ValueError("terminal failure/success flags require done")
             if data["failure"][0] and data["success"][0]:
                 raise ValueError("failure and success cannot both be true")
             rows.append(data)
-        return rows, available
+        return rows, available, scaled_available
 
     def update(self, packet: dict[str, torch.Tensor], done: torch.Tensor):
         if self._finished:
             raise RuntimeError("cannot update after report")
-        rows, self._request_available = self._validate(packet, done)
+        rows, self._request_available, self._scaled_nominal_available = self._validate(packet, done)
         for index, data in enumerate(rows):
             episode = self._episodes[index]
             timestamp, reference, actual = data["time_s"][0], data["command_reference"], data["actual"]
@@ -475,6 +494,20 @@ class ControlMetrics:
                 self._bounds_samples[index] += 1
                 self._saturated[index] += effort <= low + self.saturation_tolerance or effort >= high - self.saturation_tolerance
                 self._clipped[index] += requested < low - self.saturation_tolerance or requested > high + self.saturation_tolerance
+        if self._scaled_nominal_available:
+            for index, (effort, requested) in enumerate(zip(data["motor_effort"],
+                    data["scaled_nominal_requested_motor_effort"])):
+                low, high = data["scaled_nominal_effort_bounds"][index * 2:index * 2 + 2]
+                if high > low:
+                    self._scaled_nominal_bounds_samples[index] += 1
+                    self._scaled_nominal_at_bound[index] += (
+                        abs(effort - low) <= self.saturation_tolerance or
+                        abs(effort - high) <= self.saturation_tolerance)
+                    self._scaled_nominal_requested_outside[index] += (
+                        requested < low - self.saturation_tolerance or requested > high + self.saturation_tolerance)
+                    self._scaled_nominal_applied_outside[index] += (
+                        effort < low - self.saturation_tolerance or effort > high + self.saturation_tolerance)
+            self._scaled_nominal_samples += 1
         self._actuation_samples += 1
         episode.previous_leg, episode.previous_wheel, episode.previous_effort = data["leg_target"], data["wheel_target"], data["motor_effort"]
 
@@ -542,6 +575,21 @@ class ControlMetrics:
             actual_bound_fraction=[count / samples if samples else None for count, samples in zip(self._saturated, self._bounds_samples)],
             requested_outside_bounds_fraction=[count / samples if samples else None for count, samples in zip(self._clipped, self._bounds_samples)],
             sampled_abs_mechanical_power={"unit": "W", **self._power.report()})
+        actuation["scaled_nominal_envelope"] = {
+            "available": bool(self._scaled_nominal_available), "sample_count": self._scaled_nominal_samples,
+            "active_bound_samples": self._scaled_nominal_bounds_samples,
+            "applied_at_bound_fraction": [count / samples if samples else None for count, samples in
+                zip(self._scaled_nominal_at_bound, self._scaled_nominal_bounds_samples)],
+            "requested_outside_bounds_fraction": [count / samples if samples else None for count, samples in
+                zip(self._scaled_nominal_requested_outside, self._scaled_nominal_bounds_samples)],
+            "applied_outside_bounds_fraction": [count / samples if samples else None for count, samples in
+                zip(self._scaled_nominal_applied_outside, self._scaled_nominal_bounds_samples)],
+            "unit": "N*m",
+            "semantics": "nominal PD request and envelope scaled together by motor_strength * schedule.motor_scale; not final physical wheel output limits",
+            "scope": "all PRE-reset policy-rate physical samples, including transients, failed and final partial episodes; no steady filtering",
+            "applied_at_bound_definition": "absolute distance from applied effort to either scaled nominal bound <= saturation_tolerance",
+            "outside_bounds_definition": "effort below the lower bound or above the upper bound by more than saturation_tolerance; zero-width channels are excluded",
+            "downstream_stages": "transport holds, dynamic wheel limits and actuator response can differ from the current scaled nominal PD envelope"}
         full_interval = self._full.report("per_environment_episode")
         full_interval.update(observed_duration_s=self._duration,
             all_axes_in_band_time_fraction=self._joint_band_time / self._duration if self._duration else None)

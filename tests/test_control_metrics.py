@@ -130,6 +130,155 @@ def test_disabled_actuator_has_null_saturation_fraction():
     assert report["actual_bound_fraction"][0] is None
 
 
+def with_scaled_nominal_envelope(data, scale):
+    scale = torch.as_tensor(scale, dtype=torch.float64).expand_as(data["requested_motor_effort"])
+    return {**data,
+            "scaled_nominal_requested_motor_effort": data["requested_motor_effort"] * scale,
+            "scaled_nominal_effort_bounds": data["effort_bounds"] * scale[:, :, None]}
+
+
+@pytest.mark.parametrize("strength", (1., .85))
+def test_scaled_nominal_envelope_scales_request_and_bounds_and_preserves_legacy(strength):
+    metrics, legacy = ControlMetrics(1, .01), ControlMetrics(1, .01)
+    requested = torch.tensor([[41., -41., 39., -39., 40., -40.]], dtype=torch.float64)
+    data = packet()
+    data["effort_bounds"] *= 4.
+    data["requested_motor_effort"] = requested
+    data["motor_effort"] = requested.clamp(-40., 40.) * strength
+    done = torch.tensor([False])
+    legacy.update(data, done)
+    metrics.update(with_scaled_nominal_envelope(data, strength), done)
+    report = metrics.report()["actuation"]
+    scaled = report["scaled_nominal_envelope"]
+    actual = {key: value for key, value in report.items() if key != "scaled_nominal_envelope"}
+    old = {key: value for key, value in legacy.report()["actuation"].items() if key != "scaled_nominal_envelope"}
+    assert actual == old
+    assert actual["actual_bound_fraction"] == ([1., 1., 0., 0., 1., 1.] if strength == 1. else [0.] * 6)
+    assert scaled["available"] is True and scaled["sample_count"] == 1
+    assert scaled["active_bound_samples"] == [1] * 6
+    assert scaled["applied_at_bound_fraction"] == [1., 1., 0., 0., 1., 1.]
+    assert scaled["requested_outside_bounds_fraction"] == [1., 1., 0., 0., 0., 0.]
+    assert scaled["applied_outside_bounds_fraction"] == [0.] * 6
+    assert "not final physical wheel output limits" in scaled["semantics"]
+
+
+def test_scaled_nominal_envelope_counts_all_environment_rows_with_independent_strengths():
+    metrics = ControlMetrics(2, .01)
+    data = packet(2, effort=((40.,) * 6, (34.,) * 6), requested=(41.,) * 6)
+    data["effort_bounds"] *= 4.
+    scale = torch.tensor([[1.] * 6, [.85] * 6], dtype=torch.float64)
+    metrics.update(with_scaled_nominal_envelope(data, scale), torch.tensor([False, False]))
+    scaled = metrics.report()["actuation"]["scaled_nominal_envelope"]
+    assert scaled["sample_count"] == 2
+    assert scaled["active_bound_samples"] == [2] * 6
+    assert scaled["applied_at_bound_fraction"] == scaled["requested_outside_bounds_fraction"] == [1.] * 6
+
+
+def test_dynamic_wheel_output_outside_scaled_nominal_envelope_is_reported_separately():
+    metrics = ControlMetrics(1, .01)
+    data = packet(effort=(0., 0., 0., 0., 2.8, -2.8), requested=(0., 0., 0., 0., 1., -1.))
+    data["effort_bounds"][0, 4:] = torch.tensor([[-3., 3.], [-3., 3.]])
+    metrics.update(with_scaled_nominal_envelope(data, .85), torch.tensor([False]))
+    actuation = metrics.report()["actuation"]
+    scaled = actuation["scaled_nominal_envelope"]
+    assert actuation["actual_bound_fraction"] == [0.] * 6
+    assert scaled["applied_at_bound_fraction"] == scaled["requested_outside_bounds_fraction"] == [0.] * 6
+    assert scaled["applied_outside_bounds_fraction"] == [0., 0., 0., 0., 1., 1.]
+
+
+def test_scaled_nominal_zero_width_bounds_have_no_valid_fraction():
+    metrics = ControlMetrics(1, .01)
+    data = with_scaled_nominal_envelope(packet(effort=(10.,) * 6), .85)
+    data["scaled_nominal_effort_bounds"][0, 0] = 0.
+    metrics.update(data, torch.tensor([False]))
+    scaled = metrics.report()["actuation"]["scaled_nominal_envelope"]
+    assert scaled["sample_count"] == 1 and scaled["active_bound_samples"][0] == 0
+    for key in ("applied_at_bound_fraction", "requested_outside_bounds_fraction", "applied_outside_bounds_fraction"):
+        assert scaled[key][0] is None
+
+
+def test_missing_scaled_nominal_fields_report_unavailable_without_fabricated_fractions():
+    metrics = ControlMetrics(1, .01)
+    add(metrics, 0.)
+    scaled = metrics.report()["actuation"]["scaled_nominal_envelope"]
+    assert scaled["available"] is False and scaled["sample_count"] == 0
+    assert scaled["active_bound_samples"] == [0] * 6
+    for key in ("applied_at_bound_fraction", "requested_outside_bounds_fraction", "applied_outside_bounds_fraction"):
+        assert scaled[key] == [None] * 6
+
+
+@pytest.mark.parametrize("missing", ("scaled_nominal_requested_motor_effort", "scaled_nominal_effort_bounds"))
+def test_partial_scaled_nominal_field_group_is_rejected_before_mutation(missing):
+    metrics = ControlMetrics(1, .01)
+    data = with_scaled_nominal_envelope(packet(), .85)
+    del data[missing]
+    with pytest.raises(ValueError, match="provided together"):
+        metrics.update(data, torch.tensor([False]))
+    add(metrics, 0.)
+    assert metrics.report()["full_interval"]["samples"] == 1
+    assert metrics.report()["actuation"]["scaled_nominal_envelope"]["available"] is False
+
+
+@pytest.mark.parametrize("first_available", (False, True))
+def test_scaled_nominal_availability_cannot_change_during_evaluation(first_available):
+    metrics = ControlMetrics(1, .01)
+    data = packet()
+    first = with_scaled_nominal_envelope(data, .85) if first_available else data
+    metrics.update(first, torch.tensor([False]))
+    data = packet(time=.01)
+    second = data if first_available else with_scaled_nominal_envelope(data, .85)
+    with pytest.raises(ValueError, match="availability must remain constant"):
+        metrics.update(second, torch.tensor([False]))
+    report = metrics.report()
+    assert report["full_interval"]["samples"] == 1
+    assert report["actuation"]["scaled_nominal_envelope"]["available"] is first_available
+
+
+@pytest.mark.parametrize("field,value", [
+    ("scaled_nominal_effort_bounds", torch.zeros(1, 6)),
+    ("scaled_nominal_effort_bounds", torch.zeros(1, 6, 2, dtype=torch.int64)),
+    ("scaled_nominal_effort_bounds", torch.full((1, 6, 2), float("inf"))),
+    ("scaled_nominal_effort_bounds", torch.full((1, 6, 2), float("nan"))),
+    ("scaled_nominal_effort_bounds", torch.tensor([[[1., -1.]] * 6])),
+    ("scaled_nominal_requested_motor_effort", torch.full((1, 6), float("nan"))),
+    ("scaled_nominal_requested_motor_effort", torch.zeros(1, 5))])
+def test_invalid_scaled_nominal_packet_does_not_mutate_statistics_or_availability(field, value):
+    metrics = ControlMetrics(1, .01)
+    data = with_scaled_nominal_envelope(packet(), .85)
+    data[field] = value
+    with pytest.raises(ValueError):
+        metrics.update(data, torch.tensor([False]))
+    report = metrics.report()
+    assert report["available"] is False
+    assert report["actuation"]["sample_count"] == 0
+    assert report["actuation"]["scaled_nominal_envelope"]["available"] is False
+
+
+def test_scaled_nominal_bounds_validation_checks_every_row_before_mutation():
+    metrics = ControlMetrics(2, .01)
+    data = with_scaled_nominal_envelope(packet(2), .85)
+    data["scaled_nominal_effort_bounds"][1, 5] = torch.tensor([1., -1.])
+    with pytest.raises(ValueError, match="lower bound exceeds"):
+        metrics.update(data, torch.tensor([False, False]))
+    assert metrics.report()["full_interval"]["samples"] == 0
+
+
+def test_failed_short_and_final_partial_segments_remain_in_full_scaled_nominal_actuation():
+    metrics = ControlMetrics(1, .01, settle_steps=2, min_steady_samples=2)
+    for failed in (True, False):
+        data = packet(effort=(8.5,) * 6, requested=(11.,) * 6, failure=failed)
+        metrics.update(with_scaled_nominal_envelope(data, .85), torch.tensor([failed]))
+    report = metrics.report()
+    assert report["steady"]["available"] is False
+    assert report["episodes"]["failed"] == report["episodes"]["partial"] == 1
+    scaled = report["actuation"]["scaled_nominal_envelope"]
+    assert scaled["sample_count"] == report["full_interval"]["samples"] == 2
+    assert scaled["active_bound_samples"] == [2] * 6
+    assert scaled["applied_at_bound_fraction"] == scaled["requested_outside_bounds_fraction"] == [1.] * 6
+    assert "no steady filtering" in scaled["scope"]
+    json.dumps(report, allow_nan=False)
+
+
 def test_continuous_leg_joint_error_uses_shortest_arc_at_wrap_boundary():
     metrics = ControlMetrics(1, .01)
     data = packet(leg_target=(math.pi - .01,) * 4)

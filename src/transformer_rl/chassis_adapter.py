@@ -395,7 +395,30 @@ class ChassisFrameAdapter:
         self.env.global_actor_update = self.env.cfg.get("global_actor_update_offset", 0) + updates
         self.env.training_transitions = transitions
 
-    def _control_packet(self, diagnostic, velocity, omega, height, tilt, done):
+    def _nominal_effort_scaling(self):
+        """Snapshot the reset-stable V5 multiplier, not a physical output limit."""
+        import torch
+        if not getattr(self.env, "is_v5", False):
+            return None
+        strength = getattr(self.env, "motor_strength", None)
+        if (not isinstance(strength, torch.Tensor) or strength.shape != (self.num_envs, 6)
+                or not strength.is_floating_point() or strength.device != self._previous.device
+                or not torch.isfinite(strength).all() or (strength < 0).any()):
+            raise ValueError("scaled nominal effort requires finite nonnegative motor_strength [num_envs, 6]")
+        factors = [strength.detach().clone()]
+        skills = getattr(self.env, "skills", None)
+        if skills is not None:
+            scheduled = getattr(getattr(skills, "schedule", None), "motor_scale", None)
+            if (not isinstance(scheduled, torch.Tensor) or scheduled.shape != strength.shape
+                    or not scheduled.is_floating_point() or scheduled.device != strength.device
+                    or not torch.isfinite(scheduled).all() or (scheduled < 0).any()):
+                raise ValueError("scaled nominal effort requires finite nonnegative schedule motor_scale [num_envs, 6]")
+            factors.append(scheduled.detach().clone())
+        if len(factors) == 2 and not torch.isfinite(factors[0] * factors[1]).all():
+            raise ValueError("scaled nominal effort multiplier must be finite")
+        return tuple(factors)
+
+    def _control_packet(self, diagnostic, velocity, omega, height, tilt, done, nominal_scaling=None):
         import torch
         if self._control_motor_indices is None:
             source_order = self.metadata.get("startup", getattr(self.env, "startup_report", {})).get("active_joint_order")
@@ -415,7 +438,7 @@ class ChassisFrameAdapter:
         motor_velocity = self.env.robot.data.joint_vel.torch[:, self.env.ids][:, order]
         bound = diagnostic["motor_effort_bounds"]
         limits = torch.stack((-bound, bound), -1) if bound.ndim == 2 else bound
-        return {name: value.clone() for name, value in {
+        packet = {name: value.clone() for name, value in {
             "time_s": diagnostic["episode_ticks"].double() * .01,
             "command_reference": diagnostic["commands"],
             "actual": torch.stack((velocity[:, 0], omega[:, 2], height), -1),
@@ -427,10 +450,23 @@ class ChassisFrameAdapter:
             "failure": diagnostic["terminated"].bool() & done,
             "success": diagnostic["success"].bool() & ~diagnostic["terminated"].bool() & done,
         }.items()}
+        if nominal_scaling is not None:
+            # Keep request and envelope in the same scaled coordinate system.
+            # Filtering, transport and dynamic wheel limits remain later stages.
+            packet["scaled_nominal_requested_motor_effort"] = packet["requested_motor_effort"].clone()
+            packet["scaled_nominal_effort_bounds"] = packet["effort_bounds"].clone()
+            # Match the parent's two in-place float operations. Combining the
+            # factors first can move a true endpoint past the metric tolerance.
+            for factor in nominal_scaling:
+                scale = factor[:, order]
+                packet["scaled_nominal_requested_motor_effort"] *= scale
+                packet["scaled_nominal_effort_bounds"] *= scale[..., None]
+        return packet
 
     def step(self, issued_action):
         import torch
         from .types import StepResult
+        nominal_scaling = self._nominal_effort_scaling() if self.enable_control_metrics else None
         raw, reward, done, extras = self.env.step(issued_action)
         self._last_environment_metrics = dict(extras.get("log", {}))
         diagnostic = extras["diagnostics"]
@@ -463,7 +499,12 @@ class ChassisFrameAdapter:
                 "evaluation_signals": signals,
                 "evaluation_signal_time": diagnostic["episode_ticks"].double() * .01}
         if self.enable_control_metrics:
-            info["control_packet"] = self._control_packet(diagnostic, velocity, omega, height, tilt, done)
+            if nominal_scaling is not None:
+                current = self._nominal_effort_scaling()
+                if (current is None or len(current) != len(nominal_scaling)
+                        or any(not torch.equal(before, after) for before, after in zip(nominal_scaling, current))):
+                    raise ValueError("nominal effort scale changed during physical step; scaled envelope is unavailable")
+            info["control_packet"] = self._control_packet(diagnostic, velocity, omega, height, tilt, done, nominal_scaling)
         self._previous.copy_(issued_action)
         self._fresh.zero_()
         ids = done.nonzero(as_tuple=False).flatten()

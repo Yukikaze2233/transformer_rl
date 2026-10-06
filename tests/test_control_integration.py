@@ -102,6 +102,131 @@ def test_adapter_default_does_not_require_optional_physical_diagnostics():
     assert "control_packet" not in result.info
 
 
+class ScaledPhysicalChassis(PhysicalChassis):
+    def __init__(self):
+        super().__init__()
+        self.is_v5 = True
+        self.motor_strength = torch.ones(3, 6)
+        self.skills = SimpleNamespace(schedule=SimpleNamespace(motor_scale=torch.ones(3, 6)))
+
+    def reset(self, rows):
+        super().reset(rows)
+        self.motor_strength[rows] = .5
+        self.skills.schedule.motor_scale[rows] = .75
+
+
+@pytest.mark.parametrize("interleaved", (False, True))
+def test_scaled_nominal_packet_uses_pre_reset_coefficients_and_canonical_order(interleaved):
+    env = ScaledPhysicalChassis()
+    canonical = env.cfg["policy_action_order"]
+    source = [canonical[i] for i in (0, 1, 4, 2, 3, 5)] if interleaved else canonical
+    env.startup_report["active_joint_order"] = source
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {}, enable_control_metrics=True)
+    adapter.reset(seed=71)
+    strength = torch.tensor([1., .85, .7, .6, .9, .8]).expand(3, -1).clone()
+    scheduled = torch.tensor([.9, 1., .8, 1., .7, .6]).expand(3, -1).clone()
+    env.motor_strength.copy_(strength)
+    env.skills.schedule.motor_scale.copy_(scheduled)
+    result = adapter.step(torch.zeros(3, 6))
+    packet = result.info["control_packet"]
+    order = [source.index(name) for name in canonical]
+    scale = (strength * scheduled)[:, order]
+    torch.testing.assert_close(packet["scaled_nominal_requested_motor_effort"], 4. * scale)
+    torch.testing.assert_close(packet["scaled_nominal_effort_bounds"][..., 1], 20. * scale)
+    torch.testing.assert_close(packet["scaled_nominal_effort_bounds"][..., 0], -20. * scale)
+    torch.testing.assert_close(packet["requested_motor_effort"], torch.full((3, 6), 4.))
+    torch.testing.assert_close(packet["effort_bounds"][..., 1], torch.full((3, 6), 20.))
+    assert env.motor_strength.eq(.5).all() and env.skills.schedule.motor_scale.eq(.75).all()
+    env.motor_strength.fill_(99.)
+    env.skills.schedule.motor_scale.fill_(99.)
+    torch.testing.assert_close(packet["scaled_nominal_requested_motor_effort"], 4. * scale)
+
+
+@pytest.mark.parametrize("field", ("motor_strength", "motor_scale"))
+@pytest.mark.parametrize("invalid", ("shape", "negative", "nonfinite"))
+def test_scaled_nominal_packet_rejects_unproven_coefficients(field, invalid):
+    env = ScaledPhysicalChassis()
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {}, enable_control_metrics=True)
+    adapter.reset(seed=71)
+    owner = env if field == "motor_strength" else env.skills.schedule
+    value = getattr(owner, field)
+    if invalid == "shape":
+        setattr(owner, field, value[:, :1])
+    else:
+        value[0, 0] = -.1 if invalid == "negative" else float("nan")
+    with pytest.raises(ValueError, match=field):
+        adapter.step(torch.zeros(3, 6))
+
+
+def test_scaled_nominal_packet_rejects_scale_changes_inside_physical_step():
+    class ChangingScaleChassis(ScaledPhysicalChassis):
+        def step(self, issued):
+            result = super().step(issued)
+            self.skills.schedule.motor_scale.mul_(.9)
+            return result
+
+    env = ChangingScaleChassis()
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {}, enable_control_metrics=True)
+    adapter.reset(seed=71)
+    with pytest.raises(ValueError, match="changed during physical step"):
+        adapter.step(torch.zeros(3, 6))
+
+
+def test_scaled_nominal_packet_survives_trace_publication(tmp_path):
+    from transformer_rl.control_trace import ControlTrace
+
+    env = ScaledPhysicalChassis()
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {}, enable_control_metrics=True)
+    adapter.reset(seed=71)
+    env.motor_strength.fill_(.85)
+    env.skills.schedule.motor_scale.fill_(1.)
+    result = adapter.step(torch.zeros(3, 6))
+    path = tmp_path / "trace.npz"
+    trace = ControlTrace(path, steps=1, num_envs=3, replicas=1, groups=env.scene_groups, metadata={})
+    try:
+        trace.add(result.info["control_packet"], result.terminated | result.truncated)
+        manifest = trace.publish()
+        with np.load(path, allow_pickle=False) as saved:
+            for name in ("scaled_nominal_requested_motor_effort", "scaled_nominal_effort_bounds"):
+                assert name in manifest["fields"]
+                np.testing.assert_array_equal(saved[name][0], result.info["control_packet"][name].numpy())
+            np.testing.assert_allclose(saved["scaled_nominal_effort_bounds"][..., 1], 17.)
+    finally:
+        trace.close()
+
+
+@pytest.mark.parametrize("strength", (.9, .95))
+def test_scaled_nominal_float32_endpoint_matches_parent_operation_order(strength):
+    from transformer_rl.control_metrics import ControlMetrics
+
+    class ClippedChassis(ScaledPhysicalChassis):
+        def step(self, issued):
+            result = super().step(issued)
+            diagnostic = result[3]["diagnostics"]
+            diagnostic["motor_effort_bounds"].fill_(40.)
+            diagnostic["requested_motor_effort"].fill_(45.)
+            applied = torch.full((3, 6), 40.)
+            applied *= self.motor_strength
+            applied *= self.skills.schedule.motor_scale
+            diagnostic["motor_effort"].copy_(applied)
+            return result
+
+    env = ClippedChassis()
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {}, enable_control_metrics=True)
+    adapter.reset(seed=71)
+    env.motor_strength.fill_(strength)
+    env.skills.schedule.motor_scale.fill_(.7)
+    result = adapter.step(torch.zeros(3, 6))
+    packet = result.info["control_packet"]
+    assert torch.equal(packet["motor_effort"], packet["scaled_nominal_effort_bounds"][..., 1])
+    metrics = ControlMetrics(3, .01)
+    metrics.update(packet, result.terminated | result.truncated)
+    report = metrics.report()["actuation"]["scaled_nominal_envelope"]
+    assert report["applied_at_bound_fraction"] == [1.] * 6
+    assert report["requested_outside_bounds_fraction"] == [1.] * 6
+    assert report["applied_outside_bounds_fraction"] == [0.] * 6
+
+
 @pytest.mark.parametrize("missing", ("requested_motor_effort", "motor_effort_bounds"))
 def test_adapter_enabled_physical_diagnostics_fail_closed(missing):
     env = PhysicalChassis(missing=missing)
