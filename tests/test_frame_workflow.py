@@ -1,8 +1,10 @@
 """End-to-end interface tests on synthetic tensors, not robot training."""
-from dataclasses import replace
+from copy import deepcopy
+from dataclasses import fields, is_dataclass, replace
 import hashlib
 import json
 from pathlib import Path
+import random
 import sys
 
 import numpy as np
@@ -348,3 +350,228 @@ def test_model_state_digest_uses_names_dtype_shape_and_contents_not_storage_or_r
     second.a = first.a.clone()
     second.b[0] += 1
     assert digest != _model_state_sha256(second)
+
+
+def _cpu_initial_model(config, seed):
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(seed)
+        with torch.device("cpu"):
+            return FrameActorCritic(config.model)
+
+
+def _reject_guard_side_effects(monkeypatch):
+    import transformer_rl.frame_workflow as workflow
+    def forbidden(*args, **kwargs):
+        pytest.fail("initialization guard reached a forbidden side effect")
+    monkeypatch.setattr(workflow, "_seed", forbidden)
+    monkeypatch.setattr(workflow, "PPOTrainer", forbidden)
+    monkeypatch.setattr(torch.optim, "Adam", forbidden)
+    monkeypatch.setattr(workflow, "_write_json", forbidden)
+    monkeypatch.setattr(workflow, "_StopBudget", forbidden)
+    monkeypatch.setattr(Path, "mkdir", forbidden)
+    monkeypatch.setattr(random, "seed", forbidden)
+    monkeypatch.setattr(np.random, "seed", forbidden)
+    monkeypatch.setattr(torch, "manual_seed", forbidden)
+    for name in ("is_available", "is_initialized", "device_count", "init", "_lazy_init", "_lazy_call",
+                 "manual_seed", "manual_seed_all", "get_rng_state", "get_rng_state_all",
+                 "set_rng_state", "set_rng_state_all"):
+        monkeypatch.setattr(torch.cuda, name, forbidden)
+    return forbidden
+
+
+def _assert_same_state(first, second):
+    if isinstance(first, torch.Tensor):
+        assert isinstance(second, torch.Tensor) and first.dtype == second.dtype
+        assert first.shape == second.shape and torch.equal(first, second)
+    elif isinstance(first, np.ndarray):
+        np.testing.assert_array_equal(first, second)
+    elif is_dataclass(first):
+        assert type(first) is type(second)
+        for field in fields(first):
+            _assert_same_state(getattr(first, field.name), getattr(second, field.name))
+    elif isinstance(first, dict):
+        assert first.keys() == second.keys()
+        for key in first:
+            _assert_same_state(first[key], second[key])
+    elif isinstance(first, (tuple, list)):
+        assert type(first) is type(second) and len(first) == len(second)
+        for left, right in zip(first, second):
+            _assert_same_state(left, right)
+    else:
+        assert first == second
+
+
+def test_initial_guard_mismatch_including_fixed_buffers_has_zero_startup_side_effects(tmp_path, monkeypatch):
+    import transformer_rl.frame_workflow as workflow
+    config, seed = configuration(residual_type="gated"), 71
+    original = _cpu_initial_model(config, seed)
+    expected = _model_state_sha256(original)
+    state = torch.get_rng_state().clone()
+    python_state, numpy_state = random.getstate(), np.random.get_state()
+    def altered_buffers(model_config):
+        model = FrameActorCritic(model_config)
+        assert all(torch.equal(value, dict(original.named_parameters())[name])
+                   for name, value in model.named_parameters())
+        model.actor.policy.position_encoding[0, 1, 0] += .001
+        return model
+    monkeypatch.setattr(workflow, "FrameActorCritic", altered_buffers)
+    forbidden = _reject_guard_side_effects(monkeypatch)
+    run = tmp_path / "must-not-exist"
+    with pytest.raises(ValueError, match=f"expected {expected}, actual [0-9a-f]{{64}}"):
+        train_frame_policy(config, forbidden, "forbidden:make_env", run, updates=1,
+            seed=seed, device="cuda:0", expected_initial_model_sha256=expected)
+    assert not run.exists()
+    assert torch.equal(state, torch.get_rng_state())
+    assert random.getstate() == python_state
+    _assert_same_state(np.random.get_state(), numpy_state)
+
+
+def test_initial_guard_construction_failure_restores_rng_before_any_run(tmp_path, monkeypatch):
+    import transformer_rl.frame_workflow as workflow
+    state = torch.get_rng_state().clone()
+    python_state, numpy_state = random.getstate(), np.random.get_state()
+    def broken(config):
+        torch.rand(13)
+        raise RuntimeError("synthetic CPU construction failure")
+    monkeypatch.setattr(workflow, "FrameActorCritic", broken)
+    forbidden = _reject_guard_side_effects(monkeypatch)
+    run = tmp_path / "must-not-exist"
+    with pytest.raises(RuntimeError, match="CPU construction failure"):
+        train_frame_policy(configuration(), forbidden, "forbidden:make_env", run,
+            updates=1, seed=71, expected_initial_model_sha256="0" * 64)
+    assert not run.exists() and torch.equal(state, torch.get_rng_state())
+    assert random.getstate() == python_state
+    _assert_same_state(np.random.get_state(), numpy_state)
+
+
+@pytest.mark.parametrize("value", [False, True, 0, "", "0" * 63, "0" * 65, "A" * 64, "g" * 64, b"0" * 64])
+def test_initial_guard_rejects_non_sha_input_before_startup(tmp_path, monkeypatch, value):
+    import transformer_rl.frame_workflow as workflow
+    forbidden = _reject_guard_side_effects(monkeypatch)
+    monkeypatch.setattr(workflow, "FrameActorCritic", forbidden)
+    with pytest.raises(ValueError, match="lowercase 64-hex"):
+        train_frame_policy(configuration(), forbidden, "forbidden:make_env", tmp_path / "bad",
+            updates=1, expected_initial_model_sha256=value)
+    assert not (tmp_path / "bad").exists()
+
+
+@pytest.mark.parametrize("parent", ["resume", "initialize_from", "restore_learning_from"])
+def test_initial_guard_cannot_be_combined_with_parent_initialization(tmp_path, monkeypatch, parent):
+    import transformer_rl.frame_workflow as workflow
+    forbidden = _reject_guard_side_effects(monkeypatch)
+    monkeypatch.setattr(workflow, "FrameActorCritic", forbidden)
+    monkeypatch.setattr(workflow, "load_frame_checkpoint", forbidden)
+    with pytest.raises(ValueError, match="fresh training without a parent"):
+        train_frame_policy(configuration(), forbidden, "forbidden:make_env", tmp_path / "bad", updates=1,
+            expected_initial_model_sha256="0" * 64, **{parent: tmp_path / "never-read.pt"})
+    assert not (tmp_path / "bad").exists()
+
+
+@pytest.mark.parametrize("seed", [True, -1, 2**32, 1.])
+def test_initial_guard_seed_validation_precedes_model_and_cuda(tmp_path, monkeypatch, seed):
+    import transformer_rl.frame_workflow as workflow
+    forbidden = _reject_guard_side_effects(monkeypatch)
+    monkeypatch.setattr(workflow, "FrameActorCritic", forbidden)
+    with pytest.raises(ValueError, match="unsigned 32-bit"):
+        train_frame_policy(configuration(), forbidden, "forbidden:make_env", tmp_path / "bad", updates=1,
+            seed=seed, expected_initial_model_sha256="0" * 64)
+
+
+@pytest.mark.parametrize("architecture,overrides", [
+    ("mlp", {}), ("history_mlp", {}), ("transformer", {"residual_type": "gated"})])
+def test_matching_initial_guard_preserves_raw_rollout_metrics_model_adam_and_rng(
+        tmp_path, monkeypatch, architecture, overrides):
+    config, seed = configuration(architecture, **overrides), 71
+    expected = _model_state_sha256(_cpu_initial_model(config, seed))
+    batches = []
+    original_update = PPOTrainer.update
+    def observed_update(trainer, batch, **kwargs):
+        batches.append(deepcopy(batch))
+        return original_update(trainer, batch, **kwargs)
+    monkeypatch.setattr(PPOTrainer, "update", observed_update)
+    def factory(model_config, environment_config, device):
+        torch.rand(17)
+        random.random()
+        np.random.rand(5)
+        return make_env(model_config, environment_config, device)
+    reports, runs, payloads, metrics = [], [], [], []
+    for name, guarded in (("legacy", False), ("guarded", True), ("explicit-none", False)):
+        run = tmp_path / name
+        arguments = {"expected_initial_model_sha256": expected} if guarded else {}
+        if name == "explicit-none":
+            arguments["expected_initial_model_sha256"] = None
+        reports.append(train_frame_policy(config, factory, "packed_env:make_env", run, updates=1,
+            rollout_steps=5, tensorboard=False, seed=seed, **arguments))
+        runs.append(json.loads((run / "run.json").read_text()))
+        payloads.append(torch.load(reports[-1]["checkpoint"], weights_only=True))
+        metrics.append(json.loads((run / "metrics.jsonl").read_text()))
+    assert len(batches) == 3 and all(report["status"] == "completed" for report in reports)
+    comparable_metrics = []
+    for record in metrics:
+        record = deepcopy(record)
+        del record["elapsed_s"]
+        del record["collection"]["elapsed_s"]
+        comparable_metrics.append(record)
+    for index in (1, 2):
+        _assert_same_state(batches[0], batches[index])
+        for key in ("model", "optimizer", "rng", "config", "update"):
+            _assert_same_state(payloads[0][key], payloads[index][key])
+        _assert_same_state(comparable_metrics[0], comparable_metrics[index])
+    guard = {"expected_sha256": expected, "actual_sha256": expected, "verified": True}
+    assert runs[1].pop("initialization_guard") == payloads[1]["metadata"].pop("initialization_guard") == guard
+    assert runs[0] == runs[1] == runs[2]
+    assert (tmp_path / "legacy/run.json").read_bytes() == (tmp_path / "explicit-none/run.json").read_bytes()
+    _assert_same_state(payloads[0]["metadata"], payloads[1]["metadata"])
+    _assert_same_state(payloads[0]["metadata"], payloads[2]["metadata"])
+    assert "initialization_guard" not in runs[0] and "initialization_guard" not in payloads[0]["metadata"]
+
+
+def test_guarded_cli_does_not_resolve_factory_or_create_error_artifacts_on_mismatch(tmp_path, monkeypatch, capsys):
+    from transformer_rl import frame_cli
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(configuration().to_dict()))
+    forbidden = _reject_guard_side_effects(monkeypatch)
+    monkeypatch.setattr(frame_cli, "_factory", forbidden)
+    run = tmp_path / "bad"
+    assert frame_cli.main(["train", "--config", str(config_path), "--env-factory", "never_import:make_env",
+        "--run-dir", str(run), "--updates", "1", "--seed", "71", "--device", "cuda:0",
+        "--expected-initial-model-sha256", "0" * 64]) == 1
+    assert "initial model SHA mismatch before training" in capsys.readouterr().err
+    assert not run.exists()
+
+
+def test_cli_guard_forwarding_is_lazy_and_default_none_preserves_legacy_order(tmp_path, monkeypatch, capsys):
+    from transformer_rl import frame_cli, frame_workflow
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(configuration().to_dict()))
+    arguments = ["train", "--config", str(config_path), "--env-factory", "fixture:make_env",
+                 "--run-dir", str(tmp_path / "unused"), "--updates", "1"]
+    events = []
+    def resolve(reference):
+        events.append("factory_import")
+        return lambda **kwargs: "constructed"
+    monkeypatch.setattr(frame_cli, "_factory", resolve)
+    def training(config, factory, reference, run_dir, **kwargs):
+        guarded = "expected_initial_model_sha256" in kwargs
+        assert events == ([] if guarded else ["factory_import"])
+        if guarded:
+            assert kwargs["expected_initial_model_sha256"] == "0" * 64
+            assert factory() == "constructed" and events == ["factory_import"]
+        return {"status": "completed"}
+    monkeypatch.setattr(frame_workflow, "train_frame_policy", training)
+    assert frame_cli.main(arguments + ["--expected-initial-model-sha256", "0" * 64]) == 0
+    events.clear()
+    assert frame_cli.main(arguments) == 0
+    events.clear()
+    config_path.write_text("{}")
+    assert frame_cli.main(arguments) == 1 and events == []
+    capsys.readouterr()
+
+
+def test_cli_rejects_bad_guard_format_before_loading_config(tmp_path, monkeypatch):
+    from transformer_rl import frame_cli
+    monkeypatch.setattr(frame_cli, "_factory", lambda *args: pytest.fail("factory imported"))
+    with pytest.raises(SystemExit) as error:
+        frame_cli.main(["train", "--config", str(tmp_path / "never-read.json"), "--env-factory", "never:factory",
+            "--run-dir", str(tmp_path / "bad"), "--updates", "1", "--expected-initial-model-sha256", "A" * 64])
+    assert error.value.code == 2 and not (tmp_path / "bad").exists()

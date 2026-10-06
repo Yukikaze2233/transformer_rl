@@ -4,11 +4,18 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import sys
 import traceback
 
 from .cli import _factory, _nonnegative_int, _positive_int, _positive_seconds, _write_json
 from .frame_config import FrameTrainConfig
+
+
+def _initial_model_sha(value):
+    if not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise argparse.ArgumentTypeError("initial model SHA requires lowercase 64-hex SHA256")
+    return value
 
 
 def main(argv=None):
@@ -36,6 +43,7 @@ def main(argv=None):
     train.add_argument("--retention-coef", type=float, default=0.)
     train.add_argument("--no-tensorboard", action="store_true")
     train.add_argument("--consumed-update-offset", type=_nonnegative_int, default=0)
+    train.add_argument("--expected-initial-model-sha256", type=_initial_model_sha)
     evaluate = commands.add_parser("evaluate")
     evaluate.add_argument("--checkpoint", type=Path, required=True)
     evaluate.add_argument("--config", type=Path, required=True)
@@ -121,12 +129,22 @@ def main(argv=None):
                       "history_peak_gib_lower_bound": 2 * history_bytes / 1024**3, "environment_started": False}
         elif args.operation == "train":
             from .frame_workflow import train_frame_policy
-            result = train_frame_policy(FrameTrainConfig.load(args.config), _factory(args.env_factory), args.env_factory,
+            config = FrameTrainConfig.load(args.config)
+            guard_options = {}
+            if args.expected_initial_model_sha256 is None:
+                factory = _factory(args.env_factory)
+            else:
+                # Guard failure must precede importing an optional simulator
+                # factory, whose module can itself have startup side effects.
+                def factory(**kwargs):
+                    return _factory(args.env_factory)(**kwargs)
+                guard_options["expected_initial_model_sha256"] = args.expected_initial_model_sha256
+            result = train_frame_policy(config, factory, args.env_factory,
                 args.run_dir, updates=args.updates, rollout_steps=args.rollout_steps, seed=args.seed, device=args.device,
                 max_seconds=args.max_seconds, checkpoint_interval=args.checkpoint_interval, resume=args.resume,
                 initialize_from=args.initialize_from, anchors=args.anchors, retention_coef=args.retention_coef,
                 restore_learning_from=args.restore_learning_from,
-                tensorboard=not args.no_tensorboard, consumed_update_offset=args.consumed_update_offset)
+                tensorboard=not args.no_tensorboard, consumed_update_offset=args.consumed_update_offset, **guard_options)
             if result["status"] != "completed":
                 print(json.dumps(result, indent=2))
                 return 2

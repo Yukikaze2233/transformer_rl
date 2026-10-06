@@ -22,6 +22,10 @@ V6 环境合同保留的 legacy `learning_rate=3e-5` 是共同的非权威字段
 
 即使 Torch 版本与 dtype 相同，不同 CPU 宿主的数学函数也可能生成不同的固定 buffer。完整 state SHA 包含这些 buffer，不能通过忽略它们来宣称初始化完全一致。跨机器核验不一致时，应在目标执行 runtime 重新准备并保留原准备记录；本机 prepare/validate 成功不等于 Kaiser 的初态已验证。
 
+训练入口提供可选的 `expected_initial_model_sha256`，命令行对应 `--expected-initial-model-sha256`，只适用于无父检查点的 fresh 训练。启用后先在 CPU 构造并核对完整 state；不匹配会在创建运行目录、导入环境 factory、CUDA 播种或构造优化器之前拒绝，并恢复调用者的 CPU RNG。匹配后沿用原训练随机数时序，在 run 与检查点元数据中保存 `initialization_guard`。不传入该参数时保持既有行为。
+
+该入口检查尚未接入本研究的执行控制器；仅增加参数不能证明90个单元实际使用了它。它也不代替源码、配置、首次 fresh parent、resume 链及采样预算的运行审核。后续控制器必须从冻结单元取出预期 SHA 并显式传入；精确恢复时另核对已封存的首次初始化证据与恢复链，不能把 fresh SHA 用作恢复后权重的预期值。
+
 现有环境模块使用由同一个根 seed 派生的独立 generator，初始化 seed 与环境 seed 仍共用数值，尚无分离两种变异来源的协议。探索采样与 PPO minibatch 洗牌使用全局 Torch 随机流；LR 引起不同 KL 早停时，随机调用次数与后续轨迹会分叉。因此本设计固定采样规则与新采样预算，不承诺各 LR 的1200批 rollout 逐端点相同。未来应报告实际 optimizer steps、sample_count、首步/最终 KL 与早停；不能为达到相同梯度步而额外补采样。
 
 ## development 与确认集

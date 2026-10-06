@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import random
 import platform
+import re
 import time
 
 import numpy as np
@@ -62,7 +63,7 @@ def _model_state_sha256(model):
 def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, rollout_steps=48,
                        seed=0, device="cpu", max_seconds=3600., checkpoint_interval=40,
                        resume=None, initialize_from=None, restore_learning_from=None, anchors=(), retention_coef=0., tensorboard=True,
-                       consumed_update_offset=0):
+                       consumed_update_offset=0, expected_initial_model_sha256=None):
     """Learning-state resume resets episodes/history; weights transfer starts new Adam.
 
     Updates are additional successful PPO updates. The external study ledger
@@ -82,8 +83,35 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
     if (type(retention_coef) not in (int, float) or not math.isfinite(retention_coef) or retention_coef < 0
             or (anchors and retention_coef == 0) or (retention_coef > 0 and not anchors)):
         raise ValueError("retention coefficient and explicit anchor paths must be supplied together")
-    _seed(seed)
     model = trainer = parent_rng = None
+    initialization_guard = None
+    if expected_initial_model_sha256 is not None:
+        if (type(expected_initial_model_sha256) is not str
+                or not re.fullmatch(r"[0-9a-f]{64}", expected_initial_model_sha256)):
+            raise ValueError("expected_initial_model_sha256 requires a lowercase 64-hex SHA256")
+        if any(path is not None for path in (resume, initialize_from, restore_learning_from)):
+            raise ValueError("expected initial model SHA is only valid for fresh training without a parent")
+        if type(seed) is not int or not 0 <= seed < 2**32:
+            raise ValueError("seed must be an unsigned 32-bit integer")
+        # Preflight must not seed Python/NumPy/CUDA, create a run or resolve an
+        # environment. fork_rng restores the caller's CPU RNG even on failure.
+        with torch.random.fork_rng(devices=[]):
+            torch.random.default_generator.manual_seed(seed)
+            with torch.device("cpu"):
+                model = FrameActorCritic(config.model)
+            actual = _model_state_sha256(model)
+            post_construction_rng = torch.get_rng_state().clone()
+        if actual != expected_initial_model_sha256:
+            raise ValueError("initial model SHA mismatch before training: "
+                             f"expected {expected_initial_model_sha256}, actual {actual}")
+        initialization_guard = {"expected_sha256": expected_initial_model_sha256,
+                                "actual_sha256": actual, "verified": True}
+        _seed(seed)
+        # Reusing the verified model must consume the same CPU random prefix
+        # as the legacy seed -> model construction -> environment sequence.
+        torch.set_rng_state(post_construction_rng)
+    else:
+        _seed(seed)
     parent_metadata = {}
     start_update = 0
     restoring = resume is not None or restore_learning_from is not None
@@ -99,26 +127,29 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
             if parent_config.ppo != config.ppo:
                 raise ValueError("learning-state rollback requires the same optimizer recipe")
             start_update = parent_update
-    fresh_model = model is None
-    if fresh_model:
+    fresh_model = not restoring and initialize_from is None
+    if model is None:
         # Course-specific environment construction may consume the global CPU
         # RNG. Freeze the seeded learner first, without starting CUDA before
         # the simulator's application owns device initialization.
         with torch.device("cpu"):
             model = FrameActorCritic(config.model)
-    initial_model_sha256 = _model_state_sha256(model)
+    initial_model_sha256 = initialization_guard["actual_sha256"] if initialization_guard else _model_state_sha256(model)
     run_dir = Path(run_dir).resolve()
     run_dir.mkdir(parents=True, exist_ok=False)
     checkpoint_dir = run_dir / "checkpoints"
     checkpoint_dir.mkdir()
-    _write_json(run_dir / "run.json", {"config": config.to_dict(), "seed": seed, "environment_factory": env_reference,
+    run_identity = {"config": config.to_dict(), "seed": seed, "environment_factory": env_reference,
         "updates": updates, "rollout_steps": rollout_steps, "device": str(device), "source": source_identity(),
         "resume": str(resume) if resume else None, "initialize_from": str(initialize_from) if initialize_from else None,
         "restore_learning_from": str(restore_learning_from) if restore_learning_from else None,
         "episode_state_restored": False, "history_reset": "repeat_first", "retention_coef": retention_coef,
         "initial_model_sha256": initial_model_sha256,
         "initial_model_hash_format": "sorted_named_tensor_contents_v1",
-        "max_seconds": max_seconds, "checkpoint_interval": checkpoint_interval})
+        "max_seconds": max_seconds, "checkpoint_interval": checkpoint_interval}
+    if initialization_guard is not None:
+        run_identity["initialization_guard"] = initialization_guard
+    _write_json(run_dir / "run.json", run_identity)
     env = writer = None
     started = time.monotonic()
     update = start_update
@@ -154,6 +185,8 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
                         "runtime": {"python": platform.python_version(), "torch": str(torch.__version__),
                                     "numpy": np.__version__, "cuda": torch.version.cuda,
                                     "deterministic_algorithms": torch.are_deterministic_algorithms_enabled()}}
+            if initialization_guard is not None:
+                metadata["initialization_guard"] = initialization_guard
             collector = FrameCollector(env, model, config.ppo, config.control["action_bounds"])
             prior_transitions = parent_metadata.get("collected_transitions", 0) if restoring else 0
             progress = getattr(env, "set_training_progress", None)
