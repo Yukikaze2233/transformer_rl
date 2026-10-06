@@ -53,6 +53,31 @@ python tools/run_frame_control_campaign.py \
 
 先完成相同预算的固定场景评估，依据任务达标与控制指标筛选候选，再对合格候选执行抗扰、时延扫描、历史长度消融与跨课程技能保持验证。额外实验需要冻结各自场景协议和来源；本套件不将它们标作已经完成。
 
+### 已封存模型的配对诊断复测
+
+`run_frame_diagnostic_campaign.py` 为十种已封存的 1200 更新模型补齐二维漂移和强度缩放后的 PD 包络指标。此入口固定诊断源码 `9b576e7` 的 Python 包内容 SHA；调度器及其两个辅助脚本另行封存。模型、50 个场景、训练动力学快照和控制参数沿用原实验，各场景统计全部 8 个环境，每套 4001 个策略步。轨迹仍预先选择每个场景的前 2 个副本，不能替代全部环境的统计。
+
+评估 seed 为原有的 8701、9701，用于同模型、同场景的配对复测，不称为新的独立留出测试，也不增加训练 seed 数。复测只调用 `evaluate-suite`，不训练、续训或导出模型。输入必须是精确的 1200 更新检查点；检查点 SHA、完成回执、侧车元数据、计划、场景合同和动力学快照均写入独立 `manifest.json`。
+
+```bash
+python tools/run_frame_diagnostic_campaign.py prepare \
+  --study-root TRANSFER_STUDY --output-root NEW_DIAGNOSTIC_OUTPUT \
+  --source-root FROZEN_DIAGNOSTIC_SOURCE --source-identity SOURCE_ORIGIN.json \
+  --resource-lock PREDECESSOR_STUDY/.run.lock \
+  --transfer-receipt TRANSFER_CAMPAIGN/summary.json \
+  --transfer-campaign-sha256 TRANSFER_CAMPAIGN_SHA256 \
+  --curriculum-receipt CURRICULUM_CAMPAIGN/summary.json \
+  --curriculum-campaign-sha256 CURRICULUM_CAMPAIGN_SHA256
+python tools/run_frame_diagnostic_campaign.py validate \
+  --manifest NEW_DIAGNOSTIC_OUTPUT/manifest.json
+python tools/run_frame_diagnostic_campaign.py run \
+  --manifest NEW_DIAGNOSTIC_OUTPUT/manifest.json
+```
+
+准备与验证只使用标准库，不启动仿真。准备须在实际资源锁所在文件系统执行，以封存锁文件的 device/inode。运行等待原 transfer 评估及 Gated 课程对比都完成，核验完成回执属于指定 campaign，并在确认所有记录中的 PID/start 已终止后，依次获取既有共享资源锁和训练 study 锁。拿锁后及每套启动前重新核验输入与锁身份，等待过程中替换锁文件会拒绝运行。
+
+完成回执要求全部 50 组的双轴世界平面运动、缩放 PD 包络、完整采样计数和轨迹来源均通过验证；缺失字段、非有限数据、错误副本、检查点或 seed 不标完成。没有合格稳态或驻停区间时保持 unavailable/null。失败和超时产物保留，新尝试使用新目录；仍然存活的进程不能因观察超时被当作已结束。
+
 
 ## 遗忘、学习率与记忆分析
 
