@@ -38,6 +38,9 @@ class FramePolicyConfig:
 
     ``mean_init_scale`` multiplies only the initialized final action linear
     weights and bias; its default preserves standard PyTorch initialization.
+    ``position_reference`` defaults to the legacy oldest-frame index encoding.
+    Transformers can instead use current-frame-relative integer positions, with
+    the latest frame at zero and shared frame ages aligned across window lengths.
     """
 
     architecture: str = "mlp"
@@ -54,6 +57,7 @@ class FramePolicyConfig:
     encoder_hidden_dims: tuple[int, ...] = (128, 128)
     history_latent_dim: int = 3
     readout_type: str = "last"
+    position_reference: str = "oldest"
 
     def __post_init__(self) -> None:
         if self.architecture not in ("mlp", "frame_stack_mlp", "history_mlp", "transformer"):
@@ -88,6 +92,10 @@ class FramePolicyConfig:
             raise ValueError("readout_type must be last or query")
         if self.architecture != "transformer" and self.readout_type != "last":
             raise ValueError("query readout requires transformer")
+        if self.position_reference not in ("oldest", "current"):
+            raise ValueError("position_reference must be oldest or current")
+        if self.architecture != "transformer" and self.position_reference != "oldest":
+            raise ValueError("current position reference requires transformer")
         scale = self.mean_init_scale
         if type(scale) not in (int, float) or not math.isfinite(scale) or scale < 0:
             raise ValueError("mean_init_scale must be finite and nonnegative")
@@ -102,6 +110,9 @@ class FramePolicyConfig:
         result = asdict(self)
         for name in ("actor_hidden_dims", "encoder_hidden_dims"):
             result[name] = list(getattr(self, name))
+        if self.position_reference == "oldest":
+            # Preserve legacy canonical configs, checkpoint and anchor identities.
+            result.pop("position_reference")
         return result
 
     @classmethod
@@ -188,8 +199,11 @@ class FramePolicy(nn.Module):
                 * torch.arange(0, config.d_model, 2, dtype=torch.float32)
                 / config.d_model
             )
-            phase = torch.arange(config.history_length, dtype=torch.float32)[:, None] * frequencies
-            # Match TimeAwareActor's index encoding: all sin, then all cos.
+            if config.position_reference == "current":
+                phase = torch.arange(1 - config.history_length, 1)[:, None] * frequencies
+            else:
+                phase = torch.arange(config.history_length, dtype=torch.float32)[:, None] * frequencies
+            # Preserve the existing layout: all sin, then all cos.
             self.register_buffer("position_encoding", torch.cat((phase.sin(), phase.cos()), dim=-1)[None])
             positions = torch.arange(config.history_length)
             self.register_buffer("allowed", (positions[:, None] >= positions[None, :])[None])

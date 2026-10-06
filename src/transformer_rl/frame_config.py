@@ -131,7 +131,9 @@ class FrameTrainConfig:
         object.__setattr__(self, "environment", json.loads(json_bytes(self.environment)))
 
     def to_dict(self):
-        return json.loads(json_bytes({"model": asdict(self.model), "ppo": asdict(self.ppo),
+        model = asdict(self.model)
+        model["policy"] = self.model.policy.to_dict()
+        return json.loads(json_bytes({"model": model, "ppo": asdict(self.ppo),
                                       "control": self.control, "environment": self.environment}))
 
     @classmethod

@@ -3,6 +3,7 @@
 from dataclasses import replace
 import io
 import json
+import math
 
 import numpy as np
 import pytest
@@ -16,6 +17,17 @@ from transformer_rl.types import HistoryBatch
 
 
 ARCHITECTURES = ("mlp", "frame_stack_mlp", "history_mlp", "transformer")
+EXPORT_VARIANTS = [
+    ("mlp", "add", "last", "oldest"),
+    ("frame_stack_mlp", "add", "last", "oldest"),
+    ("history_mlp", "add", "last", "oldest"),
+    ("transformer", "add", "last", "oldest"),
+    ("transformer", "gated", "last", "oldest"),
+    ("transformer", "add", "last", "current"),
+    ("transformer", "gated", "last", "current"),
+    ("transformer", "add", "query", "current"),
+    ("transformer", "gated", "query", "current"),
+]
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -253,6 +265,10 @@ def test_wrong_input_rank_or_fixed_window_dimensions_are_rejected(architecture):
     {"history_latent_dim": 0}, {"history_latent_dim": True}, {"encoder_hidden_dims": []},
     {"readout_type": "unknown"}, {"readout_type": "query"},
     {"architecture": "gru"}, {"architecture": "lstm"}, {"architecture": "tcn"},
+    {"position_reference": "unknown"}, {"position_reference": None},
+    {"position_reference": 0}, {"position_reference": "current"},
+    {"architecture": "frame_stack_mlp", "history_length": 5, "position_reference": "current"},
+    {"architecture": "history_mlp", "history_length": 5, "position_reference": "current"},
 ])
 def test_invalid_configuration_is_rejected(fields):
     with pytest.raises((ValueError, TypeError)):
@@ -266,12 +282,10 @@ def test_unknown_saved_configuration_field_is_rejected():
         FramePolicyConfig.from_dict(data)
 
 
-@pytest.mark.parametrize("architecture,residual_type", [
-    ("mlp", "add"), ("frame_stack_mlp", "add"), ("history_mlp", "add"),
-    ("transformer", "add"), ("transformer", "gated"),
-])
-def test_torchscript_save_load_matches_single_and_multiple_environment_outputs(architecture, residual_type):
-    config = small_config(architecture, residual_type=residual_type)
+@pytest.mark.parametrize("architecture,residual_type,readout_type,position_reference", EXPORT_VARIANTS)
+def test_torchscript_save_load_matches_single_and_multiple_environment_outputs(architecture, residual_type, readout_type, position_reference):
+    config = small_config(architecture, residual_type=residual_type, readout_type=readout_type,
+                          position_reference=position_reference)
     policy = FramePolicy(config).eval()
     compiled = torch.jit.script(policy)
     archive = io.BytesIO()
@@ -283,14 +297,12 @@ def test_torchscript_save_load_matches_single_and_multiple_environment_outputs(a
         torch.testing.assert_close(restored(frames), policy(frames), atol=1e-6, rtol=1e-5)
 
 
-@pytest.mark.parametrize("architecture,residual_type", [
-    ("mlp", "add"), ("frame_stack_mlp", "add"), ("history_mlp", "add"),
-    ("transformer", "add"), ("transformer", "gated"),
-])
-def test_onnx_dynamic_batch_outputs_match_pytorch(architecture, residual_type, tmp_path):
+@pytest.mark.parametrize("architecture,residual_type,readout_type,position_reference", EXPORT_VARIANTS)
+def test_onnx_dynamic_batch_outputs_match_pytorch(architecture, residual_type, readout_type, position_reference, tmp_path):
     onnx = pytest.importorskip("onnx")
     ort = pytest.importorskip("onnxruntime")
-    config = small_config(architecture, residual_type=residual_type)
+    config = small_config(architecture, residual_type=residual_type, readout_type=readout_type,
+                          position_reference=position_reference)
     policy = FramePolicy(config).eval()
     output = tmp_path / "frame_policy.onnx"
     torch.onnx.export(
@@ -328,6 +340,152 @@ def test_current_query_readout_uses_the_complete_observed_history_without_cross_
     torch.testing.assert_close(policy(frames), actions, atol=0, rtol=0)
     scripted = torch.jit.script(policy)
     torch.testing.assert_close(scripted(frames), actions, atol=1e-6, rtol=1e-5)
+
+
+def test_legacy_policy_and_full_training_configuration_keep_canonical_identities():
+    from transformer_rl.frame_config import FrameTrainConfig, digest
+    from test_frame_workflow import configuration
+
+    policy = small_config("transformer", history_length=31)
+    assert "position_reference" not in policy.to_dict()
+    assert replace(policy, position_reference="oldest").to_dict() == policy.to_dict()
+    assert FramePolicyConfig.from_dict(policy.to_dict()).position_reference == "oldest"
+    # Captured from the pre-feature classes, including the asdict(model) path.
+    assert digest(policy.to_dict()) == "7a8769d87b4227d632d7ff7930f6f91312370639f69a125c324d436a9a58fa02"
+    config = configuration()
+    legacy = config.to_dict()
+    assert "position_reference" not in legacy["model"]["policy"]
+    assert digest(legacy) == "bf58b4032e6e448ae95be515772550cf8fe92cdf31716074ba53b6d0f1e76fae"
+    assert FrameTrainConfig.from_dict(json.loads(json.dumps(legacy))).to_dict() == legacy
+    current = replace(config, model=replace(config.model, policy=replace(config.model.policy, position_reference="current")))
+    expected = json.loads(json.dumps(legacy))
+    expected["model"]["policy"]["position_reference"] = "current"
+    assert current.to_dict() == expected
+    assert FrameTrainConfig.from_dict(current.to_dict()) == current
+    assert digest(current.to_dict()) != digest(legacy)
+
+
+@pytest.mark.parametrize("length", (1, 11, 31, 61))
+def test_oldest_position_buffers_preserve_the_original_float32_formula(length):
+    config = small_config("transformer", history_length=length)
+    policy = FramePolicy(config)
+    frequencies = torch.exp(-math.log(10000.0) * torch.arange(0, config.d_model, 2, dtype=torch.float32) / config.d_model)
+    phase = torch.arange(length, dtype=torch.float32)[:, None] * frequencies
+    expected = torch.cat((phase.sin(), phase.cos()), dim=-1)[None]
+    assert torch.equal(policy.position_encoding, expected)
+    positions = torch.arange(length)
+    assert torch.equal(policy.allowed, (positions[:, None] >= positions[None, :])[None])
+    clone = FramePolicy(replace(config, position_reference="oldest"))
+    clone.load_state_dict(policy.state_dict(), strict=True)
+    frames = torch.randn(2, length, config.frame_dim)
+    torch.testing.assert_close(clone(frames), policy(frames), atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("residual_type,readout_type", (("add", "last"), ("gated", "last"), ("add", "query"), ("gated", "query")))
+def test_current_shared_frame_ages_match_across_eleven_thirty_one_and_sixty_one_frames(residual_type, readout_type):
+    shared = torch.randn(2, 11, 35)
+    policies = [FramePolicy(small_config("transformer", history_length=length, position_reference="current",
+                    residual_type=residual_type, readout_type=readout_type)) for length in (11, 31, 61)]
+    reference = dict(policies[0].named_parameters())
+    for policy in policies[1:]:
+        with torch.no_grad():
+            for name, parameter in policy.named_parameters():
+                parameter.copy_(reference[name])
+    expected_tokens = policies[0].frame_projection(shared) + policies[0].position_encoding
+    for policy in policies:
+        assert torch.equal(policy.position_encoding[:, -11:], policies[0].position_encoding)
+        torch.testing.assert_close(policy.frame_projection(shared) + policy.position_encoding[:, -11:],
+                                   expected_tokens, atol=0, rtol=0)
+        assert torch.equal(policy.position_encoding[0, -1, :8], torch.zeros(8))
+        assert torch.equal(policy.position_encoding[0, -1, 8:], torch.ones(8))
+        frames = torch.randn(2, policy.history_length, 35, requires_grad=True)
+        actions = policy(frames)
+        assert actions.shape == (2, 6) and torch.isfinite(actions).all()
+        actions.square().sum().backward()
+        assert frames.grad is not None and torch.isfinite(frames.grad).all()
+        assert frames.grad[:, :-1].abs().sum() > 0
+        torch.testing.assert_close(policy.forward_flat(frames.flatten(1)), actions, atol=0, rtol=0)
+        with pytest.raises(ValueError, match="dimensions"):
+            policy(frames[:, :-1])
+        assert policy.config.to_dict()["position_reference"] == "current"
+    # Compare encoded inputs, not encoder outputs: longer windows expose more
+    # causal context even when the position encoding for common ages is equal.
+    ages = torch.arange(-10, 1)
+    frequencies = torch.exp(-math.log(10000.) * torch.arange(0, 16, 2, dtype=torch.float32) / 16)
+    phase = ages[:, None] * frequencies
+    assert torch.equal(policies[0].position_encoding, torch.cat((phase.sin(), phase.cos()), -1)[None])
+
+
+@pytest.mark.parametrize("position_reference", ("oldest", "current"))
+def test_checkpoint_sidecars_and_anchor_pools_roundtrip_without_relabeling_buffers(tmp_path, position_reference):
+    from transformer_rl.frame_checkpoint import load_frame_checkpoint, save_frame_checkpoint
+    from transformer_rl.frame_training import FrameActorCritic
+    from transformer_rl.ppo import PPOTrainer
+    from transformer_rl.retention import AnchorRegularizer, save_anchors
+    from test_frame_workflow import configuration
+
+    config = configuration(position_reference=position_reference)
+    model = FrameActorCritic(config.model)
+    checkpoint = tmp_path / "checkpoint.pt"
+    save_frame_checkpoint(checkpoint, model, PPOTrainer(model, config.ppo), config, 0, {})
+    sidecar = json.loads((tmp_path / "checkpoint.pt.json").read_text())
+    payload = torch.load(checkpoint, weights_only=True)
+    assert payload["config"] == sidecar["config"] == config.to_dict()
+    if position_reference == "oldest":
+        assert "position_reference" not in payload["config"]["model"]["policy"]
+    else:
+        assert payload["config"]["model"]["policy"]["position_reference"] == "current"
+    restored, _, loaded, _, _, _ = load_frame_checkpoint(checkpoint)
+    assert loaded == config
+    frames = torch.randn(9, config.model.history_length, config.model.frame_dim)
+    torch.testing.assert_close(restored.actor.policy(frames), model.actor.policy(frames), atol=0, rtol=0)
+    mean = model.actor.policy(frames).detach()
+    std = model.actor.log_std.exp().expand_as(mean).detach()
+    anchor_path = tmp_path / "anchors.pt"
+    save_anchors(anchor_path, config, frames, mean, std, "0" * 64)
+    anchors = torch.load(anchor_path, weights_only=True)
+    assert anchors["policy_config"] == config.model.policy.to_dict()
+    regularizer = AnchorRegularizer(restored.actor, loaded, [anchor_path], .3)
+    torch.testing.assert_close(regularizer(), torch.tensor(0.), atol=1e-7, rtol=0)
+    other = "current" if position_reference == "oldest" else "oldest"
+    different = replace(config, model=replace(config.model, policy=replace(config.model.policy, position_reference=other)))
+    with pytest.raises(ValueError, match="contract mismatch"):
+        AnchorRegularizer(FrameActorCritic(different.model).actor, different, [anchor_path], .3)
+    if other == "oldest":
+        payload["config"]["model"]["policy"].pop("position_reference")
+    else:
+        payload["config"]["model"]["policy"]["position_reference"] = other
+    altered = tmp_path / "relabeled.pt"
+    torch.save(payload, altered)
+    with pytest.raises(ValueError, match="fixed architecture buffer differs"):
+        load_frame_checkpoint(altered)
+
+
+def test_current_checkpoint_export_bundle_and_runtime_keep_the_position_contract(tmp_path):
+    pytest.importorskip("onnx")
+    pytest.importorskip("onnxruntime")
+    from transformer_rl.frame_checkpoint import save_frame_checkpoint
+    from transformer_rl.frame_export import export_frame_policy
+    from transformer_rl.frame_runtime import FrameRuntime
+    from transformer_rl.frame_training import FrameActorCritic
+    from transformer_rl.ppo import PPOTrainer
+    from test_frame_workflow import configuration
+
+    config = configuration(position_reference="current", residual_type="gated", readout_type="query", history_length=11)
+    model = FrameActorCritic(config.model)
+    checkpoint = tmp_path / "current.pt"
+    save_frame_checkpoint(checkpoint, model, PPOTrainer(model, config.ppo), config, 0, {})
+    bundle = tmp_path / "bundle"
+    exported = export_frame_policy(checkpoint, bundle, onnx=True)
+    assert exported["model"]["policy"]["position_reference"] == "current"
+    assert exported["validation"]["torchscript_max_abs_error"] < 1e-6
+    assert exported["validation"]["onnx_max_abs_error"] < 1e-5
+    for backend in ("torchscript", "onnx"):
+        runtime = FrameRuntime(bundle, observation_schema="tensor_fixture", policy_dt_s=.01, backend=backend)
+        frame = np.linspace(-.5, .5, 5, dtype=np.float32)
+        frames = torch.from_numpy(frame).reshape(1, 1, 5).expand(1, 11, 5)
+        expected = model.actor.policy(frames).detach().numpy()[0]
+        np.testing.assert_allclose(runtime.step(frame, 0.)["mean"], expected, atol=1e-5, rtol=1e-4)
 
 
 def test_original_time_aware_30d_interface_and_preprocessing_remain_independent():
