@@ -55,4 +55,4 @@ python -B -m transformer_rl.retention_campaign run \
   --protocol /absolute/path/retention_campaign_protocol.json
 ```
 
-上面的种子只是调用示例，必须与实际训练、资格评估、采集种子独立；路径必须替换成真实输入，协议文件位于新campaign目录外。使用包含PyTorch、NumPy、TensorBoard及真实环境依赖的运行环境。测试只有小型合成CPU环境、真实PPO与OS锁接口，不授予真实教师资格，也未运行真实K/λ分支。
+上面的种子只是调用示例，必须与实际训练、资格评估、采集种子独立；路径必须替换成真实输入，协议文件位于新campaign目录外。使用包含当前项目、PyTorch、NumPy、TensorBoard及真实环境依赖的运行环境。直接使用源码checkout时，在仓库根目录设置 `export PYTHONPATH="$PWD/src"` 再运行上述命令。测试只有小型合成CPU环境、真实PPO与OS锁接口，不授予真实教师资格，也未运行真实K/λ分支。
