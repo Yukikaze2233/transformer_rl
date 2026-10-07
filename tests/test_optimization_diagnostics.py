@@ -25,6 +25,13 @@ DIAGNOSTIC_FIELDS = FIRST_FIELDS | {
     "initial_mean_abs", "initial_std_mean", "initial_std_min", "initial_std_max",
     "final_kl", "final_mean_kl", "final_std_kl", "final_mean_change_rms", "final_std_mean",
 }
+STEP_DIAGNOSTIC_FIELDS = {"grad_clip_coef", "grad_clip_step_fraction"}
+for group in ("", "actor_", "critic_", "shared_", "other_"):
+    STEP_DIAGNOSTIC_FIELDS.update(f"{group}{field}" for field in (
+        "param_update_l2", "param_update_relative_l2", "param_update_relative_step_count", "param_count"))
+    if group:
+        STEP_DIAGNOSTIC_FIELDS.add(f"{group}grad_norm")
+DIAGNOSTIC_FIELDS |= STEP_DIAGNOSTIC_FIELDS
 
 
 def assert_state_equal(actual, expected):
@@ -236,7 +243,10 @@ def test_diagnostics_preserve_exact_next_model_adam_rng_and_batch(actor, residua
         assert_state_equal({k: v for k, v in vars(batch).items() if k != "history"},
                            {k: v for k, v in vars(batch_before).items() if k != "history"})
         assert observed_metrics["first_step_kl"] > 0
-        assert all(math.isfinite(value) for value in observed_metrics.values())
+        assert all(math.isfinite(value) for value in observed_metrics.values() if value is not None)
+        assert observed_metrics["shared_param_count"] == observed_metrics["other_param_count"] == 0
+        assert observed_metrics["shared_param_update_relative_l2"] is None
+        assert observed_metrics["other_param_update_relative_l2"] is None
 
 
 def test_default_and_explicit_false_have_no_extra_actor_passes():

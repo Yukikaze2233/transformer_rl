@@ -16,6 +16,93 @@ if TYPE_CHECKING:
     from .model import ActorCritic
 
 
+class _OptimizerStepDiagnostics:
+    """Observe applied PPO steps without touching gradients, parameters or RNG.
+
+    Actor/critic groups are exclusive parameter sets; their intersection is
+    shared and remaining optimized policy parameters are other. Gradients are
+    from the complete weighted loss, not isolated actor/value loss components.
+    Norms and changes are step means, never weighted by minibatch sample count.
+    Relative changes omit steps with zero pre-step group parameter norm; the
+    corresponding count makes that denominator explicit. Empty groups have zero
+    absolute norms/change after a step, and undefined relative change.
+    """
+
+    def __init__(self, model, policy_parameters, optimizer):
+        optimized_ids = {id(p) for group in optimizer.param_groups for p in group["params"]}
+        # Intersect with policy_parameters: detached estimator parameters do not
+        # belong to PPO, even when registered inside model.actor.
+        parameters = list({id(p): p for p in policy_parameters
+                           if p.requires_grad and id(p) in optimized_ids}.values())
+        actor_ids = {id(p) for p in model.actor.parameters()}
+        critic_ids = {id(p) for p in model.critic.parameters()}
+        self.groups = {name: [] for name in ("", "actor", "critic", "shared", "other")}
+        self.groups[""] = parameters
+        for p in parameters:
+            in_actor, in_critic = id(p) in actor_ids, id(p) in critic_ids
+            name = "shared" if in_actor and in_critic else "actor" if in_actor else "critic" if in_critic else "other"
+            self.groups[name].append(p)
+        self.totals = {}
+        self.relative_counts = {name: 0 for name in self.groups}
+        self.steps = 0
+
+    @staticmethod
+    def _field(group, name):
+        return f"{group}_{name}" if group else name
+
+    @staticmethod
+    @torch.no_grad()
+    def _norm(tensors):
+        # FP64 accumulation avoids loss of small actual parameter changes and
+        # overflow in diagnostics. The optimizer's original clip arithmetic is
+        # preserved separately. Parameters may span dtype/device groups.
+        norms = [torch.linalg.vector_norm(t.detach().double()) for t in tensors]
+        if not norms:
+            return 0.0
+        return torch.linalg.vector_norm(torch.stack([n.to(norms[0].device) for n in norms])).item()
+
+    @torch.no_grad()
+    def gradient_norms(self):
+        return {self._field(name, "grad_norm"): self._norm(p.grad for p in parameters if p.grad is not None)
+                for name, parameters in self.groups.items() if name}
+
+    @torch.no_grad()
+    def snapshot(self):
+        return {id(p): p.detach().clone() for p in self.groups[""]}
+
+    @torch.no_grad()
+    def record_step(self, before, gradient_norms, grad_norm, max_grad_norm):
+        # Match clip_grad_norm_ exactly, including 1e-6, dtype and the clamp.
+        # Comparing the actual coefficient catches clipping at the bound too.
+        coefficient = torch.clamp(max_grad_norm / (grad_norm + 1e-6), max=1.0).item()
+        values = {**gradient_norms, "grad_clip_coef": coefficient,
+                  "grad_clip_step_fraction": float(coefficient < 1.0)}
+        for name, parameters in self.groups.items():
+            old_norm = self._norm(before[id(p)] for p in parameters)
+            delta_norm = self._norm(p.detach().double() - before[id(p)].double() for p in parameters)
+            values[self._field(name, "param_update_l2")] = delta_norm
+            if old_norm > 0.0:
+                values[self._field(name, "param_update_relative_l2")] = delta_norm / old_norm
+                self.relative_counts[name] += 1
+        for key, value in values.items():
+            self.totals[key] = self.totals.get(key, 0.0) + value
+        self.steps += 1
+
+    def metrics(self):
+        result = {name: self.totals.get(name, 0.0) / self.steps if self.steps else None
+                  for name in ("grad_clip_coef", "grad_clip_step_fraction")}
+        for name, parameters in self.groups.items():
+            for metric in ("grad_norm", "param_update_l2") if name else ("param_update_l2",):
+                field = self._field(name, metric)
+                result[field] = self.totals.get(field, 0.0) / self.steps if self.steps else None
+            relative = self._field(name, "param_update_relative_l2")
+            count = self.relative_counts[name]
+            result[relative] = self.totals.get(relative, 0.0) / count if count else None
+            result[self._field(name, "param_update_relative_step_count")] = count
+            result[self._field(name, "param_count")] = sum(p.numel() for p in parameters)
+        return result
+
+
 class PPOTrainer:
     """Clipped PPO with an externally checkpointable Adam optimizer.
 
@@ -31,6 +118,23 @@ class PPOTrainer:
     after the first optimizer step and after the update (including KL early stops).
     KL terms sum over actions then average endpoints; moment means and change RMS
     average all endpoint/action entries. Normalized change uses the old std.
+    Optimization diagnostics report exclusive actor/critic, shared and other
+    optimized policy parameter groups, using the complete weighted loss's
+    pre-clipping gradients. ``grad_clip_coef`` is the mean actual global clip
+    multiplier and ``grad_clip_step_fraction`` counts steps whose multiplier is
+    below one (including the clip epsilon at the bound). ``param_update_l2``
+    and group variants measure actual optimizer parameter deltas, step by step;
+    relative L2 divides by the immediately preceding parameter L2, with a
+    separate valid-step count for zero-norm exclusions. All are step means,
+    whereas loss metrics are sample weighted. Zero applied steps yield null
+    optimization diagnostics; absent groups have zero absolute norms after
+    an applied step and null relative change. Counts describe the parameter
+    partition and valid relative denominators. Group norms accumulate in FP64;
+    global ``grad_norm`` retains the original clipping arithmetic's precision.
+    A replacement optimizer with fewer parameters narrows the diagnostic groups
+    while global clipping retains its original policy-parameter scope.
+    Diagnostics disabled creates no
+    optimization observer, parameter snapshots or extra norms.
     """
 
     def __init__(self, model: ActorCritic, config: PPOConfig):
@@ -198,6 +302,7 @@ class PPOTrainer:
         early_stopped = False
         stop_kl = 0.0
         parameters = [parameter for parameter in self.policy_parameters if parameter.requires_grad]
+        step_diagnostics = _OptimizerStepDiagnostics(self.model, parameters, self.optimizer) if diagnostics else None
         for _ in range(self.config.epochs):
             order = torch.randperm(len(batch), device=batch.raw_action.device)
             for indices in torch.tensor_split(order, chunks):
@@ -270,6 +375,8 @@ class PPOTrainer:
                     if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
                         self.optimizer.zero_grad(set_to_none=True)
                         raise FloatingPointError("nonfinite gradient; optimizer step aborted")
+                if step_diagnostics is not None:
+                    gradient_norms = step_diagnostics.gradient_norms()
                 try:
                     grad_norm = nn.utils.clip_grad_norm_(
                         parameters, self.config.max_grad_norm, error_if_nonfinite=True,
@@ -277,7 +384,13 @@ class PPOTrainer:
                 except RuntimeError:
                     self.optimizer.zero_grad(set_to_none=True)
                     raise
+                if step_diagnostics is not None:
+                    parameters_before_step = step_diagnostics.snapshot()
                 self.optimizer.step()
+                if step_diagnostics is not None:
+                    step_diagnostics.record_step(parameters_before_step, gradient_norms,
+                                                 grad_norm, self.config.max_grad_norm)
+                    del parameters_before_step
                 if diagnostics and optimizer_steps == 0:
                     first_step = self._distribution_diagnostics(batch, chunks)
                     diagnostic_metrics.update({f"first_step_{name}": first_step[name]
@@ -303,6 +416,7 @@ class PPOTrainer:
             final = self._distribution_diagnostics(batch, chunks)
             diagnostic_metrics.update({f"final_{name}": final[name]
                                        for name in ("kl", "mean_kl", "std_kl", "mean_change_rms", "std_mean")})
+            diagnostic_metrics.update(step_diagnostics.metrics())
         return {
             **{name: total / sample_count if sample_count else 0.0 for name, total in totals.items()},
             "auxiliary_coef": self.config.auxiliary_coef,
