@@ -20,7 +20,7 @@ v1 池本身没有案例、采集时间或 episode 年龄字段，因此必须�
 
 全部资格与池齐备后，锚点和索引先在同一文件系统中 staging、fsync，再独占硬链接至新目录；manifest 最后发布。多文件目录不保证崩溃原子性，消费者必须先通过 `validate_preparation`，不能根据残留 `.pt` 文件启动训练。已有目录、文件及 dangling symlink 均不会被覆盖；validator 重新核验输入、源代码、分支、索引、tensor SHA、输出清单与 manifest 原始字节。
 
-ready 分支绑定同一训练种子的已审计完整 CP400 checkpoint 路径、SHA、消耗400次更新及其 transition 时钟。它们仍只是描述符：Adam/RNG/clock 恢复执行、独立 retention RNG、phase-B executor、其他架构/H 资格与采集 provider 尚待完成，不能把锚点准备成功称为公平续训已经实现。
+ready 分支绑定同一训练种子的已审计完整 CP400 checkpoint 路径、SHA、消耗400次更新及其 transition 时钟。它们仍只是描述符，保留原格式中的 `resume_executor=not_implemented` 等状态。独立单分支组件 `FrameContinuation` 与私有 retention RNG 已在 [完整学习状态恢复](frame_continuation.md) 中提供，但尚未与本工具的严格资格、manifest 和 phase-B campaign executor 接通；其他架构/H 的资格与采集 provider 也待完成。不能把锚点准备或合成接口测试成功称为公平续训已经执行。
 
 ## 使用
 
