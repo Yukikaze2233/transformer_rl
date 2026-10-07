@@ -1,6 +1,6 @@
 # 记忆分支的完整学习状态恢复
 
-`FrameContinuation` 是独立的单分支组件，提供 `open → step → save`。它复用 packed policy、rollout collector 和 PPO，不修改旧 `train_frame_policy`、旧锚点损失或已冻结的课程与学习率队列。它不判定教师资格、不收集锚点、不选择 K/λ，也不自动启动模拟器实验；完整 campaign executor 仍需接入原始资格和准备 manifest 的重新核验。
+`FrameContinuation` 是独立的单分支组件，提供 `open → step → save`。它复用 packed policy、rollout collector 和 PPO，不修改旧 `train_frame_policy`、旧锚点损失或已冻结的课程与学习率队列。它不判定教师资格、不收集锚点、不选择 K/λ，也不自动启动模拟器实验。[记忆分支执行器](retention_campaign.md) 将其接入原始资格与准备 manifest 的重新核验、资源锁和完整分支预算；真实分支仍需满足全部输入资格。
 
 ## 分支与恢复
 
