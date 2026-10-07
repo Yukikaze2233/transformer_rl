@@ -100,4 +100,4 @@ SIGTERM 或时间预算可能使原 learner 把非空短 rollout 交给 PPO 并�
 
 每个完成的单元无论控制表现如何，都执行全部 50 个固定场景 × 四个开发评估 seed `701/1701/2701/3701`。每场景 8 环境、4001 步，reset 后去掉前 200 步，稳态片段至少 200 个样本；报告与 trace 均绑定该单元 CP1200 的 SHA，评估 request 与实际 worker 记录另行封存 SHA 并审核。评估失败保留原 attempt，不能用有利重试替代它。
 
-这四个 seed 都是开发数据。执行器目前不做 export、CPU latency 执行、学习率选择、确认评估或硬件资格认定；`development_complete` 也不等于找到了最优架构。后续中立 selector 需补齐每单元的独立 latency 证据，再封存每架构的开发学习率选择；未来 `11701/12701` 确认只提供 held-out noise stream，不代表新初态或新扰动域，也不能据确认结果重新选择。
+这四个 seed 都是开发数据。学习执行器不承担 export、CPU latency、学习率选择或确认评估；`development_complete` 也不等于找到了最优架构。独立 [CPU producer](FRAME_LEARNING_LATENCY.md) 补齐每单元的实际 latency 证据后，[中立 selector](FRAME_LEARNING_RATE_SELECTION.md) 才能封存各架构的开发学习率选择。[确认执行器](FRAME_LEARNING_CONFIRMATION.md) 随后只执行原选模型的 `11701/12701` 留出噪声流，不代表新初态或新扰动域，也不能据确认结果重新选择。这些模块具有执行能力，不代表真实研究已完成；硬件资格仍需独立证据。

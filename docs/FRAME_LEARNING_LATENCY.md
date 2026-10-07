@@ -59,4 +59,4 @@ python tools/run_learning_latency.py run --manifest /absolute/new-latency/manife
 
 存在原 live 或 unresolved handle 时返回 `waiting`，不杀死或重启它。已经失败或未封存的 job 保留同一个 attempt 并成为 `incomplete`；不复用半截输出，不新增有利重试。完成的 job 再次运行仅做只读复核。任何缺失或失败都保留在完整 90 格索引中，因此索引仍是 `not_ready`。
 
-`index.json` 是 selector 的独立输入。selector 必须重新审核训练、开发与这些原始 CPU 文件，才能封存每架构的学习率选择；确认评估与最终架构/硬件认定属于后续步骤。本机小 tensor 检查点测试和 prepare smoke 是接口验证，不代表真实 90 个候选已经导出或测量。
+`index.json` 是 selector 的独立输入。selector 必须重新审核训练、开发与这些原始 CPU 文件，才能封存每架构的学习率选择；[确认执行器](FRAME_LEARNING_CONFIRMATION.md) 只消费原封存选择，最终架构/硬件认定仍需后续证据。本机小 tensor 检查点测试和 prepare smoke 是接口验证，不代表真实 90 个候选已经导出或测量。

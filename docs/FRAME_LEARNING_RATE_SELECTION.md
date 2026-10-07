@@ -66,7 +66,7 @@ python tools/select_learning_rate.py audit-confirmation --manifest /absolute/con
 
 `seal-choice` 在现有selection锁下重新审计，原子独占创建assessment与choice，不覆盖旧seal。choice同时绑定assessment文件SHA、canonical SHA、protocol SHA及原campaign SHA。准备或审核确认时重新核验开发/runtime/latency证据与原assessment完全相同；任何变化都会拒绝，而不是更新原choice。
 
-`prepare-confirmation` 只写 `status=prepared_not_queued`、`execution_implemented=false` 的冻结计划，包含准确的evaluate-suite命令、配置和checkpoint SHA。它没有启动训练或模拟器，没有排队。真实确认需要后续独立evaluate-only控制器按照原resource锁和依赖执行；当前文件不实现该调度。
+`prepare-confirmation` 只写 `status=prepared_not_queued`、`execution_implemented=false` 的冻结计划，包含准确的evaluate-suite命令、配置和checkpoint SHA。它没有启动训练或模拟器，没有排队。[独立确认执行器](FRAME_LEARNING_CONFIRMATION.md) 按照原resource锁和依赖执行这些请求；当前selector文件不实现该调度，原准备计划的字节保持不变。
 
 `audit-confirmation` 验证原请求列表完全一致，每项只有原 `attempt_0000`，实际worker正常结束、命令相同，50case/control/trace覆盖完整。缺证据为not_ready，完整数值不通过为not_confirmed。它返回原choices及确认结果，不生成候选排序或更新LR。
 
@@ -138,6 +138,6 @@ choice包含 `format=transformer_rl.learning_rate_choice/v1, selection_sha256, c
 
 confirmation manifest包含 `choice:{path ABS,sha256}` 和原choice canonical SHA、selection manifest文件SHA、helpers、固定confirmation protocol、原3trainseed×2noise seed的requests。每request含 `cell, training_seed, evaluation_seed, checkpoint:{path ABS,sha256}, configs:{case:{path ABS,sha256}}, directory:相对confirmation root, command, use:"heldout_noise_stream_only"`。期望套件数为选择到LR的架构数×6；十种均有LR时是60项，而不是对所有90个checkpoint重新择LR。
 
-未来实际evaluate-only控制器必须把每项结果写到原请求directory的 `receipt.json` 和 `worker.process.json`。receipt identity严格含原 `manifest_sha256, cell, evaluation_seed, checkpoint_sha256, checkpoint_update:1200, use:"heldout_noise_stream_only", choice_sha256, confirmation_sha256`；status completed、directory和50case/control/trace artifacts相对confirmation root。不能用开发套件改seed标签代替确认。任何第二attempt、不同训练seed、不同LR或CP、不同命令及扩大scope都会被拒绝。
+[独立确认执行器](FRAME_LEARNING_CONFIRMATION.md) 必须把每项结果写到原请求directory的 `receipt.json` 和 `worker.process.json`。receipt identity严格含原 `manifest_sha256, cell, evaluation_seed, checkpoint_sha256, checkpoint_update:1200, use:"heldout_noise_stream_only", choice_sha256, confirmation_sha256`；status completed、directory和50case/control/trace artifacts相对confirmation root。不能用开发套件改seed标签代替确认。任何第二attempt、不同训练seed、不同LR或CP、不同命令及扩大scope都会被拒绝。
 
-确认的50个case中38个固定确定性case仍然重复；只有12个noise/combined case的噪声流随seed变化。因此确认范围只叫 **heldout_noise_stream_only**，不叫新的初态、域分布或任务泛化，也不增加独立训练seed数量。这里尚无真实确认调度器或确认结果，不把准备计划写成执行完成。
+确认的50个case中38个固定确定性case仍然重复；只有12个noise/combined case的噪声流随seed变化。因此确认范围只叫 **heldout_noise_stream_only**，不叫新的初态、域分布或任务泛化，也不增加独立训练seed数量。独立调度模块已实现，但这里尚无真实确认结果，不把准备计划或CPU协议测试写成执行完成。
