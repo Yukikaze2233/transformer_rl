@@ -120,6 +120,15 @@ def test_collector_keeps_raw_likelihood_and_correct_timeout_state():
     collector = FrameCollector(env, model, config.ppo, config.control["action_bounds"])
     collector.reset()
     batch = collector.collect(7)
+    assert collector.last_metrics["action_sample_count"] == 21
+    assert collector.last_metrics["action_statistics_elapsed_s"] >= 0
+    assert collector.last_metrics["elapsed_s"] >= collector.last_metrics["action_statistics_elapsed_s"]
+    # Terminal endpoints and post-reset rows remain in the collection denominator.
+    assert collector.last_metrics["done_count"] > 0
+    for channel in range(config.model.action_dim):
+        outside = (batch.raw_action[:, channel].abs() > collector.bounds[channel]).sum().item()
+        assert collector.last_metrics[f"raw_action_outside_count_{channel}"] == outside
+        assert collector.last_metrics[f"raw_action_clip_fraction_{channel}"] == outside / 21
     assert (batch.raw_action.abs() > torch.tensor(config.control["action_bounds"])).any()
     torch.testing.assert_close(batch.issued_action, batch.raw_action.clamp(-collector.bounds, collector.bounds))
     torch.testing.assert_close(model.actor.evaluate(batch.history, batch.raw_action).log_prob, batch.old_log_prob)
@@ -127,6 +136,29 @@ def test_collector_keeps_raw_likelihood_and_correct_timeout_state():
     frames = batch.history.frames.reshape(7, 3, 4, 5)
     assert torch.equal(frames[3, 0], frames[3, 0, -1:].expand_as(frames[3, 0]))
     assert not torch.equal(frames[3, 2, :-1], frames[3, 2, -1:].expand_as(frames[3, 2, :-1]))
+
+
+def test_collection_action_statistics_cover_partial_returned_rows_without_stale_metrics():
+    config = configuration()
+    env = make_env(config.model, config.environment, "cpu")
+    collector = FrameCollector(env, FrameActorCritic(config.model), config.ppo,
+                               config.control["action_bounds"])
+    collector.reset()
+    calls = 0
+
+    def stop():
+        nonlocal calls
+        calls += 1
+        return calls > 2
+
+    batch = collector.collect(7, stop)
+    assert len(batch) == 6
+    assert collector.last_metrics["early_stopped"]
+    assert collector.last_metrics["action_sample_count"] == 6
+    assert collector.collect(0) is None
+    assert collector.last_metrics["transitions"] == 0
+    assert "action_sample_count" not in collector.last_metrics
+    env.close()
 
 
 def test_checkpoint_rng_optimizer_and_contract_tampering(tmp_path):
@@ -511,6 +543,7 @@ def test_matching_initial_guard_preserves_raw_rollout_metrics_model_adam_and_rng
         record = deepcopy(record)
         del record["elapsed_s"]
         del record["collection"]["elapsed_s"]
+        del record["collection"]["action_statistics_elapsed_s"]
         comparable_metrics.append(record)
     for index in (1, 2):
         _assert_same_state(batches[0], batches[index])

@@ -157,3 +157,15 @@ class FrameCollector(RolloutCollector):
 
     def _issued_action(self, raw_action):
         return raw_action.clamp(-self.bounds, self.bounds)
+
+    def collect(self, steps, should_stop=None):
+        batch = super().collect(steps, should_stop)
+        if batch is not None:
+            import time
+            from .action_statistics import action_statistics
+            started = time.perf_counter()
+            self.last_metrics.update(action_statistics(
+                batch.raw_action, batch.issued_action, batch.old_mean, self.bounds))
+            self.last_metrics["action_statistics_elapsed_s"] = time.perf_counter() - started
+            self.last_metrics["elapsed_s"] += self.last_metrics["action_statistics_elapsed_s"]
+        return batch
