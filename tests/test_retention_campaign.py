@@ -207,6 +207,15 @@ def test_noncanonical_device_is_rejected_before_reading_or_creating_inputs(tmp_p
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("arguments", [["--help"], ["freeze", "--help"], ["run", "--help"]])
+def test_cli_help_exits_successfully_without_a_failure_traceback(arguments, capsys):
+    with pytest.raises(SystemExit) as caught:
+        campaign.main(arguments)
+    assert caught.value.code == 0
+    output = capsys.readouterr()
+    assert "usage:" in output.out and output.err == ""
+
+
 def test_evaluation_command_preserves_full_declared_case_and_replica_coverage(tmp_path):
     protocol = small_protocol(tmp_path)
     protocol["evaluation"].update(steps=4001, seeds=[8701, 9701], trace_replicas=8,

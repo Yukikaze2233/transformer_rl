@@ -863,8 +863,8 @@ def main(argv=None):
     freezing.add_argument("--device", default="cpu")
     running = commands.add_parser("run")
     running.add_argument("--protocol", type=Path, required=True)
+    arguments = parser.parse_args(argv)
     try:
-        arguments = parser.parse_args(argv)
         if arguments.operation == "freeze":
             result = freeze(arguments.preparation_protocol, arguments.preparation_directory,
                 output_root=arguments.output_root, retention_seed=arguments.retention_seed,
