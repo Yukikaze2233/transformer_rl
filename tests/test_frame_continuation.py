@@ -80,6 +80,23 @@ def assert_same(left, right):
         assert left == right
 
 
+def test_startup_error_survives_environment_shutdown_error(tmp_path):
+    config, path, sha = parent(tmp_path)
+    def broken_factory(**kwargs):
+        env = make_env(**kwargs)
+        def reset(*_, **__):
+            raise ValueError("original reset failure")
+        def close():
+            raise RuntimeError("secondary shutdown failure")
+        env.reset, env.close = reset, close
+        return env
+    with pytest.raises(ValueError, match="original reset failure") as caught:
+        FrameContinuation.open(config, broken_factory, "packed_env:make_env", path,
+            checkpoint_sha256=sha, parent_update=2, cumulative_transitions=24,
+            consumed_updates=2, rollout_steps=4, training_seed=71, retention_seed=901)
+    assert any("secondary shutdown failure" in note for note in caught.value.__notes__)
+
+
 @pytest.mark.parametrize("architecture,readout", [
     ("mlp", "last"), ("history_mlp", "last"),
     ("transformer", "last"), ("transformer", "query"),

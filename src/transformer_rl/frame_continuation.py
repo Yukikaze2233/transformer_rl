@@ -152,8 +152,11 @@ class FrameContinuation:
             instance.collector.reset(seed=training_seed)
             restore_rng(rng)
             return instance
-        except BaseException:
-            instance.close()
+        except BaseException as error:
+            try:
+                instance.close()
+            except BaseException as cleanup:
+                error.add_note(f"continuation startup cleanup failed: {type(cleanup).__name__}: {cleanup}")
             raise
 
     @property
