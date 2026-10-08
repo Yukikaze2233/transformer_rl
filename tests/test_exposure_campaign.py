@@ -361,6 +361,116 @@ def test_multiple_checkpoints_cannot_use_future_stages_reserved_storage(worker_s
             checkpoint_paths=(checkpoint, extra), checkpoint_limit=128)
 
 
+def test_continuous_checkpoint_reserve_counts_one_training_namespace_and_distinct_evaluators():
+    value = {"jobs": [{"id": "job_a", "stages": [{"index": 0, "updates": 12,
+        "expected_cumulative_updates": 12, "checkpoint_updates": [4, 8, 12]}]}],
+        "evaluation_cells": [{"id": f"cell_{update}_{case}", "job_id": "job_a", "stage_index": 0,
+            "checkpoint_update": update, "role": "validation", "seed": 701,
+            "expected_policy_samples": samples}
+            for update in (4, 8, 12) for case, samples in (("a", 10), ("b", 20))]}
+    caps = {"checkpoint_bytes": 100, "trace_bytes_per_policy_sample": 2,
+        "metric_bytes_per_update": 7, "inflight_bytes": 11, "runtime_cache_bytes": 13,
+        "free_margin_bytes": 17}
+    contract = {"caps": caps}
+    # Three retained checkpoints, one continuous training process, three
+    # independent checkpoint evaluation workers and one active headroom.
+    initial = campaign.remaining_storage_bytes(value, contract)
+    assert initial == 3 * 100 + 12 * 7 + 90 * 2 + 30 * 2 + 100 + 5 * 24 + 17
+    after_stage = campaign.remaining_storage_bytes(value, contract, [("job_a", 0)])
+    assert initial - after_stage == 3 * 100 + 12 * 7 + 24
+    after_one_case = campaign.remaining_storage_bytes(value, contract, [("job_a", 0)], ["cell_4_a"])
+    assert after_stage - after_one_case == 10 * 2
+    after_first_batch = campaign.remaining_storage_bytes(value, contract, [("job_a", 0)],
+        ["cell_4_a", "cell_4_b"])
+    assert after_one_case - after_first_batch == 20 * 2 + 24
+    closed = [cell["id"] for cell in value["evaluation_cells"]]
+    assert campaign.remaining_storage_bytes(value, contract, [("job_a", 0)], closed) == 100 + 17
+
+
+def test_explicit_checkpoint_caps_credit_each_immutable_publication_once(worker_storage):
+    directory, contract, available = worker_storage
+    first, final = directory / "update_000004.pt", directory / "endpoint.pt"
+    temporary = directory / ".update_000004.pt.actual-publication.tmp"
+    temporary.write_bytes(b"a" * 70)
+    os.link(temporary, first)
+    final.write_bytes(b"b" * 40)
+    (directory / ".endpoint.pt.json.sidecar.tmp").write_bytes(b"j" * 10)
+    available["bytes"] = 890
+    result = campaign.worker_storage_guard({}, contract, directory, 1000,
+        checkpoint_paths=(first, final), checkpoint_limit=256,
+        checkpoint_byte_limits={str(first): 128, final: 128})
+    assert result["checkpoint_owned_bytes"] == {str(first): 70, str(final): 40}
+    assert result["owned_bytes"]["checkpoint"] == 110
+    assert result["owned_bytes"]["other"] == 10
+    assert result["credited_declared_output_bytes"] == 110 and result["required_bytes"] == 890
+
+
+@pytest.mark.parametrize("invalid", ["missing", "extra", "aggregate", "oversize", "boolean", "duplicate"])
+def test_explicit_checkpoint_caps_cannot_change_the_authorized_budget(worker_storage, invalid):
+    directory, contract, _ = worker_storage
+    first, final = directory / "update_000004.pt", directory / "endpoint.pt"
+    limits, total = {first: 128, final: 128}, 256
+    if invalid == "missing":
+        limits.pop(first)
+    elif invalid == "extra":
+        limits[directory / "extra.pt"] = 128
+    elif invalid == "aggregate":
+        total = 257
+    elif invalid == "oversize":
+        limits[first] = 129
+        total = 257
+    elif invalid == "boolean":
+        limits[first] = True
+    else:
+        limits[str(first)] = 128
+        total = 384
+    with pytest.raises(campaign.CampaignIntegrityError, match="per-checkpoint caps"):
+        campaign.worker_storage_guard({}, contract, directory, 1000,
+            checkpoint_paths=(first, final), checkpoint_limit=total, checkpoint_byte_limits=limits)
+
+
+def test_explicit_checkpoint_cap_cannot_spend_another_snapshots_unused_bytes(worker_storage):
+    directory, contract, _ = worker_storage
+    first, final = directory / "update_000004.pt", directory / "endpoint.pt"
+    first.write_bytes(b"a" * 129)
+    final.write_bytes(b"b" * 10)
+    with pytest.raises(campaign.CampaignIntegrityError, match="per-checkpoint storage cap exceeded"):
+        campaign.worker_storage_guard({}, contract, directory, 1000,
+            checkpoint_paths=(first, final), checkpoint_limit=256,
+            checkpoint_byte_limits={first: 128, final: 128})
+    assert first.read_bytes() == b"a" * 129 and final.read_bytes() == b"b" * 10
+
+
+def test_explicit_checkpoint_publication_copies_share_only_their_own_cap(worker_storage):
+    directory, contract, _ = worker_storage
+    first, final = directory / "update_000004.pt", directory / "endpoint.pt"
+    first.write_bytes(b"a" * 70)
+    (directory / ".update_000004.pt.independent-copy.tmp").write_bytes(b"t" * 70)
+    with pytest.raises(campaign.CampaignIntegrityError, match="per-checkpoint storage cap exceeded"):
+        campaign.worker_storage_guard({}, contract, directory, 1000,
+            checkpoint_paths=(first, final), checkpoint_limit=256,
+            checkpoint_byte_limits={first: 128, final: 128})
+
+
+@pytest.mark.parametrize("alias", ["checkpoint", "sidecar", "cache"])
+def test_explicit_checkpoints_cannot_alias_another_budget_identity(worker_storage, alias):
+    directory, contract, _ = worker_storage
+    first, final = directory / "update_000004.pt", directory / "endpoint.pt"
+    first.write_bytes(b"a" * 20)
+    if alias == "checkpoint":
+        destination = final
+    elif alias == "sidecar":
+        destination = directory / ".endpoint.pt.json.sidecar.tmp"
+    else:
+        (directory / "runtime").mkdir()
+        destination = directory / "runtime" / "cache.bin"
+    os.link(first, destination)
+    with pytest.raises(campaign.CampaignIntegrityError, match="hardlink crosses"):
+        campaign.worker_storage_guard({}, contract, directory, 1000,
+            checkpoint_paths=(first, final), checkpoint_limit=256,
+            checkpoint_byte_limits={first: 128, final: 128})
+
+
 def test_inflight_files_have_an_aggregate_cap_and_cache_has_its_own_cap(worker_storage):
     directory, contract, _ = worker_storage
     stdout, sdk = directory / "stdout.txt", directory / "sdk.log"

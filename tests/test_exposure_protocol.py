@@ -158,6 +158,46 @@ def freeze(prepared, **changes):
     return protocol.freeze(prepared["history"], **arguments)
 
 
+def test_explicit_checkpoint_interval_freezes_continuous_points_and_full_evaluation_denominator(prepared):
+    legacy = freeze(prepared)
+    assert legacy['schema_version'] == 1
+    assert 'checkpoint_interval' not in legacy['execution']
+    assert all('checkpoint_updates' not in stage for job in legacy['jobs'] for stage in job['stages'])
+    assert all('checkpoint_update' not in cell for cell in legacy['evaluation_cells'])
+    result = freeze(prepared, checkpoint_interval=2)
+    assert result['schema_version'] == 2 and result['execution']['checkpoint_interval'] == 2
+    assert protocol.validate_protocol(result) == result
+    assert len(result['jobs']) == len(legacy['jobs']) == 15
+    assert all([stage['checkpoint_updates'] for stage in job['stages']] == [[2], [2,3]]
+               for job in result['jobs'])
+    assert result['budget']['training_updates'] == legacy['budget']['training_updates'] == 75
+    assert result['budget']['fresh_transitions'] == legacy['budget']['fresh_transitions'] == 1260
+    assert len(result['evaluation_cells']) == 360
+    assert result['budget']['validation_cells'] == result['budget']['held_out_cells'] == 180
+    assert {(cell['stage_index'],cell['checkpoint_update']) for cell in result['evaluation_cells']} == {
+        (0,2),(1,4),(1,5)}
+    assert not prepared['output'].exists()
+
+
+@pytest.mark.parametrize('interval', [0,-1,True,2.5,'2',[]])
+def test_invalid_explicit_checkpoint_interval_is_rejected_without_execution(prepared, interval):
+    with pytest.raises(ValueError, match='checkpoint interval'):
+        freeze(prepared, checkpoint_interval=interval)
+    assert not prepared['output'].exists()
+
+
+@pytest.mark.parametrize('change', [
+    lambda p: p['jobs'][0]['stages'][1]['checkpoint_updates'].pop(0),
+    lambda p: p['evaluation_cells'][0].update(checkpoint_update=1),
+    lambda p: p['execution'].update(checkpoint_interval=3),
+    lambda p: p.update(schema_version=1),
+])
+def test_resigned_checkpoint_schedule_or_cell_clock_change_is_rejected(prepared, change):
+    result = freeze(prepared, checkpoint_interval=2)
+    with pytest.raises(ValueError):
+        protocol.validate_protocol(resign(result, change))
+
+
 def test_real_complete_grid_initial_states_stage_and_evaluation_budgets_without_execution(prepared, monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("protocol preparation must not start training, an environment or a process")

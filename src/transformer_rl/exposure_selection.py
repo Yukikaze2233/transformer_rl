@@ -31,6 +31,16 @@ _RULE = {
 }
 
 
+def _rule(protocol):
+    rule = deepcopy(_RULE)
+    if protocol.get("schema_version") == 2:
+        rule.update(
+            checkpoint="final_endpoint_of_final_stage_of_training_seed_nearest_candidate_median_score_then_seed_number",
+            early_stages="all_scheduled_checkpoints_learning_and_acquisition_conditioned_retention_only_never_final_ranking",
+            held_out="every_original_candidate_seed_stage_checkpoint_case_seed_once_after_immutable_validation_choice")
+    return rule
+
+
 def _require(condition, reason):
     campaign._require(condition, reason)
 
@@ -149,6 +159,46 @@ def _endpoint_path(protocol, job, stage):
         / f"stage_{stage['index']:04d}_{stage['name']}" / "endpoint.json"
 
 
+def _training_checkpoints(protocol, job, stage, item, completion_receipt, pins, *, completed):
+    """Replay every scheduled save, including a failed learner's sealed prefix.
+
+    A checkpoint is an observation point, never permission to resume a learner.
+    The campaign verifier proves its actual model, optimizer and metric prefix;
+    the selection seal also pins the containing immutable files.
+    """
+    if "checkpoint_updates" not in stage:
+        return None
+    verified = campaign.verified_stage_checkpoints(protocol, job, stage, completion_receipt,
+                                                  completed=completed)
+    _require(digest(item.get("checkpoints")) == digest(verified),
+             "job ledger changes its actual sealed learning checkpoints")
+    pins.checked(completion_receipt)
+    directory = Path(protocol["output_root"]) / job["id"] / f"stage_{stage['index']:04d}" / "train"
+    for name in ("request.json", "reservation.json", "metrics.jsonl"):
+        pins.receipt(directory / name)
+    for entry in verified:
+        pins.checked(entry["record"])
+        pins.checked(entry["checkpoint"])
+        record = pins.read(entry["record"]["path"])
+        pins.receipt(record["sidecar"]["path"])
+    return deepcopy(verified)
+
+
+def _observation_record(stage_record, cell):
+    """Route a cell to its exact scheduled save without replacing a missing one."""
+    if "checkpoint_update" not in cell:
+        return stage_record
+    checkpoint_update = cell["checkpoint_update"]
+    _require(type(checkpoint_update) is int, "explicit integer observation checkpoint required")
+    matches = [entry for entry in stage_record.get("checkpoints", [])
+               if entry["checkpoint_update"] == checkpoint_update]
+    _require(len(matches) <= 1, "duplicate training checkpoint observation")
+    entry = matches[0] if matches else None
+    return {"stage_index": cell["stage_index"], "checkpoint_update": checkpoint_update,
+            "endpoint": deepcopy(entry["record"]) if entry else None,
+            "checkpoint": deepcopy(entry["checkpoint"]) if entry else None}
+
+
 def _training(protocol, raw, job, controller_receipt, pins):
     root = Path(protocol["output_root"]) / job["id"]
     reservation_receipt = pins.receipt(root / "reservation.json")
@@ -164,8 +214,11 @@ def _training(protocol, raw, job, controller_receipt, pins):
         if failed_at is not None:
             _require(not os.path.lexists(directory), "a numerical failure was retried or bypassed")
             pins.missing.add(str(directory))
-            records.append({"stage_index": stage["index"], "status": "missing", "reason": "prior_training_numerical_failure",
-                            "endpoint": None, "checkpoint": None})
+            record = {"stage_index": stage["index"], "status": "missing", "reason": "prior_training_numerical_failure",
+                      "endpoint": None, "checkpoint": None}
+            if "checkpoint_updates" in stage:
+                record["checkpoints"] = []
+            records.append(record)
             continue
         request_receipt = pins.receipt(directory / "request.json")
         request = pins.read(directory / "request.json")
@@ -235,8 +288,13 @@ def _training(protocol, raw, job, controller_receipt, pins):
             _require(digest(item.get("failed_training")) == digest(failed_training),
                      "job ledger changes actual numerical accounting")
             failed_at = stage["index"]
-            records.append({"stage_index": stage["index"], "status": "numerical_failure", "endpoint": None,
-                            "checkpoint": None, "completion": deepcopy(outcome["training_completion"])})
+            record = {"stage_index": stage["index"], "status": "numerical_failure", "endpoint": None,
+                      "checkpoint": None, "completion": deepcopy(outcome["training_completion"])}
+            checkpoints = _training_checkpoints(protocol, job, stage, item,
+                outcome["training_completion"], pins, completed=False)
+            if checkpoints is not None:
+                record["checkpoints"] = checkpoints
+            records.append(record)
         else:
             _require(outcome["status"] == "completed" and worker["returncode"] == 0
                      and worker["timed_out"] is False, "unknown/interrupted training cannot close selection")
@@ -250,9 +308,13 @@ def _training(protocol, raw, job, controller_receipt, pins):
             for name in ("request.json", "reservation.json"):
                 pins.receipt(directory / "train" / name)
             parent = proof["endpoint"]
-            records.append({"stage_index": stage["index"], "status": "completed", "endpoint": deepcopy(parent),
-                            "checkpoint": deepcopy(proof["checkpoint"]), "successful_updates": proof["actual_updates"],
-                            "fresh_transitions": proof["actual_fresh_transitions"]})
+            record = {"stage_index": stage["index"], "status": "completed", "endpoint": deepcopy(parent),
+                      "checkpoint": deepcopy(proof["checkpoint"]), "successful_updates": proof["actual_updates"],
+                      "fresh_transitions": proof["actual_fresh_transitions"]}
+            checkpoints = _training_checkpoints(protocol, job, stage, item, proof["completion"], pins, completed=True)
+            if checkpoints is not None:
+                record["checkpoints"] = checkpoints
+            records.append(record)
     _require(len(published["stages"]) == (failed_at + 1 if failed_at is not None else len(job["stages"]))
              and published["status"] == ("numerical_failure" if failed_at is not None else "training_completed"),
              "closed job stages or final status differ")
@@ -261,13 +323,12 @@ def _training(protocol, raw, job, controller_receipt, pins):
 
 
 def _directory(protocol, first):
-    return Path(protocol["output_root"]) / first["job_id"] / f"stage_{first['stage_index']:04d}" \
-        / f"evaluation_{first['role']}_{first['seed']}"
+    return campaign.evaluation_directory(protocol, first)
 
 
 def _validation_batch(protocol, cells, stage_record, pins):
     directory = _directory(protocol, cells[0])
-    batch_id = "batch_" + digest({k: cells[0][k] for k in ("job_id", "stage_index", "role", "seed")})[:24]
+    batch_id = "batch_" + digest(campaign.evaluation_batch_key(cells[0]))[:24]
     paths = {name: directory / name for name in ("request.json", "report.json", "trace.npz",
         "evaluation.completion.json", "worker.process.json", "worker.completion.json")}
     existing = {name: pins.optional(path) for name, path in paths.items()}
@@ -361,23 +422,42 @@ def _rank(protocol, training_records, cells):
             observations = [cells[cell["id"]] for cell in protocol["evaluation_cells"]
                             if cell["job_id"] == job["id"] and cell["role"] == "validation"]
             last = len(job["stages"]) - 1
-            final = [record for record in observations if record["identity"]["stage_index"] == last]
+            final_update = job["stages"][-1].get("expected_cumulative_updates")
+            final = [record for record in observations if record["identity"]["stage_index"] == last
+                     and ("checkpoint_update" not in record["identity"]
+                          or record["identity"]["checkpoint_update"] == final_update)]
             failures = []
             if data["status"] != "training_completed" or any(record["status"] != "completed" for record in observations):
                 failures.append("incomplete_declared_training_or_validation")
             if any(record["status"] != "completed" or not record.get("grade", {}).get("passed") for record in final):
                 failures.append("final_stage_task_gate_failed")
-            acquired, regressions = {}, []
-            for record in observations:
+            acquired, regressions, learning = {}, [], []
+            ordered = (sorted(observations, key=lambda record: (
+                record["identity"]["stage_index"], record["identity"].get("checkpoint_update", 0),
+                record["identity"]["seed"], record["identity"]["scenario"]))
+                if any("checkpoint_update" in record["identity"] for record in observations) else observations)
+            for record in ordered:
                 if record["status"] != "completed":
+                    if "checkpoint_update" in record["identity"]:
+                        learning.append({"cell": record["identity"]["id"], "status": record["status"],
+                                         "acquisition_status": "unobserved"})
                     continue
                 grade, identity = record["grade"], record["identity"]
                 key = (identity["scenario"], identity["seed"])
                 old = acquired.get(key)
-                if old is not None and (not grade["passed"] or grade["score"] is None
-                    or grade["score"] > old["score"] + protocol["selection"]["retention_score_tolerance"]):
+                regressed = old is not None and (not grade["passed"] or grade["score"] is None
+                    or grade["score"] > old["score"] + protocol["selection"]["retention_score_tolerance"])
+                if regressed:
                     regressions.append({"cell": identity["id"], "acquired_cell": old["cell"],
                                         "acquired_score": old["score"], "current_score": grade["score"]})
+                if "checkpoint_update" in identity:
+                    learning.append({"cell": identity["id"], "stage_index": identity["stage_index"],
+                        "checkpoint_update": identity["checkpoint_update"], "status": "completed",
+                        "passed_gate": grade["passed"], "score": grade["score"],
+                        "acquisition_status": ("regressed_after_acquisition" if regressed else
+                            "retained" if old is not None else
+                            "acquired" if grade["passed"] and grade["score"] is not None else
+                            "not_yet_acquired")})
                 if grade["passed"] and grade["score"] is not None and (old is None or grade["score"] < old["score"]):
                     acquired[key] = {"cell": identity["id"], "score": grade["score"]}
             if regressions:
@@ -390,12 +470,15 @@ def _rank(protocol, training_records, cells):
             else:
                 scores.append(score)
             reasons.extend(f"seed_{job['training_seed']}:{failure}" for failure in failures)
-            seed_records.append({"training_seed": job["training_seed"], "job_id": job["id"],
+            seed_record = {"training_seed": job["training_seed"], "job_id": job["id"],
                 "score": score, "eligible": not failures, "reasons": failures,
                 "expected_validation_cells": len(observations),
                 "completed_validation_cells": sum(record["status"] == "completed" for record in observations),
                 "acquired_skills": [{"scenario": key[0], "evaluation_seed": key[1], **value} for key, value in acquired.items()],
-                "retention_regressions": regressions})
+                "retention_regressions": regressions}
+            if any("checkpoint_update" in record["identity"] for record in observations):
+                seed_record["learning_observations"] = learning
+            seed_records.append(seed_record)
         complete_scores = len(scores) == len(jobs)
         mean = statistics.mean(scores) if complete_scores else None
         std = statistics.stdev(scores) if complete_scores and len(scores) > 1 else None
@@ -412,6 +495,9 @@ def _rank(protocol, training_records, cells):
             candidate["representative"] = {"job_id": chosen["job_id"], "training_seed": chosen["training_seed"],
                 "stage_index": selected["stage_index"], "endpoint": deepcopy(selected["endpoint"]),
                 "checkpoint": deepcopy(selected["checkpoint"])}
+            selected_job = next(job for job in jobs if job["id"] == chosen["job_id"])
+            if "checkpoint_updates" in selected_job["stages"][-1]:
+                candidate["representative"]["checkpoint_update"] = selected_job["stages"][-1]["expected_cumulative_updates"]
         candidates.append(candidate)
     eligible = [candidate for candidate in candidates if candidate["eligible"]]
     transformers = [candidate for candidate in eligible if candidate["architecture"] == "transformer"]
@@ -439,23 +525,26 @@ def _build(protocol, raw, *, require_pristine_held_out):
     for cell in protocol["evaluation_cells"]:
         if cell["role"] != "validation":
             continue
-        key = tuple(cell[name] for name in ("job_id", "stage_index", "role", "seed"))
+        key = digest(campaign.evaluation_batch_key(cell))
         if key in seen:
             continue
         seen.add(key)
-        declared = [item for item in protocol["evaluation_cells"] if tuple(item[name] for name in
-                    ("job_id", "stage_index", "role", "seed")) == key]
-        stage_record = training_records[cell["job_id"]]["stages"][cell["stage_index"]]
+        declared = [item for item in protocol["evaluation_cells"]
+                    if digest(campaign.evaluation_batch_key(item)) == key]
+        stage_record = _observation_record(training_records[cell["job_id"]]["stages"][cell["stage_index"]], cell)
         batch_id, batch, measured = _validation_batch(protocol, declared, stage_record, pins)
         batches[batch_id] = batch
         for item in declared:
             validation[item["id"]] = measured.get(item["id"], {"identity": deepcopy(item), "status": "missing",
                 "batch": batch_id, "reason": batch.get("reason", "not_evaluated"), "grade": None})
     ranking = _rank(protocol, training_records, validation)
-    held_out = {cell["id"]: {"identity": deepcopy(cell),
-        "endpoint": deepcopy(training_records[cell["job_id"]]["stages"][cell["stage_index"]]["endpoint"]),
-        "checkpoint": deepcopy(training_records[cell["job_id"]]["stages"][cell["stage_index"]]["checkpoint"])}
-        for cell in protocol["evaluation_cells"] if cell["role"] == "held_out"}
+    held_out = {}
+    for cell in protocol["evaluation_cells"]:
+        if cell["role"] != "held_out":
+            continue
+        record = _observation_record(training_records[cell["job_id"]]["stages"][cell["stage_index"]], cell)
+        held_out[cell["id"]] = {"identity": deepcopy(cell), "endpoint": deepcopy(record["endpoint"]),
+                               "checkpoint": deepcopy(record["checkpoint"])}
     actual, actual_raw = campaign.read_authorized_protocol(raw["path"], raw["sha256"])
     _require(actual == protocol and actual_raw == raw, "authorized protocol changed during selection")
     pins.verify()
@@ -464,7 +553,7 @@ def _build(protocol, raw, *, require_pristine_held_out):
     winner = ranking["best_transformer"]
     status = "selected_provisional" if winner is not None else "no_eligible_transformer" if ranking["best_overall"] else "no_eligible"
     value = {"format": FORMAT, "schema_version": 1, "protocol": deepcopy(raw), "source": deepcopy(protocol["source"]),
-        "status": status, "rule": deepcopy(_RULE), "selection_parameters": deepcopy(protocol["selection"]),
+        "status": status, "rule": _rule(protocol), "selection_parameters": deepcopy(protocol["selection"]),
         "training": training_records, "validation_cells": validation, "validation_batches": batches, **ranking,
         "denominator": {"jobs": len(protocol["jobs"]), "validation_cells": len(validation),
             "completed_validation_cells": sum(cell["status"] == "completed" for cell in validation.values()),
@@ -524,7 +613,7 @@ def _sealed_inputs(selection_receipt):
     protocol, raw = campaign.read_authorized_protocol(choice["protocol"]["path"], choice["protocol"]["sha256"])
     _require(path == Path(protocol["output_root"]) / "selection" / "choice.json"
              and choice["protocol"] == raw and choice["source"] == protocol["source"]
-             and choice["rule"] == _RULE and choice["selection_parameters"] == protocol["selection"],
+             and choice["rule"] == _rule(protocol) and choice["selection_parameters"] == protocol["selection"],
              "validation seal escapes its original protocol/source/rule")
     artifacts, signatures = choice["artifacts"], choice["input_signatures"]
     _require(type(artifacts) is list and type(signatures) is dict
@@ -562,16 +651,19 @@ def authorize_heldout_batch(selection_receipt, endpoint_receipt, cells, director
     first = cells[0]
     _require(type(first) is dict and first.get("role") == "held_out"
              and all(type(first.get(name)) is int for name in ("stage_index", "seed")), "held-out role/stage/seed differs")
-    key = tuple(first[name] for name in ("job_id", "stage_index", "role", "seed"))
-    expected = [cell for cell in protocol["evaluation_cells"] if tuple(cell[name] for name in
-                ("job_id", "stage_index", "role", "seed")) == key]
+    key = campaign.evaluation_batch_key(first)
+    _require("checkpoint_update" not in key or type(key["checkpoint_update"]) is int,
+             "explicit integer held-out checkpoint update required")
+    expected = [cell for cell in protocol["evaluation_cells"] if campaign.evaluation_batch_key(cell) == key]
     _require(bool(expected) and digest(cells) == digest(expected), "held-out batch shrinks or changes the original matrix")
     _require(definition._path(directory) == _directory(protocol, first), "held-out output route differs")
     fixed = [choice["held_out_cells"][cell["id"]] for cell in cells]
     _require(all(item["endpoint"] is not None and item["endpoint"] == endpoint_receipt for item in fixed),
              "held-out evaluation changes its sealed checkpoint or lacks a trained endpoint")
     job = next(job for job in protocol["jobs"] if job["id"] == first["job_id"])
-    endpoint = campaign.verify_segment_endpoint(protocol, job, first["stage_index"], endpoint_receipt)
+    stage = job["stages"][first["stage_index"]]
+    endpoint = campaign.verify_learning_checkpoint(protocol, job, first["stage_index"],
+        first.get("checkpoint_update", stage["expected_cumulative_updates"]), endpoint_receipt)
     _require(all(endpoint["checkpoint"] == item["checkpoint"] for item in fixed), "held-out actual checkpoint differs from choice")
     campaign._checked(selection_receipt)
     return {"selection": deepcopy(selection_receipt), "protocol": raw, "endpoint": deepcopy(endpoint_receipt),

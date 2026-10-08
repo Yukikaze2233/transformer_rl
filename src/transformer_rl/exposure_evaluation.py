@@ -35,7 +35,9 @@ def _batch(protocol, endpoint_receipt, cells, directory, selection_receipt=None)
     first = cells[0]
     _require(type(first) is dict and all(type(first.get(k)) is int for k in ("stage_index", "seed")),
              "explicit integer evaluation stage and seed required")
-    key = {k: first[k] for k in ("job_id", "stage_index", "role", "seed")}
+    key = campaign.evaluation_batch_key(first)
+    _require("checkpoint_update" not in key or type(key["checkpoint_update"]) is int,
+             "explicit integer evaluation checkpoint update required")
     _require(key["role"] in ("validation", "held_out"), "unknown evaluation role")
     if key["role"] == "held_out":
         _require(selection_receipt is not None, "held-out evaluation requires an immutable validation choice")
@@ -48,8 +50,9 @@ def _batch(protocol, endpoint_receipt, cells, directory, selection_receipt=None)
              "evaluation batch omits, reorders or replaces declared cells")
     job = next((j for j in protocol["jobs"] if j["id"] == key["job_id"]), None)
     _require(job is not None, "evaluation job does not belong to the complete grid")
-    endpoint = campaign.verify_segment_endpoint(protocol, job, key["stage_index"], endpoint_receipt)
     stage = job["stages"][key["stage_index"]]
+    endpoint = campaign.verify_learning_checkpoint(protocol, job, key["stage_index"],
+        key.get("checkpoint_update", stage["expected_cumulative_updates"]), endpoint_receipt)
     configs = [FrameTrainConfig.from_dict(definition._read(campaign._checked(c["config_receipt"]))) for c in cells]
     saved = FrameTrainConfig.from_dict(stage["config"])
     _require(protocol["environment_factory"] == "transformer_rl.chassis_adapter:make_env"
@@ -73,8 +76,7 @@ def _batch(protocol, endpoint_receipt, cells, directory, selection_receipt=None)
              "effective cases differ from the declared batch")
     environment = {"snapshot": str(snapshot), "snapshot_sha256": environments[0]["snapshot_sha256"],
                    "contracts": deepcopy(environments), "num_envs": sum(e["num_envs"] for e in environments)}
-    expected_directory = Path(protocol["output_root"]) / job["id"] / f"stage_{key['stage_index']:04d}" \
-        / f"evaluation_{key['role']}_{key['seed']}"
+    expected_directory = campaign.evaluation_directory(protocol, first)
     _require(definition._path(directory) == expected_directory, "evaluation escapes its fixed role/seed output")
     return {"job": job, "endpoint": endpoint, "config": saved, "environment": environment,
             "effective_contract_sha256": digest(merged), "key": key, "configs": configs}
@@ -145,6 +147,7 @@ def plan_request(protocol, endpoint_receipt, cells, directory, leases, controlle
                  selection_receipt, storage_progress)
     directory = definition._path(directory)
     _require(not os.path.lexists(directory), "evaluation directory cannot be reused")
+    directory.parent.mkdir(mode=0o700, exist_ok=True)
     directory.mkdir(mode=0o700)
     path = directory / "request.json"
     campaign._new(path, body)

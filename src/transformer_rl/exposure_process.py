@@ -34,7 +34,10 @@ def run_request(request, request_receipt):
     optimizer_update = PPOTrainer.update
     continuation_save = FrameContinuation.save
     output_root = Path(request["output_root"])
-    checkpoint = output_root / f"stage_{stage['index']:04d}_{stage['name']}" / "endpoint.pt"
+    checkpoint_records = campaign.learning_checkpoint_records(protocol, job, stage)
+    checkpoints = {Path(item["checkpoint_path"]): item["checkpoint_update"] for item in checkpoint_records}
+    checkpoint_caps = ({path: contract["caps"]["checkpoint_bytes"] for path in checkpoints}
+                       if "checkpoint_updates" in stage else None)
 
     def on_signal(number, frame):
         nonlocal stop_requested
@@ -51,14 +54,16 @@ def run_request(request, request_receipt):
         # Only this stage's declared data may spend its output reserve. SDK,
         # stdout and publication temporaries cannot consume future jobs' caps.
         campaign.worker_storage_guard(protocol, contract, directory,
-            request["required_remaining_bytes"], active_worker=True, checkpoint_paths=(checkpoint,),
-            checkpoint_limit=contract["caps"]["checkpoint_bytes"],
+            request["required_remaining_bytes"], active_worker=True, checkpoint_paths=checkpoints,
+            checkpoint_limit=len(checkpoints) * contract["caps"]["checkpoint_bytes"],
+            checkpoint_byte_limits=checkpoint_caps,
             metric_paths=(output_root / "metrics.jsonl",),
             metric_limit=stage["updates"] * contract["caps"]["metric_bytes_per_update"])
         return False
 
     def guarded_save(self, path):
-        campaign._require(Path(path) == checkpoint, "worker checkpoint publication path differs")
+        campaign._require(Path(path) in checkpoints and self.update == checkpoints[Path(path)],
+                          "worker checkpoint publication path or update differs")
         # The final PPO update and metric publication occur after the last
         # collector guard. Recheck before creating an immutable endpoint.
         campaign._require(not guard(), "worker stopped before checkpoint publication")
@@ -100,7 +105,7 @@ def run_request(request, request_receipt):
         PPOTrainer.update = typed_optimizer
         FrameContinuation.save = guarded_save
         completion = training.train_exposure_segment(
-            {key: stage[key] for key in ("name", "config", "updates")},
+            campaign.stage_definition(stage),
             lazy_factory, protocol["environment_factory"], request["output_root"],
             job_id=job["id"], rollout_steps=protocol["execution"]["rollout_steps"],
             training_seed=job["training_seed"], retention_seed=job["retention_seed"],

@@ -173,7 +173,8 @@ def measured_trace_bytes(path, units):
 
 def worker_storage_guard(protocol, contract, directory, required_remaining_bytes, *,
                          checkpoint_paths=(), checkpoint_limit=0, metric_paths=(), metric_limit=0,
-                         trace_prefix=None, trace_sample_limit=0, active_worker=False):
+                         trace_prefix=None, trace_sample_limit=0, active_worker=False,
+                         checkpoint_byte_limits=None):
     """Credit only this worker's declared outputs; cap all other owned bytes."""
     directory = definition._path(directory)
     root_stat = directory.lstat()
@@ -187,18 +188,35 @@ def worker_storage_guard(protocol, contract, directory, required_remaining_bytes
     _require(required_remaining_bytes > active_headroom,
              "active namespace headroom must fit the fixed storage reservation")
     effective_remaining = required_remaining_bytes - active_headroom
-    checkpoint_paths, metric_paths = set(map(Path, checkpoint_paths)), set(map(Path, metric_paths))
+    declared_checkpoints = tuple(map(Path, checkpoint_paths))
+    checkpoint_paths, metric_paths = set(declared_checkpoints), set(map(Path, metric_paths))
     _require(all(p.is_absolute() and p.is_relative_to(directory)
                  for p in checkpoint_paths | metric_paths)
-             and len(checkpoint_paths) <= 1 and len(metric_paths) <= 1
+             and len(checkpoint_paths) == len(declared_checkpoints)
+             and (checkpoint_byte_limits is not None or len(checkpoint_paths) <= 1)
+             and len(metric_paths) <= 1
              and all(type(x) is int and x >= 0 for x in
                      (checkpoint_limit, metric_limit, trace_sample_limit)),
              "exact worker output paths and nonnegative byte limits required")
+    if checkpoint_byte_limits is None:
+        per_checkpoint_limits = {path: checkpoint_limit for path in checkpoint_paths}
+    else:
+        _require(type(checkpoint_byte_limits) is dict
+                 and all(isinstance(path, (str, Path)) and bool(str(path))
+                         and type(limit) is int and 0 < limit <= caps["checkpoint_bytes"]
+                         for path, limit in checkpoint_byte_limits.items()),
+                 "explicit per-checkpoint caps must fit the measured checkpoint cap")
+        per_checkpoint_limits = {Path(path): limit for path, limit in checkpoint_byte_limits.items()}
+        _require(len(per_checkpoint_limits) == len(checkpoint_byte_limits)
+                 and set(per_checkpoint_limits) == checkpoint_paths
+                 and checkpoint_limit == sum(per_checkpoint_limits.values()),
+                 "per-checkpoint caps must exactly match declared paths and aggregate cap")
     trace_prefix = Path(trace_prefix) if trace_prefix is not None else None
     _require(trace_prefix is None or trace_prefix == directory / "trace.npz",
              "trace must belong to the declared evaluation worker")
     sizes = {name: 0 for name in ("checkpoint", "metric", "trace_maps", "trace_archive", "other", "cache")}
     credits = {name: 0 for name in sizes}
+    checkpoint_sizes = {path: 0 for path in checkpoint_paths}
     trace_directories, seen = set(), {}
     for base, directories, names in os.walk(directory, followlinks=False):
         base_path = definition._path(base)
@@ -232,11 +250,16 @@ def worker_storage_guard(protocol, contract, directory, required_remaining_bytes
                      "worker output is not an owned regular file on its filesystem")
             relative = p.relative_to(directory)
             category = "other"
+            checkpoint_owner = None
+            matching_checkpoints = [cp for cp in checkpoint_paths if p == cp or
+                (p.parent == cp.parent and re.fullmatch(
+                    re.escape("." + cp.name + ".") + r"[a-zA-Z0-9_-]+\.tmp", p.name))]
+            _require(len(matching_checkpoints) <= 1, "checkpoint publication namespaces overlap")
             if relative.parts[0] in ("empty_python_cache", "runtime"):
                 category = "cache"
-            elif p in checkpoint_paths or any(p.parent == cp.parent and re.fullmatch(
-                    re.escape("." + cp.name + ".") + r"[a-zA-Z0-9_-]+\.tmp", p.name) for cp in checkpoint_paths):
+            elif matching_checkpoints:
                 category = "checkpoint"
+                checkpoint_owner = matching_checkpoints[0]
             elif p in metric_paths:
                 category = "metric"
             elif trace_prefix is not None and p == trace_prefix:
@@ -251,18 +274,24 @@ def worker_storage_guard(protocol, contract, directory, required_remaining_bytes
             _require(category in ("cache", "checkpoint") or p.suffix != ".pt",
                      "undeclared checkpoint cannot consume a later stage's reservation")
             inode = (s.st_dev, s.st_ino)
-            _require(inode not in seen or seen[inode] == category,
-                     "hardlink crosses worker storage budget categories")
+            budget_owner = category, checkpoint_owner
+            _require(inode not in seen or seen[inode] == budget_owner,
+                     "hardlink crosses worker storage budget categories or checkpoint identities")
             if inode not in seen:
                 sizes[category] += s.st_size
+                if checkpoint_owner is not None:
+                    checkpoint_sizes[checkpoint_owner] += s.st_size
                 # A new memmap can have its complete logical length while
                 # still sparse. Holes are future writes, not spent reserve.
                 credits[category] += min(s.st_size, s.st_blocks * 512)
-                seen[inode] = category
+                seen[inode] = budget_owner
     _require(len(trace_directories) <= 1, "worker contains multiple trace publications")
     for category, limit in (("checkpoint", checkpoint_limit), ("metric", metric_limit),
                             ("other", caps["inflight_bytes"]), ("cache", caps["runtime_cache_bytes"])):
         _require(sizes[category] <= limit, f"worker {category} storage cap exceeded")
+    for checkpoint_path, limit in per_checkpoint_limits.items():
+        _require(checkpoint_sizes[checkpoint_path] <= limit,
+                 f"worker per-checkpoint storage cap exceeded: {checkpoint_path}")
     trace_limit = trace_sample_limit * caps["trace_bytes_per_policy_sample"]
     _require(sizes["trace_maps"] <= trace_limit and sizes["trace_archive"] <= trace_limit,
              "worker raw trace or publication storage cap exceeded")
@@ -273,7 +302,9 @@ def worker_storage_guard(protocol, contract, directory, required_remaining_bytes
     floor = sum(caps[name] for name in ("inflight_bytes", "runtime_cache_bytes", "free_margin_bytes"))
     disk = check_disk(directory, max(floor, effective_remaining - credited))
     return {**disk, "credited_declared_output_bytes": credited, "owned_bytes": sizes,
-            "undeclared_output_budget_credit": 0, "active_runtime_headroom_bytes": active_headroom}
+            "undeclared_output_budget_credit": 0, "active_runtime_headroom_bytes": active_headroom,
+            "checkpoint_owned_bytes": {str(path): checkpoint_sizes[path]
+                                       for path in sorted(checkpoint_sizes)}}
 
 
 def remaining_storage_bytes(protocol, contract, completed_stages=(), closed_cells=()):
@@ -287,25 +318,31 @@ guard consumes that fixed headroom without crediting any cache/log bytes.
 """
     caps = contract["caps"]
     completed, closed = set(completed_stages), set(closed_cells)
-    checkpoint_count = updates = 0
+    checkpoint_count = training_worker_count = updates = 0
+    stage_expected_updates = {}
     for job in protocol["jobs"]:
         for stage in job["stages"]:
+            stage_expected_updates[job["id"], stage["index"]] = stage.get(
+                "expected_cumulative_updates", stage["updates"])
             if (job["id"], stage["index"]) not in completed:
-                checkpoint_count += 1
+                checkpoint_count += len(stage.get("checkpoint_updates", [stage["updates"]]))
+                training_worker_count += 1
                 updates += stage["updates"]
     samples = sum(cell["expected_policy_samples"] for cell in protocol["evaluation_cells"]
                   if cell["id"] not in closed)
     batches = {}
     for cell in protocol["evaluation_cells"]:
         if cell["id"] not in closed:
-            key = (cell["job_id"], cell["stage_index"], cell["role"], cell["seed"])
+            expected_update = stage_expected_updates.get((cell["job_id"], cell["stage_index"]))
+            key = (cell["job_id"], cell["stage_index"], cell["role"], cell["seed"],
+                   cell.get("checkpoint_update", expected_update))
             batches[key] = batches.get(key, 0) + cell["expected_policy_samples"]
     largest_trace = max(batches.values(), default=0) * caps["trace_bytes_per_policy_sample"]
     # Every OS stage/batch keeps its own namespace and runtime proof. Closed
     # files already reduce statvfs available bytes; future caches and ordinary
     # publications must each be reserved, rather than assuming one shared
     # reusable cache or silently deleting historical worker evidence.
-    future_worker_count = checkpoint_count + len(batches)
+    future_worker_count = training_worker_count + len(batches)
     namespace_cap = caps["inflight_bytes"] + caps["runtime_cache_bytes"]
     active_headroom = namespace_cap if future_worker_count else 0
     return (checkpoint_count * caps["checkpoint_bytes"]
@@ -529,6 +566,42 @@ def reservation_for(protocol, protocol_receipt, job):
             "refund": False, "automatic_retries": 0}
 
 
+def stage_definition(stage):
+    """Pass only learner fields, including an explicitly frozen save schedule."""
+    names = ("name", "config", "updates")
+    value = {key: stage[key] for key in names}
+    if "checkpoint_updates" in stage:
+        value["checkpoint_updates"] = deepcopy(stage["checkpoint_updates"])
+    return value
+
+
+def learning_checkpoint_records(protocol, job, stage):
+    """Declared observation points; only the final record can resume a stage."""
+    base = Path(protocol["output_root"]) / job["id"] / f"stage_{stage['index']:04d}" / "train" \
+        / f"stage_{stage['index']:04d}_{stage['name']}"
+    offset = stage["expected_cumulative_updates"] - stage["updates"]
+    return [{"local_update": local, "checkpoint_update": offset + local,
+             "kind": "endpoint" if local == stage["updates"] else "intermediate",
+             "path": str(base / ("endpoint.json" if local == stage["updates"] else
+                                  f"checkpoint_{local:08d}.json")),
+             "checkpoint_path": str(base / ("endpoint.pt" if local == stage["updates"] else
+                                             f"checkpoint_{local:08d}.pt"))}
+            for local in stage.get("checkpoint_updates", [stage["updates"]])]
+
+
+def evaluation_batch_key(cell):
+    names = ("job_id", "stage_index", "role", "seed")
+    return {key: cell[key] for key in (*names, "checkpoint_update") if key in cell}
+
+
+def evaluation_directory(protocol, cell):
+    """Separate physical workers for distinct checkpoints of the same stage."""
+    root = Path(protocol["output_root"]) / cell["job_id"] / f"stage_{cell['stage_index']:04d}"
+    if "checkpoint_update" in cell:
+        root = root / f"checkpoint_{cell['checkpoint_update']:08d}"
+    return root / f"evaluation_{cell['role']}_{cell['seed']}"
+
+
 def build_stage_request(protocol, protocol_receipt, job, stage, directory, leases,
                         controller_receipt, reservation_receipt, parent_endpoint, storage_contract_receipt,
                         remaining_bytes):
@@ -601,7 +674,7 @@ def prove_stage_endpoint(protocol, job, stage, endpoint_path):
     """Use actual model/Adam/RNG/metric proof, including the complete chain."""
     receipt = definition._receipt(endpoint_path)
     config = FrameTrainConfig.from_dict(stage["config"])
-    plan, _ = training._definition([{key: stage[key] for key in ("name", "config", "updates")}],
+    plan, _ = training._definition([stage_definition(stage)],
         job_id=job["id"], rollout_steps=protocol["execution"]["rollout_steps"],
         training_seed=job["training_seed"], retention_seed=job["retention_seed"],
         evaluation_seeds=[*protocol["evaluation"]["validation_seeds"], *protocol["evaluation"]["seeds"]],
@@ -637,6 +710,68 @@ def verify_segment_endpoint(protocol, job, stage_index, endpoint_receipt):
     _require(path == expected, "endpoint is outside the authorized job stage")
     prove_stage_endpoint(protocol, job, stage, path)
     return _read(path)
+
+
+def verify_learning_checkpoint(protocol, job, stage_index, checkpoint_update, record_receipt):
+    """Prove a scheduled checkpoint without granting it continuation rights."""
+    _require(job in protocol["jobs"] and type(stage_index) is int
+             and 0 <= stage_index < len(job["stages"]), "checkpoint job/stage differs")
+    stage = job["stages"][stage_index]
+    declared = next((record for record in learning_checkpoint_records(protocol, job, stage)
+                     if record["checkpoint_update"] == checkpoint_update), None)
+    _require(type(checkpoint_update) is int and declared is not None,
+             "checkpoint update is outside the frozen observation schedule")
+    path = _checked(record_receipt)
+    _require(path == Path(declared["path"]), "checkpoint record is outside the authorized stage")
+    if declared["kind"] == "endpoint":
+        return verify_segment_endpoint(protocol, job, stage_index, record_receipt)
+    config = FrameTrainConfig.from_dict(stage["config"])
+    plan, _ = training._definition([stage_definition(stage)], job_id=job["id"],
+        rollout_steps=protocol["execution"]["rollout_steps"], training_seed=job["training_seed"],
+        retention_seed=job["retention_seed"],
+        evaluation_seeds=[*protocol["evaluation"]["validation_seeds"], *protocol["evaluation"]["seeds"]],
+        device=protocol["execution"]["device"], expected_initial_model_sha256=job["initial_model_sha256"],
+        max_seconds=protocol["execution"]["max_seconds"], environment_reference=protocol["environment_factory"])
+    proof = training.verify_exposure_checkpoint(record_receipt, plan, config)
+    record = proof["endpoint"]
+    transitions_per_update = stage["fresh_transitions"] // stage["updates"]
+    expected_transitions = (stage["expected_cumulative_transitions"] - stage["fresh_transitions"]
+                           + declared["local_update"] * transitions_per_update)
+    _require(record["stage_index"] == stage_index and record["stage"] == stage["name"]
+             and record["stage_updates"] == declared["local_update"]
+             and record["stage_fresh_transitions"] == declared["local_update"] * transitions_per_update
+             and record["cumulative_successful_updates"] == checkpoint_update
+             and record["cumulative_attempted_updates"] == checkpoint_update
+             and record["cumulative_collected_transitions"] == expected_transitions
+             and proof["config"].to_dict() == stage["config"]
+             and record["checkpoint"]["path"] == declared["checkpoint_path"],
+             "actual learning checkpoint differs from the frozen observation point")
+    return record
+
+
+def verified_stage_checkpoints(protocol, job, stage, completion_receipt, *, completed):
+    """Keep sealed prefixes after numerical failure; retain all missing cells."""
+    if "checkpoint_updates" not in stage:
+        return []
+    completion = _read(_checked(completion_receipt))
+    entries = completion.get("sealed_checkpoints")
+    _require(type(entries) is list, "scheduled training lacks checkpoint publications")
+    declared = learning_checkpoint_records(protocol, job, stage)
+    _require(len(entries) <= len(declared) and (not completed or len(entries) == len(declared)),
+             "sealed checkpoints differ from the frozen observation denominator")
+    verified = []
+    for entry, expected in zip(entries, declared):
+        _require(entry.get("stage_index") == stage["index"]
+                 and entry.get("local_update") == expected["local_update"]
+                 and entry.get("checkpoint_update") == expected["checkpoint_update"]
+                 and entry.get("kind") == expected["kind"]
+                 and entry.get("record", {}).get("path") == expected["path"],
+                 "checkpoint publication omits, reorders or replaces a frozen point")
+        record = verify_learning_checkpoint(protocol, job, stage["index"],
+            expected["checkpoint_update"], entry["record"])
+        verified.append({"checkpoint_update": expected["checkpoint_update"], "kind": expected["kind"],
+                         "record": deepcopy(entry["record"]), "checkpoint": deepcopy(record["checkpoint"])})
+    return verified
 
 
 def _provider(value):
@@ -702,7 +837,7 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
     def evaluate_batch(job, stage, endpoint, cells, leases, *, selection_receipt=None):
         audit_inputs()
         first = cells[0]
-        evaluation_root = root / job["id"] / f"stage_{stage['index']:04d}" / f"evaluation_{first['role']}_{first['seed']}"
+        evaluation_root = evaluation_directory(protocol, first)
         progress = {"completed_stages": [list(item) for item in sorted(completed_stages)],
                     "closed_cells": sorted(closed_cells)}
         planned = provider.plan_request(protocol, endpoint, cells, evaluation_root, leases, controller_receipt,
@@ -721,7 +856,8 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
                 active_worker=True)
 
         publish("evaluating", active_job=job["id"], active_stage=stage["index"],
-                active_evaluation_role=first["role"], active_evaluation_seed=first["seed"])
+                active_evaluation_role=first["role"], active_evaluation_seed=first["seed"],
+                active_checkpoint_update=first.get("checkpoint_update", stage["expected_cumulative_updates"]))
         worker = launch_owned_worker(planned["command"], evaluation_root, leases,
             protocol["execution"]["worker_timeout_seconds"], publish, monitor=monitor)
         if worker["returncode"] != 0 or worker["timed_out"]:
@@ -736,6 +872,19 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
         _new(evaluation_root / "receipt.json", evaluated)
         summary["independent_evaluation_performed"] = True
         audit_inputs()
+
+    def evaluate_points(job, stage, points, role, leases, *, selection_receipt=None):
+        seeds = protocol["evaluation"]["validation_seeds" if role == "validation" else "seeds"]
+        for point in points:
+            for seed in seeds:
+                cells = [cell for cell in protocol["evaluation_cells"]
+                         if cell["job_id"] == job["id"] and cell["stage_index"] == stage["index"]
+                         and cell["role"] == role and cell["seed"] == seed
+                         and cell.get("checkpoint_update", stage["expected_cumulative_updates"])
+                         == point["checkpoint_update"]]
+                _require(bool(cells), "sealed point has no frozen evaluation batch")
+                evaluate_batch(job, stage, point["record"], cells, leases,
+                               selection_receipt=selection_receipt)
 
     publish("waiting")
     try:
@@ -766,7 +915,10 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
                     command = [sys.executable, "-B", "-m", "transformer_rl.exposure_process",
                                "--request", request_receipt["path"],
                                "--expected-request-sha256", request_receipt["sha256"]]
-                    checkpoint_path = directory / "train" / f"stage_{stage['index']:04d}_{stage['name']}" / "endpoint.pt"
+                    checkpoint_paths = [Path(point["checkpoint_path"])
+                                        for point in learning_checkpoint_records(protocol, job, stage)]
+                    checkpoint_caps = ({path: contract["caps"]["checkpoint_bytes"] for path in checkpoint_paths}
+                                       if "checkpoint_updates" in stage else None)
 
                     def monitor_training():
                         _checked(request_receipt)
@@ -774,7 +926,9 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
                         _checked(storage_receipt)
                         _require(source_identity() == protocol["source"], "training worker source changed")
                         return worker_storage_guard(protocol, contract, directory, remaining,
-                            checkpoint_paths=[checkpoint_path], checkpoint_limit=contract["caps"]["checkpoint_bytes"],
+                            checkpoint_paths=checkpoint_paths,
+                            checkpoint_limit=len(checkpoint_paths) * contract["caps"]["checkpoint_bytes"],
+                            checkpoint_byte_limits=checkpoint_caps,
                             metric_paths=[directory / "train" / "metrics.jsonl"],
                             metric_limit=stage["updates"] * contract["caps"]["metric_bytes_per_update"],
                             active_worker=True)
@@ -817,15 +971,24 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
                             "actual_collected_transitions": failure_completion["actual_collected_transitions"],
                             "optimizer_steps_of_failed_update": failure_completion["failed_update_optimizer_steps"],
                             "accounting_scope": "actual counters; no sealed endpoint for this stage"}
+                        points = verified_stage_checkpoints(protocol, job, stage,
+                            outcome["training_completion"], completed=False)
+                        if "checkpoint_updates" in stage:
+                            item["checkpoints"] = points
+                        available_updates = {point["checkpoint_update"] for point in points}
                         result["status"] = "numerical_failure"
                         for cell in protocol["evaluation_cells"]:
-                            if cell["job_id"] == job["id"] and cell["stage_index"] >= stage["index"]:
+                            if cell["job_id"] == job["id"] and (cell["stage_index"] > stage["index"]
+                                    or (cell["stage_index"] == stage["index"]
+                                        and cell.get("checkpoint_update") not in available_updates)):
                                 summary["evaluation_cells"][cell["id"]].update(reason="training_numerical_failure")
                                 closed_cells.add(cell["id"])
                         # The whole-job reservation remains charged, including
                         # its unexecuted stages. No replacement seed or retry.
                         completed_stages.update((job["id"], s["index"]) for s in job["stages"]
                                                 if s["index"] >= stage["index"])
+                        if provider is not None and points:
+                            evaluate_points(job, stage, points, "validation", leases)
                         break
                     if worker["returncode"] != 0 or worker["timed_out"] or outcome["status"] != "completed":
                         raise CampaignWorkerError("worker failed, interrupted or unknown; campaign stopped without retry")
@@ -835,6 +998,12 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
                              "worker completed a different training publication")
                     item["training"] = proof
                     parent = proof["endpoint"]
+                    points = verified_stage_checkpoints(protocol, job, stage, proof["completion"], completed=True)
+                    if "checkpoint_updates" in stage:
+                        item["checkpoints"] = points
+                    else:
+                        points = [{"checkpoint_update": stage["expected_cumulative_updates"],
+                                   "record": parent, "checkpoint": proof["checkpoint"], "kind": "endpoint"}]
                     completed_stages.add((job["id"], stage["index"]))
                     summary["verified_successful_updates"] += proof["actual_updates"]
                     summary["verified_fresh_transitions"] += proof["actual_fresh_transitions"]
@@ -844,10 +1013,7 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
                              "actual optimizer log exceeds measured storage cap")
                     if provider is not None:
                         # Complete validation before fixing every endpoint.
-                        for seed in protocol["evaluation"]["validation_seeds"]:
-                            cells = [c for c in protocol["evaluation_cells"] if c["job_id"] == job["id"]
-                                and c["stage_index"] == stage["index"] and c["role"] == "validation" and c["seed"] == seed]
-                            evaluate_batch(job, stage, parent, cells, leases)
+                        evaluate_points(job, stage, points, "validation", leases)
                     publish("training", active_evaluation_role=None, active_evaluation_seed=None)
                 if result["status"] != "numerical_failure":
                     result["status"] = "training_completed"
@@ -862,14 +1028,15 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
                 choice = verify_selection(frozen["receipt"])
                 for job in protocol["jobs"]:
                     for stage in job["stages"]:
-                        endpoint = next((entry["training"]["endpoint"] for entry in summary["jobs"][job["id"]]["stages"]
-                                         if entry["stage_index"] == stage["index"] and "training" in entry), None)
-                        if endpoint is None:
+                        entry = next((entry for entry in summary["jobs"][job["id"]]["stages"]
+                                      if entry["stage_index"] == stage["index"]), None)
+                        if entry is None:
                             continue
-                        for seed in protocol["evaluation"]["seeds"]:
-                            cells = [c for c in protocol["evaluation_cells"] if c["job_id"] == job["id"]
-                                and c["stage_index"] == stage["index"] and c["role"] == "held_out" and c["seed"] == seed]
-                            evaluate_batch(job, stage, endpoint, cells, leases, selection_receipt=frozen["receipt"])
+                        points = entry.get("checkpoints", [])
+                        if "checkpoint_updates" not in stage and "training" in entry:
+                            points = [{"checkpoint_update": stage["expected_cumulative_updates"],
+                                       "record": entry["training"]["endpoint"]}]
+                        evaluate_points(job, stage, points, "held_out", leases, selection_receipt=frozen["receipt"])
                 _require(verify_selection(frozen["receipt"]) == choice, "held-out changed the immutable validation choice")
         _require(len(summary["jobs"]) == len(protocol["jobs"])
                  and summary["charged_updates"] == protocol["budget"]["training_updates"]

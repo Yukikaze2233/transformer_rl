@@ -36,6 +36,17 @@ def _integer(value, name, minimum=1):
     _require(type(value) is int and value >= minimum, f"{name} must be an integer >= {minimum}")
 
 
+def _checkpoint_updates(stage):
+    """Validate explicit local successful-update boundaries without adding stages."""
+    updates = stage['updates']
+    values = stage.get('checkpoint_updates', [updates])
+    _require(type(values) is list and bool(values)
+             and all(type(value) is int and 0 < value <= updates for value in values)
+             and values == sorted(set(values)) and values[-1] == updates,
+             'checkpoint updates must be increasing local integers including the final update')
+    return values
+
+
 def _sha(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -82,13 +93,15 @@ def _definition(stages, *, job_id, rollout_steps, training_seed, retention_seed,
              and re.fullmatch(r'[0-9a-f]{64}', expected_initial_model_sha256), 'initial model SHA required')
     configs, declared, names = [], [], set()
     for stage in stages:
-        _require(isinstance(stage, dict) and set(stage) == {'name', 'config', 'updates'},
-                 'stage fields must be name/config/updates')
+        _require(isinstance(stage, dict) and set(stage) in (
+            {'name', 'config', 'updates'}, {'name', 'config', 'updates', 'checkpoint_updates'}),
+                 'stage fields must be name/config/updates and optional checkpoint_updates')
         name = stage['name']
         _require(isinstance(name, str) and re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,63}', name)
                  and name not in names, 'stage names must be unique')
         names.add(name)
         _integer(stage['updates'], 'stage updates')
+        _checkpoint_updates(stage)
         config = stage['config']
         config = FrameTrainConfig.from_dict(config.to_dict() if isinstance(config, FrameTrainConfig) else config)
         num_envs = config.environment.get('num_envs')
@@ -100,9 +113,12 @@ def _definition(stages, *, job_id, rollout_steps, training_seed, retention_seed,
         declared.append({'name': name, 'config': config.to_dict(), 'updates': stage['updates'],
                          'transitions_per_update': rollout_steps * num_envs,
                          'fresh_transition_budget': stage['updates'] * rollout_steps * num_envs})
+        if 'checkpoint_updates' in stage:
+            declared[-1]['checkpoint_updates'] = list(stage['checkpoint_updates'])
     _require(initial_model_sha256(configs[0], training_seed) == expected_initial_model_sha256,
              'initial model SHA mismatch before output/environment construction')
-    value = {'format': 'transformer_rl.fixed_exposure_job', 'schema_version': 1,
+    value = {'format': 'transformer_rl.fixed_exposure_job',
+             'schema_version': 2 if any('checkpoint_updates' in stage for stage in declared) else 1,
              'job_id': job_id, 'source': source_identity(), 'stages': declared,
              'training_seed': training_seed, 'retention_seed': retention_seed,
              'evaluation_seeds': list(evaluation_seeds), 'rollout_steps': rollout_steps,
@@ -173,6 +189,8 @@ def _run_exposure_plan(plan, configs, env_factory, environment_reference, output
     shutdown_errors, stop_reason = [], None
     active_stage, failure_phase = None, 'before_environment'
     optimizer_steps, optimization_sample_uses, status, error = 0, 0, 'completed', None
+    sealed_checkpoints, metric_sha, metric_bytes = [], hashlib.sha256(), 0
+    scheduled = plan['schema_version'] == 2
 
     def stop():
         nonlocal stop_reason
@@ -252,6 +270,40 @@ def _run_exposure_plan(plan, configs, env_factory, environment_reference, output
                     metrics.flush()
                     recorded_updates += 1
                     recorded_samples += row['batch_samples']
+                    metric_sha.update(line.encode())
+                    metric_bytes += len(line.encode())
+                    if scheduled and successful - sum(s['stage_updates'] for s in endpoints) in _checkpoint_updates(stage):
+                        local_update = session.update - (prior_success + sum(s['stage_updates'] for s in endpoints))
+                        if local_update != stage['updates']:
+                            failure_phase = 'fsync_checkpoint_metrics'
+                            os.fsync(metrics.fileno())
+                            failure_phase = 'verify_source'
+                            _require(source_identity() == plan['source'], 'learner source changed before checkpoint')
+                            _require(session.config.to_dict() == stage['config'], 'runtime configuration changed before checkpoint')
+                            _require(session.metadata.get('source') == plan['source'], 'runtime producer source changed before checkpoint')
+                            path = directory / f'checkpoint_{local_update:08d}.pt'
+                            failure_phase = 'publish_checkpoint'
+                            session.save(path)
+                            checkpoint_record = {'format': 'transformer_rl.exposure_learning_checkpoint',
+                                'schema_version': 1, 'job_id': job_id, 'job_plan_sha256': plan['sha256'],
+                                'stage': stage['name'], 'stage_index': index, 'stage_updates': local_update,
+                                'stage_fresh_transitions': local_update * stage['transitions_per_update'],
+                                'cumulative_successful_updates': session.update,
+                                'cumulative_attempted_updates': session.consumed_updates,
+                                'cumulative_collected_transitions': session.collected_transitions,
+                                'checkpoint': {'path': str(path), 'sha256': _sha(path), 'bytes': path.stat().st_size},
+                                'sidecar': {'path': str(path) + '.json', 'sha256': _sha(str(path) + '.json')},
+                                'learning_state': 'full_actor_critic_Adam_global_private_RNG_clock',
+                                'episode_state_restored': False, 'history_reset': 'repeat_first'}
+                            record_path = directory / f'checkpoint_{local_update:08d}.json'
+                            failure_phase = 'publish_checkpoint_record'
+                            _new(record_path, checkpoint_record)
+                            sealed_checkpoints.append({'stage_index': index, 'local_update': local_update,
+                                'checkpoint_update': session.update, 'kind': 'intermediate',
+                                'record': {'path': str(record_path), 'sha256': _sha(record_path), 'bytes': record_path.stat().st_size},
+                                'metrics_prefix': {'path': str(root / 'metrics.jsonl'), 'sha256': metric_sha.hexdigest(),
+                                    'bytes': metric_bytes, 'rows': recorded_updates, 'optimizer_steps': optimizer_steps,
+                                    'optimization_sample_uses': optimization_sample_uses}})
                 if status != 'completed':
                     break
                 failure_phase = 'verify_source'
@@ -259,6 +311,9 @@ def _run_exposure_plan(plan, configs, env_factory, environment_reference, output
                 _require(session.config.to_dict() == stage['config'], 'runtime configuration changed before endpoint')
                 _require(session.metadata.get('source') == plan['source'], 'runtime producer source changed before endpoint')
                 path = directory / 'endpoint.pt'
+                if scheduled:
+                    failure_phase = 'fsync_checkpoint_metrics'
+                    os.fsync(metrics.fileno())
                 failure_phase = 'publish_checkpoint'
                 session.save(path)
                 endpoint = {'stage': stage['name'], 'stage_index': index,
@@ -276,6 +331,14 @@ def _run_exposure_plan(plan, configs, env_factory, environment_reference, output
                 failure_phase = 'publish_endpoint'
                 _new(directory / 'endpoint.json', endpoint)
                 endpoints.append(endpoint)
+                if scheduled:
+                    record_path = directory / 'endpoint.json'
+                    sealed_checkpoints.append({'stage_index': index, 'local_update': stage['updates'],
+                        'checkpoint_update': session.update, 'kind': 'endpoint',
+                        'record': {'path': str(record_path), 'sha256': _sha(record_path), 'bytes': record_path.stat().st_size},
+                        'metrics_prefix': {'path': str(root / 'metrics.jsonl'), 'sha256': metric_sha.hexdigest(),
+                            'bytes': metric_bytes, 'rows': recorded_updates, 'optimizer_steps': optimizer_steps,
+                            'optimization_sample_uses': optimization_sample_uses}})
             failure_phase = 'fsync_metrics'
             os.fsync(metrics.fileno())
     except BaseException as failure:
@@ -327,6 +390,22 @@ def _run_exposure_plan(plan, configs, env_factory, environment_reference, output
             cumulative_successful_updates=prior_success+successful,
             cumulative_attempted_updates=prior_attempts+attempts,
             cumulative_collected_transitions=prior_samples+collected)
+    if scheduled:
+        expected_checkpoints = [(offset+i, value) for i, stage in enumerate(plan['stages'])
+                                for value in _checkpoint_updates(stage)]
+        sealed_keys = {(item['stage_index'], item['local_update']) for item in sealed_checkpoints}
+        completion.update(schema_version=2, sealed_checkpoints=deepcopy(sealed_checkpoints),
+            missing_checkpoints=[{'stage_index': index, 'local_update': value}
+                                 for index, value in expected_checkpoints if (index, value) not in sealed_keys],
+            last_sealed_learning_checkpoint=deepcopy(sealed_checkpoints[-1]) if sealed_checkpoints else None)
+        declared_paths = []
+        for i, stage in enumerate(plan['stages']):
+            directory = root / f'stage_{offset+i:04d}_{stage["name"]}'
+            for value in _checkpoint_updates(stage):
+                path = directory / ('endpoint.pt' if value == stage['updates'] else f'checkpoint_{value:08d}.pt')
+                if (offset+i, value) not in sealed_keys and path.is_file():
+                    declared_paths.append(str(path))
+        completion['unsealed_checkpoint_paths'] = declared_paths
     _new(root / 'completion.json', completion)
     return completion
 
@@ -368,7 +447,7 @@ def _read_input(path, *, canonical=True):
     return value, receipt
 
 
-def _checkpoint_learning_proof(endpoint, endpoint_path, plan, request, config):
+def _checkpoint_learning_proof(endpoint, endpoint_path, plan, request, config, *, intermediate=False):
     """Bind an actual stage checkpoint to its declared learning producer."""
     fields = {'stage', 'stage_index', 'stage_updates', 'stage_fresh_transitions',
         'cumulative_successful_updates', 'cumulative_attempted_updates',
@@ -376,9 +455,16 @@ def _checkpoint_learning_proof(endpoint, endpoint_path, plan, request, config):
         'episode_state_restored', 'history_reset'}
     segment_fields = {'format', 'schema_version', 'job_id', 'segment_plan_sha256'}
     is_segment = request['format'] == 'transformer_rl.exposure_segment_request'
-    _require(isinstance(endpoint, dict) and set(endpoint) == (fields | segment_fields if is_segment else fields),
+    intermediate_fields = {'format', 'schema_version', 'job_id', 'job_plan_sha256'}
+    expected_fields = fields | intermediate_fields if intermediate else fields | segment_fields if is_segment else fields
+    _require(isinstance(endpoint, dict) and set(endpoint) == expected_fields,
              'parent stage endpoint schema differs from request')
-    if is_segment:
+    if intermediate:
+        _require(endpoint['format'] == 'transformer_rl.exposure_learning_checkpoint'
+                 and type(endpoint['schema_version']) is int and endpoint['schema_version'] == 1
+                 and endpoint['job_id'] == plan['job_id']
+                 and endpoint['job_plan_sha256'] == request['sha256'], 'learning checkpoint identity differs')
+    elif is_segment:
         _require(endpoint['format'] == 'transformer_rl.exposure_segment_endpoint'
                  and type(endpoint['schema_version']) is int and endpoint['schema_version'] == 1
                  and endpoint['job_id'] == plan['job_id']
@@ -401,7 +487,8 @@ def _checkpoint_learning_proof(endpoint, endpoint_path, plan, request, config):
     _require(actual_endpoint == endpoint, 'actual sealed stage endpoint differs from completion')
     checkpoint_path = _input_receipt(endpoint['checkpoint'])
     sidecar_path = _input_receipt(endpoint['sidecar'], require_bytes=False)
-    _require(checkpoint_path == endpoint_path.parent/'endpoint.pt'
+    checkpoint_name = f"checkpoint_{endpoint['stage_updates']:08d}.pt" if intermediate else 'endpoint.pt'
+    _require(checkpoint_path == endpoint_path.parent/checkpoint_name
              and sidecar_path == Path(str(checkpoint_path)+'.json'), 'parent stage checkpoint/sidecar paths differ')
     with torch.device('cpu'):
         model, trainer, parent_config, update, metadata, rng = load_frame_checkpoint(checkpoint_path)
@@ -494,6 +581,87 @@ def _adam_step_proof(optimizer, expected_steps):
              'parent actual Adam step differs from verified cumulative PPO optimizer steps')
 
 
+def _sealed_checkpoint_records(request, completion, root, stage_offset, first_update, *,
+                               first_samples=0, require_complete=False):
+    """Check the complete declared snapshot inventory without loading its model payloads."""
+    expected, update, samples = [], first_update, first_samples
+    for index, stage in enumerate(request['stages']):
+        for local in _checkpoint_updates(stage):
+            expected.append((stage_offset+index, local, update+local,
+                             samples+local*stage['transitions_per_update'], stage))
+        update += stage['updates']
+        samples += stage['fresh_transition_budget']
+    records = completion.get('sealed_checkpoints')
+    _require(type(records) is list and len(records) <= len(expected), 'sealed checkpoint inventory required')
+    result = []
+    for item, (index, local, cumulative, cumulative_samples, stage) in zip(records, expected):
+        _require(type(item) is dict and set(item) == {
+            'stage_index','local_update','checkpoint_update','kind','record','metrics_prefix'},
+            'sealed checkpoint inventory fields differ')
+        _require(all(type(item.get(k)) is int for k in ('stage_index','local_update','checkpoint_update'))
+                 and (item['stage_index'], item['local_update'], item['checkpoint_update']) == (index,local,cumulative),
+                 'sealed checkpoint sequence differs from the declared schedule')
+        final = local == stage['updates']
+        _require(item['kind'] == ('endpoint' if final else 'intermediate'), 'checkpoint kind differs')
+        name = 'endpoint.json' if final else f'checkpoint_{local:08d}.json'
+        path = _input_receipt(item['record'])
+        _require(path == root/f'stage_{index:04d}_{stage["name"]}'/name, 'sealed checkpoint path differs')
+        record, actual = _read_input(path)
+        _require(actual == item['record'] and record['stage_index'] == index and record['stage'] == stage['name']
+                 and record['stage_updates'] == local and record['cumulative_successful_updates'] == cumulative
+                 and record['cumulative_attempted_updates'] == cumulative
+                 and record['stage_fresh_transitions'] == local*stage['transitions_per_update']
+                 and record['cumulative_collected_transitions'] == cumulative_samples,
+                 'sealed checkpoint record differs from inventory')
+        checkpoint_path = _input_receipt(record['checkpoint'])
+        sidecar_path = _input_receipt(record['sidecar'], require_bytes=False)
+        expected_checkpoint = path.with_suffix('.pt') if not final else path.parent/'endpoint.pt'
+        _require(checkpoint_path == expected_checkpoint and sidecar_path == Path(str(expected_checkpoint)+'.json'),
+                 'sealed checkpoint payload or sidecar path differs')
+        prefix = item['metrics_prefix']
+        _require(type(prefix) is dict and set(prefix) == {
+            'path','sha256','bytes','rows','optimizer_steps','optimization_sample_uses'}
+            and prefix['path'] == str(root/'metrics.jsonl')
+            and isinstance(prefix['sha256'],str) and re.fullmatch(r'[0-9a-f]{64}',prefix['sha256']),
+            'sealed checkpoint metric prefix fields differ')
+        for key in ('bytes','rows','optimizer_steps','optimization_sample_uses'):
+            _integer(prefix[key], 'sealed checkpoint metric prefix '+key, 0 if key in ('optimizer_steps','optimization_sample_uses') else 1)
+        _require(prefix['rows'] == cumulative-first_update, 'sealed metric prefix update count differs')
+        result.append((item, record, path))
+    missing = [{'stage_index': index, 'local_update': local} for index,local,_,_,_ in expected[len(records):]]
+    _require(completion.get('missing_checkpoints') == missing
+             and completion.get('last_sealed_learning_checkpoint') == (records[-1] if records else None),
+             'checkpoint completion inventory or missing denominator differs')
+    if require_complete:
+        _require(not missing, 'completed stage is missing a declared learning checkpoint')
+    return result
+
+
+def _verify_metric_prefixes(path, records):
+    """Bind all inventory prefixes in one streamed pass over immutable worker metrics."""
+    pending = {item['metrics_prefix']['bytes']: item['metrics_prefix'] for item,_,_ in records}
+    _require(len(pending) == len(records), 'checkpoint metric prefixes repeat a boundary')
+    sha, count, length, steps, uses = hashlib.sha256(), 0, 0, 0, 0
+    with path.open('rb') as stream:
+        for raw in stream:
+            if not pending:
+                break
+            row = json.loads(raw)
+            _require(raw == json_bytes(row)+b'\n', 'checkpoint prefix metric row is incomplete')
+            sha.update(raw)
+            length += len(raw)
+            count += 1
+            steps += row['optimization']['optimizer_steps']
+            uses += row['optimization']['sample_count']
+            if length in pending:
+                prefix = pending.pop(length)
+                _require(prefix['sha256'] == sha.hexdigest() and prefix['rows'] == count
+                         and prefix['optimizer_steps'] == steps and prefix['optimization_sample_uses'] == uses,
+                         'checkpoint metric prefix differs from actual rows')
+            _require(not pending or length < min(pending), 'checkpoint prefix is not a complete metric-row boundary')
+    _require(not pending, 'checkpoint metric prefix exceeds the actual recorded metrics')
+
+
 def _segment_parent(receipt, plan, config):
     """CPU-only proof of a completed, logged parent before any new output/env."""
     endpoint_path = _input_receipt(receipt)
@@ -536,10 +704,10 @@ def _segment_parent(receipt, plan, config):
     reservation, reservation_receipt = _read_input(parent_root/'reservation.json')
     completion, completion_receipt = _read_input(parent_root/'completion.json')
     _require(request.get('format') in ('transformer_rl.fixed_exposure_job', 'transformer_rl.exposure_segment_request')
-             and type(request.get('schema_version')) is int and request['schema_version'] == 1,
+             and type(request.get('schema_version')) is int and request['schema_version'] in (1, 2),
              'parent request schema differs')
     _require(completion.get('format') in ('transformer_rl.fixed_exposure_completion', 'transformer_rl.exposure_segment_completion')
-             and type(completion.get('schema_version')) is int and completion['schema_version'] == 1,
+             and type(completion.get('schema_version')) is int and completion['schema_version'] == request['schema_version'],
              'parent completion schema differs')
     expected_completion_format = ('transformer_rl.exposure_segment_completion'
         if request['format'] == 'transformer_rl.exposure_segment_request' else 'transformer_rl.fixed_exposure_completion')
@@ -668,9 +836,11 @@ def _segment_parent(receipt, plan, config):
     schedule, names, stage_learning = [], set(), {}
     next_update, next_samples = first_update, first_samples
     for local_index, stage in enumerate(parent_stages):
-        _require(isinstance(stage,dict) and set(stage) == {
-            'name','config','updates','transitions_per_update','fresh_transition_budget'},
+        _require(isinstance(stage,dict) and set(stage) in ({
+            'name','config','updates','transitions_per_update','fresh_transition_budget'}, {
+            'name','config','updates','transitions_per_update','fresh_transition_budget','checkpoint_updates'}),
             'parent declared stage fields differ')
+        _checkpoint_updates(stage)
         _require(isinstance(stage['name'],str)
                  and re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,63}',stage['name'])
                  and stage['name'] not in names, 'parent declared stage names differ')
@@ -776,6 +946,10 @@ def _segment_parent(receipt, plan, config):
     for key in ('optimizer_steps','optimization_sample_uses','automatic_retries'):
         _integer(completion.get(key), 'parent completion '+key, 0)
     _require(matching_count == endpoint['stage_updates'], 'parent stage complete metrics count differs')
+    if request['schema_version'] == 2:
+        checkpoint_records = _sealed_checkpoint_records(request, completion, parent_root, stage_offset,
+                                                        first_update, first_samples=first_samples, require_complete=True)
+        _verify_metric_prefixes(metrics_path, checkpoint_records)
     proof_inputs.extend(((parent_root/'request.json',request_receipt),
                          (parent_root/'reservation.json',reservation_receipt),
                          (parent_root/'completion.json',completion_receipt), (metrics_path,metric_receipt)))
@@ -786,6 +960,175 @@ def _segment_parent(receipt, plan, config):
         'completion':completion_receipt,'metrics':metric_receipt,'config':parent_config,
         'protected_trees':tuple(protected_trees), 'proof_inputs':proof_inputs,
         'cumulative_optimizer_steps':prior_optimizer_steps+all_steps}
+
+
+def verify_exposure_checkpoint(receipt, plan, config):
+    """CPU proof of a saved observation point, including a subsequently failed stage.
+
+    Intermediate observation points authorize offline evaluation only. They do
+    not authorize a restarted learner or turn partial exposure into completion.
+    """
+    path = _input_receipt(receipt)
+    record, actual_receipt = _read_input(path)
+    _require(actual_receipt == receipt, 'learning checkpoint receipt differs')
+    if path.name == 'endpoint.json':
+        proof = _segment_parent(receipt, plan, config)
+        completion, _ = _read_input(Path(proof['completion']['path']))
+        item = next((item for item in completion.get('sealed_checkpoints', []) if item['record'] == receipt), None)
+        return {**proof, 'checkpoint': deepcopy(proof['endpoint']['checkpoint']),
+                'metrics_prefix': deepcopy(item['metrics_prefix']) if item is not None else None}
+    _require(record.get('format') == 'transformer_rl.exposure_learning_checkpoint',
+             'intermediate learning checkpoint record required')
+    root = path.parent.parent
+    request, request_receipt = _read_input(root/'request.json')
+    reservation, reservation_receipt = _read_input(root/'reservation.json')
+    completion, completion_receipt = _read_input(root/'completion.json')
+    _require(request.get('format') in ('transformer_rl.fixed_exposure_job','transformer_rl.exposure_segment_request')
+             and request.get('schema_version') == 2 and type(request['schema_version']) is int
+             and request.get('sha256') == digest({k:v for k,v in request.items() if k != 'sha256'}),
+             'scheduled learning checkpoint request required')
+    extra = {'stage_index','parent_endpoint','parent_request','parent_reservation','parent_completion',
+             'parent_metrics','charge_scope','whole_job_reservation_created'} if request['format'].endswith('segment_request') else set()
+    _require(set(request) == set(plan)|extra and all(request.get(k) == v for k,v in plan.items()
+             if k not in ('format','sha256')), 'learning checkpoint request differs from authorized plan')
+    _require(completion.get('format') == ('transformer_rl.exposure_segment_completion' if extra
+             else 'transformer_rl.fixed_exposure_completion') and completion.get('schema_version') == 2
+             and completion.get('job_plan_sha256') == request['sha256']
+             and completion.get('job_id') == plan['job_id'] and completion.get('source') == plan['source']
+             and completion.get('status') in ('completed','failed','interrupted','partial_rollout','user_interrupted'),
+             'learning checkpoint completion producer or state differs')
+    _require(reservation.get('job_plan_sha256') == request['sha256']
+             and reservation.get('charged_updates') == request['reserved_updates']
+             and reservation.get('charged_fresh_transition_budget') == request['reserved_fresh_transitions']
+             and reservation.get('refund') is False and completion.get('refund') is False
+             and completion.get('automatic_retries') == 0 and completion.get('independent_evaluation_performed') is False,
+             'learning checkpoint reservation differs')
+    if extra:
+        _require(reservation.get('format') == 'transformer_rl.exposure_segment_reservation'
+                 and reservation.get('schema_version') == 1
+                 and reservation.get('charge_scope') == request.get('charge_scope') == completion.get('charge_scope')
+                 == 'segment_itemization_of_external_whole_job_reservation'
+                 and all(value.get('whole_job_reservation_created') is False for value in (request,reservation,completion)),
+                 'learning checkpoint segment charge differs')
+    prior, prior_steps, first_update, first_samples = None, 0, 0, 0
+    offset = request.get('stage_index', 0)
+    if extra:
+        _integer(offset, 'learning checkpoint stage index', 0)
+        _require(len(request['stages']) == 1 and completion.get('stage_index') == offset,
+                 'learning checkpoint segment stage membership differs')
+        previous_receipt = request.get('parent_endpoint')
+        _require(completion.get('parent_endpoint') == previous_receipt, 'learning checkpoint parent differs')
+        if offset:
+            prior = _segment_parent(previous_receipt, plan, config)
+            _require(prior['endpoint']['stage_index'] == offset-1, 'learning checkpoint parent skips a stage')
+            for key in ('request','reservation','completion','metrics'):
+                _require(request.get('parent_'+key) == prior[key], 'learning checkpoint ancestor receipt differs')
+            first_update = prior['endpoint']['cumulative_successful_updates']
+            first_samples = prior['endpoint']['cumulative_collected_transitions']
+            prior_steps = prior['cumulative_optimizer_steps']
+        else:
+            _require(all(request.get(key) is None for key in ('parent_endpoint','parent_request','parent_reservation',
+                     'parent_completion','parent_metrics')), 'fresh checkpoint has an unexpected parent')
+    records = _sealed_checkpoint_records(request, completion, root, offset, first_update,
+                                        first_samples=first_samples,
+                                        require_complete=completion['status'] == 'completed')
+    selected = next((item for item in records if item[0]['record'] == receipt), None)
+    _require(selected is not None and selected[0]['kind'] == 'intermediate', 'checkpoint is not uniquely sealed')
+    item = selected[0]
+    local_index = item['stage_index']-offset
+    stage = request['stages'][local_index]
+    _require(config.to_dict() == stage['config'] and item['local_update'] < stage['updates'],
+             'intermediate checkpoint changes the frozen stage config or endpoint')
+    learning = _checkpoint_learning_proof(record, path, plan, request, config, intermediate=True)
+    _require(learning['config'].to_dict() == stage['config'], 'checkpoint actual config differs from stage')
+    previous_endpoint, previous_config = (prior['endpoint'],prior['config']) if prior else (None,None)
+    earlier_inputs = []
+    for index in range(local_index):
+        earlier = completion['endpoints'][index]
+        earlier_path = root/f'stage_{index:04d}_{request["stages"][index]["name"]}'/'endpoint.json'
+        earlier_config = FrameTrainConfig.from_dict(request['stages'][index]['config'])
+        earlier_learning = _checkpoint_learning_proof(earlier, earlier_path, plan, request, earlier_config)
+        _learning_transition(earlier_learning['metadata'], earlier_config, previous_endpoint, previous_config)
+        earlier_item = next(item for item,_,_ in records if item['stage_index'] == index and item['kind'] == 'endpoint')
+        _adam_step_proof(earlier_learning['optimizer'],prior_steps+earlier_item['metrics_prefix']['optimizer_steps'])
+        earlier_inputs.extend(earlier_learning['proof_inputs'])
+        previous_endpoint, previous_config = earlier, earlier_config
+    _learning_transition(learning['metadata'], learning['config'], previous_endpoint, previous_config)
+    metrics_path = _input_path(str(root/'metrics.jsonl'))
+    before = metrics_path.stat()
+    metrics_receipt = {'path':str(metrics_path),'sha256':_sha(metrics_path),'bytes':before.st_size}
+    _verify_metric_prefixes(metrics_path, records)
+    rows, samples, steps, uses = 0, first_samples, 0, 0
+    expected_rows = ((stage['name'], offset+index, start_update+local, start_samples+local*stage['transitions_per_update'],
+                      stage['transitions_per_update'])
+        for index,stage,start_update,start_samples in _stage_prefix_schedule(request, first_update, first_samples)
+        for local in range(1,stage['updates']+1))
+    with metrics_path.open('rb') as stream:
+        while rows < item['metrics_prefix']['rows']:
+            raw = stream.readline()
+            row = json.loads(raw)
+            name,index,update,expected_samples,per_update = next(expected_rows)
+            _require(raw == json_bytes(row)+b'\n' and row.get('stage') == name
+                     and type(row.get('stage_index')) is int and row['stage_index'] == index
+                     and all(type(row.get(k)) is int for k in ('update','consumed_updates','cumulative_transitions','batch_samples'))
+                     and row['update'] == row['consumed_updates'] == update
+                     and row['cumulative_transitions'] == expected_samples and row['batch_samples'] == per_update
+                     and row['collection'].get('transitions') == per_update
+                     and type(row['collection'].get('transitions')) is int
+                     and row['collection'].get('vector_steps') == plan['rollout_steps']
+                     and type(row['collection'].get('vector_steps')) is int
+                     and row['collection'].get('early_stopped') is False, 'checkpoint complete rollout prefix differs')
+            optimization = row['optimization']
+            for key in ('optimizer_steps','planned_optimizer_steps','sample_count'):
+                _integer(optimization.get(key), 'checkpoint optimizer '+key, 0)
+            chunks = min(config.ppo.num_minibatches,per_update)
+            epochs,remainder = divmod(optimization['optimizer_steps'],chunks)
+            sample_uses = epochs*per_update + remainder*(per_update//chunks) + min(remainder,per_update%chunks)
+            _require(optimization['planned_optimizer_steps'] == config.ppo.epochs*chunks
+                     and optimization['optimizer_steps'] <= optimization['planned_optimizer_steps']
+                     and optimization['sample_count'] == sample_uses
+                     and type(optimization.get('early_stopped')) is bool
+                     and optimization['early_stopped'] == (optimization['optimizer_steps'] < optimization['planned_optimizer_steps']),
+                     'checkpoint frozen optimizer minibatch prefix differs')
+            rows += 1
+            samples += per_update
+            steps += optimization['optimizer_steps']
+            uses += optimization['sample_count']
+    _require(record['cumulative_successful_updates'] == first_update+rows
+             and record['cumulative_attempted_updates'] == first_update+rows
+             and record['cumulative_collected_transitions'] == samples
+             and item['metrics_prefix']['optimizer_steps'] == steps
+             and item['metrics_prefix']['optimization_sample_uses'] == uses, 'checkpoint measured clocks differ')
+    _adam_step_proof(learning['optimizer'], prior_steps+steps)
+    for key, lower, upper in (('successful_updates',rows,request['reserved_updates']),
+                             ('attempted_updates',rows,request['reserved_updates']),
+                             ('recorded_metric_updates',rows,request['reserved_updates']),
+                             ('actual_collected_transitions',samples-first_samples,request['reserved_fresh_transitions'])):
+        _integer(completion.get(key), 'checkpoint completion '+key, 0)
+        _require(lower <= completion[key] <= upper, 'checkpoint completion contradicts its sealed prefix')
+    inputs = [*learning['proof_inputs'], *earlier_inputs, (root/'request.json',request_receipt),
+              (root/'reservation.json',reservation_receipt), (root/'completion.json',completion_receipt),
+              (metrics_path,metrics_receipt)]
+    if prior:
+        inputs.extend(prior['proof_inputs'])
+    for checked, pin in inputs:
+        _require(checked.stat().st_size == pin['bytes'] and _sha(checked) == pin['sha256'],
+                 'learning checkpoint proof input changed')
+    after = metrics_path.stat()
+    _require((before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns)
+             == (after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns), 'learning checkpoint metrics changed')
+    return {'endpoint':record,'receipt':actual_receipt,'checkpoint':deepcopy(record['checkpoint']),
+        'config':learning['config'],'completion':completion_receipt,'request':request_receipt,
+        'reservation':reservation_receipt,'metrics':metrics_receipt,'metrics_prefix':deepcopy(item['metrics_prefix']),
+        'cumulative_optimizer_steps':prior_steps+steps,'proof_inputs':inputs}
+
+
+def _stage_prefix_schedule(request, first_update, first_samples):
+    update, samples = first_update, first_samples
+    for index, stage in enumerate(request['stages']):
+        yield index, stage, update, samples
+        update += stage['updates']
+        samples += stage['fresh_transition_budget']
 
 
 def train_exposure_segment(stage, env_factory, environment_reference, output_root, *,

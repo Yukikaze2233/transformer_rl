@@ -256,7 +256,7 @@ def _protected_roots(history, descriptor, dependencies, runtime_roots, environme
 
 def freeze(history_root, *, output_root, retention_seed, device, curriculum_summary,
            diagnostic_summary, learning_summary, resource_lock, runtime_roots,
-           runtime_mutable_paths=None,
+           runtime_mutable_paths=None, checkpoint_interval=None,
            worker_timeout_seconds=86700., max_wait_seconds=1814400., poll_seconds=20.,
            _allow_existing_output=False):
     """Reconstruct the full grid and all file bindings; create no output or process."""
@@ -267,6 +267,8 @@ def freeze(history_root, *, output_root, retention_seed, device, curriculum_summ
     _require(source_identity() == plan['source'], 'current learner differs from the packed history source')
     history_receipt = _receipt(history / 'history_plan.json')
     spec = plan['spec']
+    _require(checkpoint_interval is None or type(checkpoint_interval) is int and checkpoint_interval > 0,
+             'checkpoint interval must be an explicit positive integer')
     _require(type(retention_seed) is int and 0 <= retention_seed < 2**32, 'private seed must be uint32')
     eval_seeds = [*spec['evaluation']['validation_seeds'], *spec['evaluation']['seeds']]
     _require(retention_seed not in [*spec['seeds'], *eval_seeds, *spec['training']['anchor_seeds']],
@@ -330,23 +332,31 @@ def freeze(history_root, *, output_root, retention_seed, device, curriculum_summ
                     'config_receipt': _receipt(history / 'study' / route), 'updates': stage['updates'],
                     'fresh_transitions': stage_samples, 'expected_cumulative_updates': updates,
                     'expected_cumulative_transitions': transitions})
+                if checkpoint_interval is not None:
+                    stages[-1]['checkpoint_updates'] = sorted(set(
+                        [*range(checkpoint_interval, stage['updates'], checkpoint_interval), stage['updates']]))
             guard = initial_model_sha256(configs[f'configs/{variant["name"]}.train.{spec["stages"][0]["name"]}.json'], seed)
             jobs.append({**identity, 'id': job_id, 'retention_seed': retention_seed,
                          'initial_model_sha256': guard, 'stages': stages,
                          'reserved_updates': updates, 'reserved_fresh_transitions': transitions})
             for index in range(len(stages)):
-                for role, seeds in (('validation', spec['evaluation']['validation_seeds']),
-                                    ('held_out', spec['evaluation']['seeds'])):
-                    for evaluation_seed in seeds:
-                        for case in spec['scenarios']:
-                            route = f'configs/{variant["name"]}.eval.{case["name"]}.json'
-                            config = configs[route]
-                            cell = {'job_id': job_id, 'stage_index': index, 'role': role,
-                                    'seed': evaluation_seed, 'scenario': case['name']}
-                            cells.append({**cell, 'id': 'cell_' + digest(cell)[:24],
-                                'config_receipt': _receipt(history / 'study' / route),
-                                'num_envs': config.environment['num_envs'],
-                                'expected_policy_samples': spec['evaluation']['steps'] * config.environment['num_envs']})
+                stage = stages[index]
+                checkpoint_updates = stage.get('checkpoint_updates', [stage['updates']])
+                for local_update in checkpoint_updates:
+                    for role, seeds in (('validation', spec['evaluation']['validation_seeds']),
+                                        ('held_out', spec['evaluation']['seeds'])):
+                        for evaluation_seed in seeds:
+                            for case in spec['scenarios']:
+                                route = f'configs/{variant["name"]}.eval.{case["name"]}.json'
+                                config = configs[route]
+                                cell = {'job_id': job_id, 'stage_index': index, 'role': role,
+                                        'seed': evaluation_seed, 'scenario': case['name']}
+                                if checkpoint_interval is not None:
+                                    cell['checkpoint_update'] = stage['expected_cumulative_updates'] - stage['updates'] + local_update
+                                cells.append({**cell, 'id': 'cell_' + digest(cell)[:24],
+                                    'config_receipt': _receipt(history / 'study' / route),
+                                    'num_envs': config.environment['num_envs'],
+                                    'expected_policy_samples': spec['evaluation']['steps'] * config.environment['num_envs']})
     _require(len({job['id'] for job in jobs}) == len(jobs)
              and len({cell['id'] for cell in cells}) == len(cells), 'grid identity collision')
     budget = {'jobs': len(jobs), 'training_updates': sum(j['reserved_updates'] for j in jobs),
@@ -372,7 +382,7 @@ def freeze(history_root, *, output_root, retention_seed, device, curriculum_summ
     for pin in locks:
         _require(predecessors._lock_signature(pin['path']) == pin,
                  'original lock inode changed while freezing')
-    definition = {'format': FORMAT, 'schema_version': 1, 'history_root': str(history),
+    definition = {'format': FORMAT, 'schema_version': 2 if checkpoint_interval is not None else 1, 'history_root': str(history),
         'history_manifest': history_receipt, 'history_sha256': descriptor['sha256'],
         'packed_plan_sha256': plan['sha256'], 'source': source_identity(), 'output_root': str(destination),
         'runtime_roots': list(map(str, map(_path, runtime_roots))), 'runtime': runtime,
@@ -394,13 +404,17 @@ def freeze(history_root, *, output_root, retention_seed, device, curriculum_summ
         'execution_status': 'unexecuted', 'needs_fixed_authorization_OS_controller': True,
         'independent_evaluation_performed': False, 'hardware_verified': False,
         'formal_architecture_selection': False}
+    if checkpoint_interval is not None:
+        definition['execution']['checkpoint_interval'] = checkpoint_interval
+        definition['policy']['evaluation'] = 'every_declared_checkpoint_all_scenarios_after_stage_learning_with_missing_cells_preserved'
+        definition['policy']['checkpoint'] = 'successful_update_boundary_without_environment_history_optimizer_or_RNG_reset'
     return {**definition, 'sha256': digest(definition)}
 
 
 def validate_protocol(protocol):
     """Rebuild all inputs and the complete denominator; a self-signature is insufficient."""
     _require(type(protocol) is dict and protocol.get('format') == FORMAT
-             and type(protocol.get('schema_version')) is int and protocol['schema_version'] == 1
+             and type(protocol.get('schema_version')) is int and protocol['schema_version'] in (1, 2)
              and digest({k: v for k, v in protocol.items() if k != 'sha256'}) == protocol.get('sha256'),
              'invalid exposure protocol identity')
     dependencies = protocol['execution']['dependencies']
@@ -420,6 +434,7 @@ def validate_protocol(protocol):
         curriculum_summary=dependencies[0]['summary_path'], diagnostic_summary=dependencies[1]['summary_path'],
         learning_summary=dependencies[2]['summary_path'], resource_lock=next(iter(shared)),
         runtime_roots=protocol['runtime_roots'], runtime_mutable_paths=protocol['runtime_mutable_paths'],
+        checkpoint_interval=execution.get('checkpoint_interval'),
         worker_timeout_seconds=execution['worker_timeout_seconds'],
         max_wait_seconds=execution['max_wait_seconds'], poll_seconds=execution['poll_seconds'],
         _allow_existing_output=True)
@@ -442,6 +457,8 @@ def main(argv=None):
     prepare.add_argument('--worker-timeout-seconds', type=float, default=86700.)
     prepare.add_argument('--max-wait-seconds', type=float, default=1814400.)
     prepare.add_argument('--poll-seconds', type=float, default=20.)
+    prepare.add_argument('--checkpoint-interval', type=int,
+                         help='Local successful update interval; save and evaluate continuous learning snapshots')
     validate = commands.add_parser('validate')
     validate.add_argument('--protocol', type=Path, required=True)
     args = parser.parse_args(argv)
@@ -452,7 +469,7 @@ def main(argv=None):
                 learning_summary=args.learning_summary, resource_lock=args.resource_lock, runtime_roots=args.runtime_roots,
                 runtime_mutable_paths=args.runtime_mutable_path,
                 worker_timeout_seconds=args.worker_timeout_seconds, max_wait_seconds=args.max_wait_seconds,
-                poll_seconds=args.poll_seconds)
+                poll_seconds=args.poll_seconds, checkpoint_interval=args.checkpoint_interval)
             destination = _path(args.protocol_output)
             for root in [protocol['output_root'], *protocol['protected_roots']]:
                 path = _path(root)
