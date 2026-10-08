@@ -23,7 +23,7 @@ from transformer_rl.ppo import PPOTrainer
 from transformer_rl.retention import AnchorRegularizer, save_anchors
 
 sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
-from packed_env import make_env
+from packed_env import PackedFixture, make_env
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -111,6 +111,75 @@ def test_repeat_first_history_is_row_local_owned_and_idempotent():
     assert torch.equal(after.frames[1:], before[1:])
     after.frames.fill_(100)
     assert not (history.snapshot().frames == 100).any()
+
+
+class OutcomeFixture(PackedFixture):
+    def __init__(self, model_config, environment_config, device):
+        super().__init__(model_config, environment_config, device)
+        self.metadata["evaluation_groups"] = ["continuous", "continuous", "jump"]
+
+    def step(self, issued_action):
+        ticks = self.age.clone() + 1
+        result = super().step(issued_action)
+        if not getattr(self, "enable_episode_outcomes", False):
+            return result
+        done = result.terminated | result.truncated
+        mask = torch.zeros(3, dtype=torch.bool, device=self.device)
+        boundary, success = mask.clone(), mask.clone()
+        boundary[0], success[2] = done[0], done[2]
+        blocked = mask.clone()
+        blocked[1] = done[1] & self.options.get("blocked", False)
+        horizon = torch.tensor([4, 8 if self.options.get("blocked", False) else 4, 4],
+                               dtype=torch.int64, device=self.device)
+        result.info["evaluation_episode"] = {"episode_ticks": ticks, "episode_horizon_ticks": horizon,
+            "time_out": result.truncated.clone(), "environment_failure": mask,
+            "task_success": success, "boundary": boundary, "blocked": blocked,
+            "survival_applicable": torch.tensor([True, True, False], device=self.device)}
+        result.info["evaluation_state"] = {"height": torch.tensor([.3, .3, .1], device=self.device),
+                                           "tilt": torch.zeros(3, device=self.device)}
+        return result
+
+
+@pytest.mark.parametrize("steps,blocked", ((2, False), (10, False), (10, True)))
+def test_evaluation_outcomes_use_fixed_first_cohort_and_correct_group_denominators(tmp_path, steps, blocked):
+    config = configuration()
+    config = replace(config, environment={**config.environment, "blocked": blocked})
+    trained = train_frame_policy(config, OutcomeFixture, "outcome_fixture:make_env", tmp_path / "run",
+        updates=1, rollout_steps=5, tensorboard=False, seed=71)
+    result = evaluate_frame_policy(trained["checkpoint"], OutcomeFixture, config.environment,
+        steps=steps, seed=801, settle_steps=0, min_steady_samples=1)
+    outcomes = result["episode_outcomes"]
+    continuous = result["groups"]["continuous"]["episode_outcomes"]
+    jump = result["groups"]["jump"]["episode_outcomes"]
+    assert outcomes["requested_episodes"] == 3
+    assert outcomes["survival"]["requested_episodes"] == 2
+    assert continuous["requested_episodes"] == 2 and jump["requested_episodes"] == 1
+    if steps == 2:
+        assert outcomes["censored_episodes"] == 3 and not outcomes["all_requested_accounted"]
+        assert outcomes["survival"]["full_horizon_survival_rate"] == 0
+        assert outcomes["task"]["task_success_rate"] == 0
+    else:
+        assert result["success_rate"] == 1  # Legacy flags can include early boundary/blocked exits.
+        assert result["completed_episodes"] > 3
+        assert outcomes["completed_episodes"] == 3 and outcomes["all_requested_accounted"]
+        assert continuous["survival"]["full_horizon_survival_rate"] == (0 if blocked else .5)
+        assert continuous["survival"]["healthy_full_horizon_rate"] == (0 if blocked else .5)
+        assert jump["survival"]["full_horizon_survival_rate"] is None
+        assert jump["task"]["task_success_rate"] == 1
+        assert outcomes["environment_failure_episodes"] == 0
+        assert outcomes["end_reasons"]["boundary"] == 1
+    assert "legacy" in result["success_rate_scope"]
+
+
+def test_evaluation_outcomes_without_explicit_metadata_stay_unavailable(tmp_path):
+    config = configuration()
+    trained = train_frame_policy(config, make_env, "packed_env:make_env", tmp_path / "run",
+        updates=1, rollout_steps=5, tensorboard=False, seed=71)
+    result = evaluate_frame_policy(trained["checkpoint"], make_env, config.environment,
+        steps=5, seed=801, settle_steps=0, min_steady_samples=1)
+    assert result["success_rate"] == 1
+    assert not result["episode_outcomes"]["available"]
+    assert result["episode_outcomes"]["survival"]["full_horizon_survival_rate"] is None
 
 
 def test_collector_keeps_raw_likelihood_and_correct_timeout_state():

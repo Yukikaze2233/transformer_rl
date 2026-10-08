@@ -22,6 +22,9 @@ class TensorChassis:
         self.value = torch.zeros(3)
         self.failed = torch.zeros(3, dtype=torch.bool)
         self.success = torch.zeros(3, dtype=torch.bool)
+        self.episode_limits = torch.ones(3, dtype=torch.int64)
+        self.boundary = torch.zeros(3, dtype=torch.bool)
+        self.blocked = torch.zeros(3, dtype=torch.bool)
 
     def get_observations(self):
         return {"policy": self.value[:, None].expand(-1, 35).clone(),
@@ -39,6 +42,7 @@ class TensorChassis:
             "gravity": torch.tensor([[0., 0., -1.]]).expand(3, -1).clone(),
             "commands": torch.tensor([[0., 0., .3]]).expand(3, -1).clone(), "height": torch.full((3,), .3),
             "episode_ticks": torch.ones(3, dtype=torch.long), "terminated": self.failed.clone(),
+            "reasons": {"boundary": self.boundary, "blocked": self.blocked},
             "success": self.success.clone(), "leg_target_position": torch.zeros(3, 4),
             "wheel_target_velocity": torch.zeros(3, 2), "motor_effort": torch.zeros(3, 6)}
         return self.get_observations(), torch.ones(3), torch.ones(3, dtype=torch.bool), {
@@ -63,6 +67,71 @@ def test_terminal_critic_and_goal_success_survive_manual_reset(real_events):
     assert adapter._fresh.all()
     env.value.fill_(100.)
     torch.testing.assert_close(result.final_critic[:, 0], torch.tensor([1., 2., 3.]))
+
+
+@pytest.mark.parametrize("device_alias", ("cpu", "cpu:0"))
+def test_episode_evidence_is_owned_before_reset_and_keeps_success_distinct(device_alias):
+    class ResettingChassis(TensorChassis):
+        def reset(self, rows):
+            super().reset(rows)
+            self.episode_limits[rows] = 99
+            self.boundary[rows] = False
+            self.blocked[rows] = False
+
+    env = ResettingChassis()
+    env.device = device_alias
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {})
+    adapter.enable_episode_outcomes = True
+    adapter.reset()
+    env.episode_limits.copy_(torch.tensor([1, 8, 12]))
+    env.boundary[0] = True
+    env.blocked[1] = True
+    env.success[2] = True
+    result = adapter.step(torch.zeros(3, 6))
+    packet = result.info["evaluation_episode"]
+    assert packet["episode_horizon_ticks"].tolist() == [1, 8, 12]
+    assert packet["boundary"].tolist() == [True, False, False]
+    assert packet["blocked"].tolist() == [False, True, False]
+    assert packet["survival_applicable"].tolist() == [True, False, False]
+    assert packet["task_success"].tolist() == [False, False, True]
+    assert not packet["environment_failure"].any()
+    assert result.terminated[2]  # A learning termination is a task success here.
+    assert env.episode_limits.tolist() == [99, 99, 99]
+    assert not env.boundary.any() and not env.blocked.any()
+    assert result.info["evaluation_state"]["world_position"][0, 0] == .5
+    assert not env.pose.any()
+
+
+@pytest.mark.parametrize("missing", ("reasons", "boundary", "horizon", "active_blocked"))
+def test_episode_evidence_rejects_missing_timeout_causes(missing):
+    env = TensorChassis()
+    original = env.step
+    def missing_evidence(issued):
+        raw, reward, done, extras = original(issued)
+        if missing == "reasons":
+            del extras["diagnostics"]["reasons"]
+        elif missing == "boundary":
+            del extras["diagnostics"]["reasons"]["boundary"]
+        elif missing == "horizon":
+            env.episode_limits = None
+        else:
+            env.step_assist = object()
+            del extras["diagnostics"]["reasons"]["blocked"]
+        return raw, reward, done, extras
+    env.step = missing_evidence
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {})
+    adapter.enable_episode_outcomes = True
+    with pytest.raises(ValueError, match="episode|blocked"):
+        adapter.step(torch.zeros(3, 6))
+
+
+def test_episode_evidence_without_explicit_task_contract_is_unavailable():
+    env = TensorChassis()
+    env.cfg["evaluation_exact_cases"] = False
+    adapter = ChassisFrameAdapter(env, FrameModelConfig(), {})
+    adapter.enable_episode_outcomes = True
+    result = adapter.step(torch.zeros(3, 6))
+    assert "evaluation_episode" not in result.info
 
 
 def test_default_study_contains_only_requested_architecture_families_and_consistent_presets():

@@ -332,6 +332,8 @@ def evaluate_suite(checkpoint, configs, outputs, *, steps, seed, device, settle_
             "checkpoint_sha256": report["checkpoint_sha256"], "checkpoint_update": report["checkpoint_update"],
             "seed": seed, "steps": steps, "environment_provenance": report["environment_provenance"],
             "control": report["control"], "groups": {name: value["control"] for name, value in report["groups"].items()},
+            "episode_outcomes": report["episode_outcomes"],
+            "group_episode_outcomes": {name: value["episode_outcomes"] for name, value in report["groups"].items()},
             "trace": report.get("trace")})
     return {"case_reports": [str(path) for path in outputs], "simulation_envs": environment["num_envs"], "seed": seed}
 
@@ -341,6 +343,7 @@ class ChassisFrameAdapter:
         import torch
         self.env, self.config, self.metadata = env, config, metadata
         self.enable_control_metrics = enable_control_metrics
+        self.enable_episode_outcomes = False
         self._reset_transform = reset_transform
         self._last_environment_metrics = {}
         self._control_motor_indices = None
@@ -465,6 +468,33 @@ class ChassisFrameAdapter:
                 packet["scaled_nominal_effort_bounds"] *= scale[..., None]
         return packet
 
+    def _episode_packet(self, diagnostic, time_outs, done):
+        """Preserve explicit timeout reasons and per-case limits before reset."""
+        import torch
+        reasons = diagnostic.get("reasons")
+        horizon = getattr(self.env, "episode_limits", None)
+        if not isinstance(reasons, dict) or "boundary" not in reasons or horizon is None:
+            raise ValueError("episode outcomes require explicit reasons and episode limits")
+        blocked = reasons.get("blocked")
+        if blocked is None:
+            if getattr(self.env, "step_assist", None) is not None:
+                raise ValueError("active step assistance requires an explicit blocked reason")
+            blocked = torch.zeros_like(done)
+        values = {"episode_ticks": diagnostic["episode_ticks"], "episode_horizon_ticks": horizon,
+                  "time_out": time_outs, "environment_failure": diagnostic["terminated"],
+                  "task_success": diagnostic["success"], "boundary": reasons["boundary"],
+                  "blocked": blocked, "survival_applicable": self._survival_only}
+        for name, value in values.items():
+            dtype = torch.int64 if name in ("episode_ticks", "episode_horizon_ticks") else torch.bool
+            if (not isinstance(value, torch.Tensor) or value.shape != (self.num_envs,)
+                    or value.dtype != dtype or value.device != done.device):
+                raise ValueError(f"invalid PRE-reset episode outcome {name}")
+        packet = {name: value.clone() for name, value in values.items()}
+        packet["time_out"] &= done
+        packet["environment_failure"] &= done
+        packet["task_success"] &= done & ~packet["environment_failure"]
+        return packet
+
     def step(self, issued_action):
         import torch
         from .types import StepResult
@@ -500,6 +530,11 @@ class ChassisFrameAdapter:
                 "evaluation_metrics": {name: value.clone() for name, value in metrics.items()},
                 "evaluation_signals": signals,
                 "evaluation_signal_time": diagnostic["episode_ticks"].double() * .01}
+        if self.enable_episode_outcomes and self._survival_only is not None:
+            info["evaluation_episode"] = self._episode_packet(diagnostic, extras["time_outs"], done)
+            info["evaluation_state"] = {"height": height.clone(), "tilt": tilt.clone(),
+                "world_position": self.env.robot.data.root_link_pose_w.torch[:, :3].clone()}
+            info["evaluation_step_dt"] = .01
         if self.enable_control_metrics:
             if nominal_scaling is not None:
                 current = self._nominal_effort_scaling()

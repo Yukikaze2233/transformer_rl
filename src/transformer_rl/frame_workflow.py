@@ -262,7 +262,7 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                           settle_steps=200, min_steady_samples=200, anchor_output=None, max_anchors=2048,
                           group_anchor_directory=None, control_metrics=False, trace_output=None, trace_replicas=2,
                           history_control=False, should_stop=None):
-    """Task metrics and episode_success are owned PRE-reset environment diagnostics."""
+    """Keep legacy task flags and fixed first-episode outcomes distinct."""
     _positive_integer(steps, "steps")
     _positive_integer(max_anchors, "max_anchors")
     EpisodeSignalStatistics.validate_protocol(settle_steps, min_steady_samples)
@@ -290,6 +290,9 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
         if provenance["identity"] != metadata["environment_provenance"]["identity"]:
             raise ValueError("evaluation source/assets differ from training")
         model.to(device).eval()
+        from .episode_outcomes import EpisodeOutcomeStatistics
+        env.enable_episode_outcomes = True
+        episode_outcomes = EpisodeOutcomeStatistics(env.num_envs, config.control["policy_dt_s"])
         controls = None
         if control_metrics:
             from .control_metrics import ControlMetrics
@@ -315,6 +318,7 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                 groups[name] = {"indices": indices, "completed": 0, "successes": 0, "failures": 0,
                     "reward": _MetricAccumulator(), "metrics": {}, "frames": [], "mean": [], "std": [], "anchor_count": 0,
                     "statistics": EpisodeSignalStatistics(len(indices), settle_steps=settle_steps, min_steady_samples=min_steady_samples)}
+                groups[name]["episode_outcomes"] = EpisodeOutcomeStatistics(len(indices), config.control["policy_dt_s"])
                 if control_metrics:
                     groups[name]["control"] = ControlMetrics(len(indices), config.control["policy_dt_s"],
                         settle_steps=settle_steps, min_steady_samples=min_steady_samples)
@@ -354,6 +358,11 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                     anchor_count += len(valid)
             result = contract.step(env.step(action.clone()))
             done = result.terminated | result.truncated
+            outcome = result.info.get("evaluation_episode")
+            outcome_state = result.info.get("evaluation_state", {})
+            if not isinstance(outcome_state, dict):
+                raise ValueError("evaluation_state must be a PRE-reset tensor mapping")
+            episode_outcomes.update(outcome, outcome_state.get("height"), outcome_state.get("tilt"), done)
             packet = None
             if controls is not None:
                 packet = result.info.get("control_packet")
@@ -410,6 +419,10 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                 trace.add(recorded, done)
             for group in groups.values():
                 rows = group["indices"]
+                group["episode_outcomes"].update(
+                    {name: value[rows] for name, value in outcome.items()} if outcome is not None else None,
+                    outcome_state["height"][rows] if outcome is not None else None,
+                    outcome_state["tilt"][rows] if outcome is not None else None, done[rows])
                 if controls is not None:
                     group["control"].update({name: value[rows] for name, value in packet.items()}, done[rows])
                 if history_control:
@@ -444,7 +457,9 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                   "completed_episodes": completed, "success_rate": successes / completed if present and completed else None,
                   "failed_episodes": failures if present else None, "success_metric_available": bool(present),
                   "reward_mean": rewards.report()["mean"], "metrics": {name: value.report() for name, value in metrics.items()},
-                  "stability": statistics.report(), "policy": "deterministic_raw_mean_then_declared_action_limits"}
+                  "stability": statistics.report(), "policy": "deterministic_raw_mean_then_declared_action_limits",
+                  "episode_outcomes": episode_outcomes.report(),
+                  "success_rate_scope": "legacy adapter episode_success / all completed auto-reset episodes; not strict full-horizon survival"}
         if controls is not None:
             report["control"] = controls.report()
         if history_controls is not None:
@@ -466,7 +481,7 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                     success_rate=group["successes"] / group["completed"] if present and group["completed"] else None,
                     reward_mean=group["reward"].report()["mean"],
                     metrics={key: values.report() for key, values in group["metrics"].items()},
-                    stability=group["statistics"].report())
+                    stability=group["statistics"].report(), episode_outcomes=group["episode_outcomes"].report())
                 if controls is not None:
                     grouped["control"] = group["control"].report()
                 if history_control:
