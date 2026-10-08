@@ -16,6 +16,8 @@ fresh 使用 `FrameContinuation.start()`，λ 为零，没有教师或 anchors�
 
 ## 阶段链
 
+同进程任务入口要求环境工厂能够完整关闭并重新创建环境。Isaac chassis 的多阶段执行使用每阶段独立 OS worker 与 [分阶段续训接口](exposure_segments.md)，由外层一次性预留整个任务预算，避免在一个进程中重建应用或重复安装奖励包装。
+
 每阶段的真实完整边界保存 `endpoint.pt`、sidecar 与 `endpoint.json`。下一阶段严格从这份文件的实际 SHA 打开，显式指定 `resume=True, environment_transition=True`，继承模型、Adam、全局及私有 RNG、成功更新、已尝试更新与累计 transition。环境和历史重新 reset，历史规则为 repeat-first；物理 episode 没有恢复。
 
 评价不在训练进程内运行，不消费学习随机数，也没有评价 gate 回调影响任务暴露。成绩差的模型仍接受预声明的全部阶段；后续外层评价应覆盖所有候选及每个真正封存的阶段端点。

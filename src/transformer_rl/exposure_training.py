@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+import json
 import math
 import os
 from pathlib import Path
@@ -19,8 +20,11 @@ from .checkpoint import _publish_new_files
 from .experiments import source_identity
 from .frame_config import FrameTrainConfig, digest, json_bytes
 from .frame_continuation import FrameContinuation
+from .frame_checkpoint import load_frame_checkpoint
 from .frame_training import FrameActorCritic
 from .frame_workflow import _model_state_sha256
+from .ppo import PPOTrainer
+from .private_retention import PrivateAnchorRegularizer
 
 
 def _require(condition, reason):
@@ -130,6 +134,22 @@ def train_exposure_job(stages, env_factory, environment_reference, output_root, 
         training_seed=training_seed, retention_seed=retention_seed, evaluation_seeds=evaluation_seeds,
         device=device, expected_initial_model_sha256=expected_initial_model_sha256,
         max_seconds=max_seconds, environment_reference=environment_reference)
+    return _run_exposure_plan(plan, configs, env_factory, environment_reference, output_root,
+        job_id=job_id, rollout_steps=rollout_steps, training_seed=training_seed,
+        retention_seed=retention_seed, evaluation_seeds=evaluation_seeds, device=device,
+        expected_initial_model_sha256=expected_initial_model_sha256, max_seconds=max_seconds,
+        should_stop=should_stop, protected_paths=protected_paths)
+
+
+def _run_exposure_plan(plan, configs, env_factory, environment_reference, output_root, *,
+                       job_id, rollout_steps, training_seed, retention_seed,
+                       evaluation_seeds, device, expected_initial_model_sha256,
+                       max_seconds, should_stop, protected_paths, parent=None, segment=False):
+    base = parent['endpoint'] if parent else None
+    offset = base['stage_index'] + 1 if base else 0
+    prior_success = base['cumulative_successful_updates'] if base else 0
+    prior_attempts = base['cumulative_attempted_updates'] if base else 0
+    prior_samples = base['cumulative_collected_transitions'] if base else 0
     root = Path(output_root)
     _require(root.is_absolute() and root.resolve() == root
              and not any(p.is_symlink() for p in (root, *root.parents)), 'canonical output path required')
@@ -139,9 +159,14 @@ def train_exposure_job(stages, env_factory, environment_reference, output_root, 
                  'output overlaps a protected source/input tree')
     root.mkdir()
     _new(root / 'request.json', plan)
-    _new(root / 'reservation.json', {'job_plan_sha256': plan['sha256'],
+    reservation = {'job_plan_sha256': plan['sha256'],
         'charged_updates': plan['reserved_updates'], 'charged_fresh_transition_budget': plan['reserved_fresh_transitions'],
-        'actual_samples': 'recorded separately; reservation is not actual collection', 'refund': False})
+        'actual_samples': 'recorded separately; reservation is not actual collection', 'refund': False}
+    if segment:
+        reservation.update(format='transformer_rl.exposure_segment_reservation', schema_version=1,
+            charge_scope='segment_itemization_of_external_whole_job_reservation',
+            whole_job_reservation_created=False)
+    _new(root / 'reservation.json', reservation)
     started = time.monotonic()
     session, endpoints, successful, attempts, collected = None, [], 0, 0, 0
     full_samples, recorded_samples, recorded_updates = 0, 0, 0
@@ -162,7 +187,8 @@ def train_exposure_job(stages, env_factory, environment_reference, output_root, 
     try:
         _require(source_identity() == plan['source'], 'learner source changed before environment construction')
         with (root / 'metrics.jsonl').open('x') as metrics:
-            for index, (stage, config) in enumerate(zip(plan['stages'], configs)):
+            for local_index, (stage, config) in enumerate(zip(plan['stages'], configs)):
+                index = offset + local_index
                 active_stage = {'name': stage['name'], 'index': index}
                 if stop():
                     status = 'interrupted'
@@ -171,21 +197,22 @@ def train_exposure_job(stages, env_factory, environment_reference, output_root, 
                 _require(source_identity() == plan['source'], 'learner source changed at stage boundary')
                 directory = root / f'stage_{index:04d}_{stage["name"]}'
                 directory.mkdir()
-                if session is None:
+                if session is None and base is None:
                     failure_phase = 'construct_fresh_environment'
                     session = FrameContinuation.start(config, env_factory, environment_reference,
                         expected_initial_model_sha256=expected_initial_model_sha256,
                         training_seed=training_seed, retention_seed=retention_seed,
                         evaluation_seeds=evaluation_seeds, rollout_steps=rollout_steps, device=device)
                 else:
-                    parent = endpoints[-1]
-                    failure_phase = 'close_previous_environment'
-                    session.close()
+                    previous_endpoint = endpoints[-1] if endpoints else base
+                    if session is not None:
+                        failure_phase = 'close_previous_environment'
+                        session.close()
                     failure_phase = 'open_stage_environment'
                     session = FrameContinuation.open(config, env_factory, environment_reference,
-                        parent['checkpoint']['path'], checkpoint_sha256=parent['checkpoint']['sha256'],
-                        parent_update=parent['cumulative_successful_updates'], cumulative_transitions=parent['cumulative_collected_transitions'],
-                        consumed_updates=parent['cumulative_attempted_updates'], rollout_steps=rollout_steps,
+                        previous_endpoint['checkpoint']['path'], checkpoint_sha256=previous_endpoint['checkpoint']['sha256'],
+                        parent_update=previous_endpoint['cumulative_successful_updates'], cumulative_transitions=previous_endpoint['cumulative_collected_transitions'],
+                        consumed_updates=previous_endpoint['cumulative_attempted_updates'], rollout_steps=rollout_steps,
                         training_seed=training_seed, retention_seed=retention_seed,
                         evaluation_seeds=evaluation_seeds, device=device, resume=True, environment_transition=True)
                 failure_phase = 'verify_runtime_budget'
@@ -243,6 +270,9 @@ def train_exposure_job(stages, env_factory, environment_reference, output_root, 
                     'sidecar': {'path': str(path) + '.json', 'sha256': _sha(str(path) + '.json')},
                     'learning_state': 'full_actor_critic_Adam_global_private_RNG_clock',
                     'episode_state_restored': False, 'history_reset': 'repeat_first'}
+                if segment:
+                    endpoint.update(format='transformer_rl.exposure_segment_endpoint', schema_version=1,
+                        job_id=job_id, segment_plan_sha256=plan['sha256'])
                 failure_phase = 'publish_endpoint'
                 _new(directory / 'endpoint.json', endpoint)
                 endpoints.append(endpoint)
@@ -253,7 +283,8 @@ def train_exposure_job(stages, env_factory, environment_reference, output_root, 
         error = {'type': type(failure).__name__, 'message': str(failure), 'phase': failure_phase}
     finally:
         if session is not None:
-            attempts, collected = session.consumed_updates, session.collected_transitions
+            attempts = session.consumed_updates - prior_attempts
+            collected = session.collected_transitions - prior_samples
             try:
                 session.close()
             except BaseException as failure:
@@ -283,10 +314,511 @@ def train_exposure_job(stages, env_factory, environment_reference, output_root, 
         'failed_update_optimizer_steps': None if attempts > successful else 0,
         'optimization_sample_uses': optimization_sample_uses, 'endpoints': deepcopy(endpoints),
         'missing_stage_endpoints': [s['name'] for s in plan['stages'][len(endpoints):]],
-        'unsealed_checkpoint_paths': [str(root / f'stage_{i:04d}_{s["name"]}' / 'endpoint.pt')
+        'unsealed_checkpoint_paths': [str(root / f'stage_{offset+i:04d}_{s["name"]}' / 'endpoint.pt')
             for i, s in enumerate(plan['stages']) if i >= len(endpoints)
-            and (root / f'stage_{i:04d}_{s["name"]}' / 'endpoint.pt').is_file()],
+            and (root / f'stage_{offset+i:04d}_{s["name"]}' / 'endpoint.pt').is_file()],
         'elapsed_s': time.monotonic() - started, 'refund': False, 'automatic_retries': 0,
         'independent_evaluation_performed': False, 'source': plan['source']}
+    if segment:
+        completion.update(format='transformer_rl.exposure_segment_completion', stage_index=offset,
+            charge_scope='segment_itemization_of_external_whole_job_reservation',
+            whole_job_reservation_created=False,
+            parent_endpoint=deepcopy(parent['receipt']) if parent else None,
+            cumulative_successful_updates=prior_success+successful,
+            cumulative_attempted_updates=prior_attempts+attempts,
+            cumulative_collected_transitions=prior_samples+collected)
     _new(root / 'completion.json', completion)
     return completion
+
+
+def _input_path(value):
+    _require(isinstance(value, str), 'input receipt path must be a string')
+    path = Path(value)
+    _require(path.is_absolute() and path.resolve() == path
+             and not any(p.is_symlink() for p in (path, *path.parents))
+             and path.is_file(), 'canonical existing input file required')
+    return path
+
+
+def _input_receipt(value, *, require_bytes=True):
+    fields = {'path', 'sha256', 'bytes'} if require_bytes else {'path', 'sha256'}
+    _require(isinstance(value, dict) and set(value) == fields, 'input receipt fields differ')
+    path = _input_path(value['path'])
+    _require(isinstance(value['sha256'], str)
+             and re.fullmatch(r'[0-9a-f]{64}', value['sha256']), 'input receipt SHA required')
+    if require_bytes:
+        _integer(value['bytes'], 'input receipt bytes')
+        _require(path.stat().st_size == value['bytes'], 'input receipt size differs')
+    _require(_sha(path) == value['sha256'], 'input receipt SHA differs')
+    return path
+
+
+def _read_input(path, *, canonical=True):
+    path = _input_path(str(path))
+    before = path.stat()
+    raw = path.read_bytes()
+    value = json.loads(raw)
+    if canonical:
+        _require(raw == json_bytes(value) + b'\n', 'input JSON is not canonical')
+    after = path.stat()
+    _require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+             == (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns), 'input changed while reading')
+    receipt = {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)}
+    _require(_sha(path) == receipt['sha256'], 'input changed after reading')
+    return value, receipt
+
+
+def _checkpoint_learning_proof(endpoint, endpoint_path, plan, request, config):
+    """Bind an actual stage checkpoint to its declared learning producer."""
+    fields = {'stage', 'stage_index', 'stage_updates', 'stage_fresh_transitions',
+        'cumulative_successful_updates', 'cumulative_attempted_updates',
+        'cumulative_collected_transitions', 'checkpoint', 'sidecar', 'learning_state',
+        'episode_state_restored', 'history_reset'}
+    segment_fields = {'format', 'schema_version', 'job_id', 'segment_plan_sha256'}
+    is_segment = request['format'] == 'transformer_rl.exposure_segment_request'
+    _require(isinstance(endpoint, dict) and set(endpoint) == (fields | segment_fields if is_segment else fields),
+             'parent stage endpoint schema differs from request')
+    if is_segment:
+        _require(endpoint['format'] == 'transformer_rl.exposure_segment_endpoint'
+                 and type(endpoint['schema_version']) is int and endpoint['schema_version'] == 1
+                 and endpoint['job_id'] == plan['job_id']
+                 and endpoint['segment_plan_sha256'] == request['sha256'],
+                 'parent stage endpoint identity differs')
+    _require(isinstance(endpoint['stage'], str)
+             and re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,63}', endpoint['stage']), 'parent stage identity differs')
+    for key in ('stage_index', 'cumulative_successful_updates', 'cumulative_attempted_updates',
+                'cumulative_collected_transitions'):
+        _integer(endpoint[key], 'parent stage '+key, 0)
+    for key in ('stage_updates', 'stage_fresh_transitions'):
+        _integer(endpoint[key], 'parent stage '+key)
+    _require(endpoint['cumulative_attempted_updates'] == endpoint['cumulative_successful_updates']
+             and endpoint['learning_state'] == 'full_actor_critic_Adam_global_private_RNG_clock'
+             and endpoint['episode_state_restored'] is False and endpoint['history_reset'] == 'repeat_first',
+             'parent stage must have a complete successful learning boundary')
+    _require(endpoint_path.parent.name == f"stage_{endpoint['stage_index']:04d}_{endpoint['stage']}",
+             'parent stage endpoint directory differs')
+    actual_endpoint, endpoint_receipt = _read_input(endpoint_path)
+    _require(actual_endpoint == endpoint, 'actual sealed stage endpoint differs from completion')
+    checkpoint_path = _input_receipt(endpoint['checkpoint'])
+    sidecar_path = _input_receipt(endpoint['sidecar'], require_bytes=False)
+    _require(checkpoint_path == endpoint_path.parent/'endpoint.pt'
+             and sidecar_path == Path(str(checkpoint_path)+'.json'), 'parent stage checkpoint/sidecar paths differ')
+    with torch.device('cpu'):
+        model, trainer, parent_config, update, metadata, rng = load_frame_checkpoint(checkpoint_path)
+        expected_group = PPOTrainer(model, parent_config.ppo).optimizer.state_dict()['param_groups']
+    optimizer = trainer.optimizer.state_dict()
+    _require(optimizer['param_groups'] == expected_group,
+             'parent actual Adam options differ from the frozen PPO recipe')
+    _input_receipt(endpoint['checkpoint'])
+    sidecar, actual_sidecar = _read_input(sidecar_path, canonical=False)
+    _require(actual_sidecar['sha256'] == endpoint['sidecar']['sha256']
+             and sidecar.get('format') == 'transformer_rl.packed_checkpoint'
+             and type(sidecar.get('schema_version')) is int and sidecar['schema_version'] == 1
+             and sidecar.get('sha256') == endpoint['checkpoint']['sha256']
+             and sidecar.get('config') == parent_config.to_dict()
+             and type(sidecar.get('update')) is int and sidecar['update'] == update
+             and sidecar.get('metadata') == metadata,
+             'parent sidecar differs from actual CPU learning checkpoint')
+    _require(update == endpoint['cumulative_successful_updates'], 'parent actual checkpoint update differs')
+    _require(plan['device'] == 'cpu' or bool(rng['cuda']), 'CUDA parent learning RNG state missing')
+    _require(all(config.to_dict()[key] == parent_config.to_dict()[key] for key in ('model','ppo','control')),
+             'only stage environment may change')
+    fixed = metadata.get('fixed_exposure_job')
+    _require(isinstance(fixed, dict) and fixed.get('job_id') == plan['job_id']
+             and fixed.get('job_plan_sha256') == request['sha256']
+             and fixed.get('stage') == endpoint['stage'] and fixed.get('stage_index') == endpoint['stage_index']
+             and type(fixed.get('stage_index')) is int
+             and fixed.get('initial_model_sha256') == plan['expected_initial_model_sha256'],
+             'parent fixed exposure identity or original initial model guard differs')
+    _require(metadata.get('initialization_guard') == {
+        'expected_sha256':plan['expected_initial_model_sha256'],
+        'actual_sha256':plan['expected_initial_model_sha256'],'verified':True},
+        'parent original initialization guard differs')
+    _require(metadata['initialization_guard']['verified'] is True
+             and type(metadata.get('seed')) is int, 'parent original guard or seed types differ')
+    _require(metadata.get('seed') == plan['training_seed']
+             and metadata.get('environment_factory') == plan['environment_factory']
+             and metadata.get('evaluation_seeds') == plan['evaluation_seeds']
+             and metadata.get('source') == plan['source']
+             and metadata.get('continuation_device') == plan['device'], 'parent learning producer metadata differs')
+    state = metadata.get('continuation')
+    _require(isinstance(state, dict) and set(state) == {'format','schema_version','clock','retention'}
+             and state['format'] == 'transformer_rl.frame_continuation'
+             and type(state['schema_version']) is int and state['schema_version'] == 1,
+             'parent full continuation state required')
+    clock = {'consumed_updates':endpoint['cumulative_attempted_updates'],
+        'collected_transitions':endpoint['cumulative_collected_transitions'], 'rollout_steps':plan['rollout_steps']}
+    _require(state.get('clock') == clock and all(type(v) is int for v in state['clock'].values())
+             and type(metadata.get('collected_transitions')) is int
+             and metadata['collected_transitions'] == clock['collected_transitions'], 'parent full clocks differ')
+    _require(metadata.get('anchors') == [] and type(metadata.get('retention_coef')) in (int,float)
+             and metadata['retention_coef'] == 0., 'parent must be a zero-retention exposure learner')
+    sampler = PrivateAnchorRegularizer(model.actor, parent_config, (), 0., seed=plan['retention_seed'])
+    sampler.load_state_dict(state['retention'])
+    expected_segment = {'start_update':update-endpoint['stage_updates'],
+        'successful_updates':endpoint['stage_updates'],'attempted_updates':endpoint['stage_updates'],
+        'fresh_transitions':endpoint['stage_fresh_transitions'],'discarded_transitions':0}
+    _require(metadata.get('continuation_segment') == expected_segment
+             and all(type(v) is int for v in metadata['continuation_segment'].values()),
+             'parent actual continuation segment differs')
+    return {'config':parent_config, 'metadata':metadata, 'optimizer':optimizer,
+        'proof_inputs':[(endpoint_path,endpoint_receipt), (checkpoint_path,deepcopy(endpoint['checkpoint'])),
+                        (sidecar_path,actual_sidecar)]}
+
+
+def _learning_transition(metadata, config, previous_endpoint=None, previous_config=None):
+    if previous_endpoint is None:
+        _require(metadata.get('continuation_parent') is None and 'stage_transition' not in metadata,
+                 'fresh parent checkpoint has an unexpected continuation origin')
+        return
+    _require(metadata.get('continuation_parent') == {
+        'path':previous_endpoint['checkpoint']['path'], 'sha256':previous_endpoint['checkpoint']['sha256'],
+        'update':previous_endpoint['cumulative_successful_updates'], 'resume':True}
+        and metadata['continuation_parent']['resume'] is True
+        and type(metadata['continuation_parent']['update']) is int,
+        'parent learning state does not resume its sealed ancestor')
+    _require(metadata.get('stage_transition') == {
+        'environment_transition':True, 'parent_environment_sha256':digest(previous_config.environment),
+        'environment_sha256':digest(config.environment)}
+        and metadata['stage_transition']['environment_transition'] is True,
+        'parent environment transition does not match sealed ancestor')
+
+
+def _adam_step_proof(optimizer, expected_steps):
+    """Every packed actor/critic parameter participates in each applied PPO step."""
+    _integer(expected_steps, 'verified cumulative PPO optimizer steps', 0)
+    states, ids = optimizer['state'], optimizer['param_groups'][0]['params']
+    _require(set(states) == (set(ids) if expected_steps else set()),
+             'parent actual Adam parameter state does not match verified PPO steps')
+    _require(all(int(state['step'].item()) == expected_steps for state in states.values()),
+             'parent actual Adam step differs from verified cumulative PPO optimizer steps')
+
+
+def _segment_parent(receipt, plan, config):
+    """CPU-only proof of a completed, logged parent before any new output/env."""
+    endpoint_path = _input_receipt(receipt)
+    _require(endpoint_path.name == 'endpoint.json', 'sealed endpoint receipt required')
+    endpoint, actual_receipt = _read_input(endpoint_path)
+    _require(actual_receipt == receipt, 'endpoint actual receipt differs')
+    fields = {'stage', 'stage_index', 'stage_updates', 'stage_fresh_transitions',
+        'cumulative_successful_updates', 'cumulative_attempted_updates',
+        'cumulative_collected_transitions', 'checkpoint', 'sidecar', 'learning_state',
+        'episode_state_restored', 'history_reset'}
+    segment_fields = {'format', 'schema_version', 'job_id', 'segment_plan_sha256'}
+    _require(isinstance(endpoint, dict) and set(endpoint) in (fields, fields | segment_fields),
+             'unsupported exposure endpoint schema')
+    if 'format' in endpoint:
+        _require(endpoint['format'] == 'transformer_rl.exposure_segment_endpoint'
+                 and type(endpoint['schema_version']) is int and endpoint['schema_version'] == 1
+                 and endpoint['job_id'] == plan['job_id'], 'segment endpoint identity differs')
+    _require(isinstance(endpoint['stage'], str)
+             and re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,63}', endpoint['stage']), 'parent stage identity differs')
+    for key in ('stage_index', 'cumulative_successful_updates', 'cumulative_attempted_updates',
+                'cumulative_collected_transitions'):
+        _integer(endpoint[key], 'parent '+key, 0)
+    for key in ('stage_updates', 'stage_fresh_transitions'):
+        _integer(endpoint[key], 'parent '+key)
+    _require(endpoint['cumulative_successful_updates'] >= endpoint['stage_updates']
+             and endpoint['cumulative_attempted_updates'] == endpoint['cumulative_successful_updates']
+             and endpoint['cumulative_collected_transitions'] >= endpoint['stage_fresh_transitions'],
+             'parent successful boundary clocks differ')
+    _require(endpoint['learning_state'] == 'full_actor_critic_Adam_global_private_RNG_clock'
+             and endpoint['episode_state_restored'] is False and endpoint['history_reset'] == 'repeat_first',
+             'complete parent learning state required')
+    _require(endpoint_path.parent.name == f"stage_{endpoint['stage_index']:04d}_{endpoint['stage']}",
+             'parent stage directory differs')
+    checkpoint_path = _input_receipt(endpoint['checkpoint'])
+    sidecar_path = _input_receipt(endpoint['sidecar'], require_bytes=False)
+    _require(checkpoint_path == endpoint_path.parent/'endpoint.pt'
+             and sidecar_path == Path(str(checkpoint_path)+'.json'), 'parent checkpoint/sidecar paths differ')
+    parent_root = endpoint_path.parent.parent
+    request, request_receipt = _read_input(parent_root/'request.json')
+    reservation, reservation_receipt = _read_input(parent_root/'reservation.json')
+    completion, completion_receipt = _read_input(parent_root/'completion.json')
+    _require(request.get('format') in ('transformer_rl.fixed_exposure_job', 'transformer_rl.exposure_segment_request')
+             and type(request.get('schema_version')) is int and request['schema_version'] == 1,
+             'parent request schema differs')
+    _require(completion.get('format') in ('transformer_rl.fixed_exposure_completion', 'transformer_rl.exposure_segment_completion')
+             and type(completion.get('schema_version')) is int and completion['schema_version'] == 1,
+             'parent completion schema differs')
+    expected_completion_format = ('transformer_rl.exposure_segment_completion'
+        if request['format'] == 'transformer_rl.exposure_segment_request' else 'transformer_rl.fixed_exposure_completion')
+    _require(completion['format'] == expected_completion_format, 'parent request/completion formats differ')
+    request_fields = set(plan)
+    if request['format'] == 'transformer_rl.exposure_segment_request':
+        request_fields |= {'stage_index','parent_endpoint','parent_request','parent_reservation',
+                           'parent_completion','parent_metrics','charge_scope','whole_job_reservation_created'}
+    _require(set(request) == request_fields, 'parent request fields differ from schema')
+    for key in ('reserved_updates','reserved_fresh_transitions','training_seed','retention_seed','rollout_steps'):
+        _integer(request.get(key), 'parent request '+key, 0 if key.endswith('seed') else 1)
+    _require(request.get('sha256') == digest({k:v for k,v in request.items() if k != 'sha256'})
+             and completion.get('job_plan_sha256') == request['sha256'], 'parent request/completion binding differs')
+    _require(completion.get('status') == 'completed' and completion.get('error') is None
+             and completion.get('shutdown_errors') == [] and completion.get('stop_reason') is None
+             and completion.get('missing_stage_endpoints') == []
+             and completion.get('unsealed_checkpoint_paths') == [], 'parent completion is not a clean successful boundary')
+    endpoints = completion.get('endpoints')
+    _require(isinstance(endpoints, list) and endpoints and endpoints[-1] == endpoint
+             and sum(item == endpoint for item in endpoints) == 1
+             and completion.get('last_sealed_checkpoint') == endpoint['checkpoint'],
+             'parent endpoint is not the unique last sealed completion endpoint')
+    for key in ('job_id', 'training_seed', 'retention_seed', 'evaluation_seeds', 'rollout_steps',
+                'device', 'environment_factory', 'expected_initial_model_sha256', 'source',
+                'retention_coefficient','retry_policy','stage_rule','evaluation_rule'):
+        _require(request.get(key) == plan[key], 'parent '+key+' differs from segment')
+    _require(completion.get('job_id') == plan['job_id'] and completion.get('source') == plan['source'],
+             'parent completion producer differs')
+    _require(reservation.get('job_plan_sha256') == request['sha256']
+             and reservation.get('charged_updates') == request['reserved_updates']
+             and reservation.get('charged_fresh_transition_budget') == request['reserved_fresh_transitions']
+             and reservation.get('refund') is False and completion.get('refund') is False
+             and completion.get('automatic_retries') == 0
+             and completion.get('independent_evaluation_performed') is False,
+             'parent actual reservation or no-retry policy differs')
+    if request['format'] == 'transformer_rl.exposure_segment_request':
+        _require(reservation.get('format') == 'transformer_rl.exposure_segment_reservation'
+                 and type(reservation.get('schema_version')) is int and reservation['schema_version'] == 1
+                 and reservation.get('charge_scope') == request.get('charge_scope')
+                 == completion.get('charge_scope') == 'segment_itemization_of_external_whole_job_reservation'
+                 and reservation.get('whole_job_reservation_created') is False
+                 and request.get('whole_job_reservation_created') is False
+                 and completion.get('whole_job_reservation_created') is False,
+                 'parent segment reservation scope differs')
+    for key in ('reserved_updates', 'charged_updates', 'successful_updates', 'attempted_updates',
+                'recorded_metric_updates'):
+        _integer(completion.get(key), 'parent completion '+key)
+        _require(completion[key] == request['reserved_updates'], 'parent full successful update budget differs')
+    for key in ('charged_fresh_transition_budget', 'actual_collected_transitions',
+                'successful_full_rollout_samples', 'recorded_full_rollout_samples'):
+        _integer(completion.get(key), 'parent completion '+key)
+        _require(completion[key] == request['reserved_fresh_transitions'], 'parent full sample budget differs')
+    _require(completion.get('failed_update_optimizer_steps') == 0
+             and completion.get('optimizer_update_may_be_partial') is False
+             and completion.get('unverified_or_unoptimized_samples') == 0
+             and completion.get('unsealed_successful_updates') == 0, 'parent incomplete learning accounting')
+    for key in ('failed_update_optimizer_steps','unverified_or_unoptimized_samples','unsealed_successful_updates'):
+        _integer(completion.get(key), 'parent completion '+key, 0)
+    learning = _checkpoint_learning_proof(endpoint, endpoint_path, plan, request, config)
+    parent_config, metadata = learning['config'], learning['metadata']
+    update = endpoint['cumulative_successful_updates']
+    proof_inputs = list(learning['proof_inputs'])
+    parent_stages = request.get('stages')
+    _require(isinstance(parent_stages, list) and parent_stages
+             and all(isinstance(stage,dict) for stage in parent_stages), 'parent stage request missing')
+    _require(len(endpoints) == len(parent_stages), 'parent completion stage endpoint count differs')
+    declared = parent_stages[-1]
+    _require(declared.get('name') == endpoint['stage'] and declared.get('config') == parent_config.to_dict()
+             and declared.get('updates') == endpoint['stage_updates']
+             and declared.get('fresh_transition_budget') == endpoint['stage_fresh_transitions']
+             and declared.get('transitions_per_update') == plan['rollout_steps']*parent_config.environment['num_envs'],
+             'parent endpoint stage budget or configuration differs')
+    if request['format'] == 'transformer_rl.exposure_segment_request':
+        _require(type(request.get('stage_index')) is int
+                 and request['stage_index'] == endpoint['stage_index']
+                 and type(completion.get('stage_index')) is int
+                 and completion['stage_index'] == endpoint['stage_index']
+                 and len(parent_stages) == 1 and endpoint.get('segment_plan_sha256') == request['sha256'],
+                 'parent segment stage binding differs')
+        for endpoint_key, completion_key in (
+            ('cumulative_successful_updates','cumulative_successful_updates'),
+            ('cumulative_attempted_updates','cumulative_attempted_updates'),
+            ('cumulative_collected_transitions','cumulative_collected_transitions')):
+            _integer(completion.get(completion_key), 'parent segment '+completion_key)
+            _require(completion[completion_key] == endpoint[endpoint_key], 'parent segment cumulative completion differs')
+    else:
+        _require(len(parent_stages)-1 == endpoint['stage_index'], 'parent job last stage index differs')
+    stage_offset = endpoint['stage_index']-len(parent_stages)+1
+    first_update = update-request['reserved_updates']
+    first_samples = endpoint['cumulative_collected_transitions']-request['reserved_fresh_transitions']
+    _require(stage_offset >= 0 and first_update >= 0 and first_samples >= 0,
+             'parent stage or cumulative budget baseline differs')
+    if request['format'] == 'transformer_rl.fixed_exposure_job':
+        _require(first_update == first_samples == stage_offset == 0, 'fresh parent job has nonzero baseline')
+    protected_trees = [str(parent_root)]
+    prior_optimizer_steps = 0
+    if request['format'] == 'transformer_rl.exposure_segment_request':
+        previous_receipt = request.get('parent_endpoint')
+        _require(completion.get('parent_endpoint') == previous_receipt,
+                 'parent segment request/completion input binding differs')
+        if endpoint['stage_index'] == 0:
+            _require(all(request.get(key) is None for key in (
+                'parent_endpoint','parent_request','parent_reservation','parent_completion','parent_metrics'))
+                and first_update == first_samples == 0, 'fresh segment has a continuation baseline')
+            _learning_transition(metadata, parent_config)
+        else:
+            previous_path = _input_receipt(previous_receipt)
+            previous_endpoint, actual_previous = _read_input(previous_path)
+            _require(actual_previous == previous_receipt
+                     and type(previous_endpoint.get('stage_index')) is int
+                     and previous_endpoint['stage_index'] == endpoint['stage_index']-1,
+                     'parent stage chain must decrease by exactly one')
+            previous = _segment_parent(previous_receipt, plan, parent_config)
+            for key in ('request','reservation','completion','metrics'):
+                _require(request.get('parent_'+key) == previous[key],
+                         'parent segment ancestor '+key+' receipt differs')
+            previous_endpoint = previous['endpoint']
+            _require(first_update == previous_endpoint['cumulative_successful_updates']
+                     and first_update == previous_endpoint['cumulative_attempted_updates']
+                     and first_samples == previous_endpoint['cumulative_collected_transitions'],
+                     'parent segment baseline differs from sealed ancestor')
+            _learning_transition(metadata, parent_config, previous_endpoint, previous['config'])
+            prior_optimizer_steps = previous['cumulative_optimizer_steps']
+            proof_inputs.extend(previous['proof_inputs'])
+            protected_trees.extend(previous['protected_trees'])
+    schedule, names, stage_learning = [], set(), {}
+    next_update, next_samples = first_update, first_samples
+    for local_index, stage in enumerate(parent_stages):
+        _require(isinstance(stage,dict) and set(stage) == {
+            'name','config','updates','transitions_per_update','fresh_transition_budget'},
+            'parent declared stage fields differ')
+        _require(isinstance(stage['name'],str)
+                 and re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,63}',stage['name'])
+                 and stage['name'] not in names, 'parent declared stage names differ')
+        names.add(stage['name'])
+        previous_config = FrameTrainConfig.from_dict(stage['config'])
+        _integer(stage.get('updates'), 'parent declared stage updates')
+        _integer(stage.get('transitions_per_update'), 'parent declared transitions_per_update')
+        _integer(stage.get('fresh_transition_budget'), 'parent declared fresh_transition_budget')
+        _integer(previous_config.environment.get('num_envs'), 'parent declared num_envs')
+        per_update = plan['rollout_steps']*previous_config.environment['num_envs']
+        _require(all(previous_config.to_dict()[key] == parent_config.to_dict()[key]
+                     for key in ('model','ppo','control'))
+                 and stage.get('transitions_per_update') == per_update
+                 and stage.get('fresh_transition_budget') == stage['updates']*per_update,
+                 'parent declared stage configuration or budget differs')
+        schedule.append((stage['name'],stage_offset+local_index,next_update,next_samples,per_update,stage['updates']))
+        next_update += stage['updates']
+        next_samples += stage['updates']*per_update
+        current_endpoint = endpoints[local_index]
+        _require(isinstance(current_endpoint,dict)
+                 and current_endpoint.get('stage') == stage['name']
+                 and type(current_endpoint.get('stage_index')) is int
+                 and current_endpoint['stage_index'] == stage_offset+local_index
+                 and type(current_endpoint.get('stage_updates')) is int
+                 and current_endpoint['stage_updates'] == stage['updates']
+                 and type(current_endpoint.get('stage_fresh_transitions')) is int
+                 and current_endpoint['stage_fresh_transitions'] == stage['fresh_transition_budget']
+                 and current_endpoint.get('cumulative_successful_updates') == next_update
+                 and current_endpoint.get('cumulative_attempted_updates') == next_update
+                 and current_endpoint.get('cumulative_collected_transitions') == next_samples,
+                 'parent actual stage endpoint sequence differs from declared exposure')
+        if request['format'] == 'transformer_rl.fixed_exposure_job':
+            path = parent_root/f'stage_{local_index:04d}_{stage["name"]}'/'endpoint.json'
+            current_learning = (learning if local_index == len(parent_stages)-1 else
+                _checkpoint_learning_proof(current_endpoint,path,plan,request,previous_config))
+            _require(current_learning['config'].to_dict() == stage['config'],
+                     'parent actual stage checkpoint configuration differs from request')
+            before_endpoint = endpoints[local_index-1] if local_index else None
+            before_config = stage_learning[local_index-1]['config'] if local_index else None
+            _learning_transition(current_learning['metadata'],current_learning['config'],before_endpoint,before_config)
+            proof_inputs.extend(current_learning['proof_inputs'])
+            stage_learning[local_index] = current_learning
+        else:
+            stage_learning[stage_offset+local_index] = learning
+    expected_count = sum(item[-1] for item in schedule)
+    expected_rows = ((name,index,start_update+count,start_samples+count*per_update,per_update)
+        for name,index,start_update,start_samples,per_update,updates in schedule
+        for count in range(1,updates+1))
+    _require(expected_count == request['reserved_updates']
+             and next_update == update and next_samples == endpoint['cumulative_collected_transitions'],
+             'parent requested full budget differs from cumulative endpoint')
+    metrics_path = _input_path(str(parent_root/'metrics.jsonl'))
+    metrics_before = metrics_path.stat()
+    metric_sha, all_rows, matching_count, all_samples, all_steps, all_uses = hashlib.sha256(), 0, 0, 0, 0, 0
+    with metrics_path.open('rb') as stream:
+        for raw in stream:
+            metric_sha.update(raw)
+            row = json.loads(raw)
+            _require(raw == json_bytes(row)+b'\n', 'parent metrics row is not canonical or complete')
+            for key in ('batch_samples','update','consumed_updates','cumulative_transitions','stage_index'):
+                _integer(row.get(key), 'parent metric '+key, 0 if key == 'stage_index' else 1)
+            _require(all_rows < expected_count, 'parent unexpected extra metrics row')
+            stage_name, stage_index, row_update, row_samples, per_update = next(expected_rows)
+            _require(row.get('stage') == stage_name and row['stage_index'] == stage_index
+                     and row['update'] == row['consumed_updates'] == row_update
+                     and row['cumulative_transitions'] == row_samples
+                     and row['batch_samples'] == row['collection']['transitions'] == per_update
+                     and type(row['collection']['transitions']) is int
+                     and type(row['collection']['vector_steps']) is int
+                     and row['collection']['vector_steps'] == plan['rollout_steps']
+                     and row['collection'].get('early_stopped') is False,
+                     'parent complete rollout sequence or stage clock differs')
+            for key in ('optimizer_steps','planned_optimizer_steps','sample_count'):
+                _integer(row['optimization'].get(key), 'parent optimization '+key, 0)
+            chunks = min(parent_config.ppo.num_minibatches,per_update)
+            steps = row['optimization']['optimizer_steps']
+            full_epochs, remainder = divmod(steps,chunks)
+            expected_uses = (full_epochs*per_update + remainder*(per_update//chunks)
+                             + min(remainder,per_update%chunks))
+            _require(row['optimization']['planned_optimizer_steps'] == parent_config.ppo.epochs*chunks
+                     and steps <= row['optimization']['planned_optimizer_steps']
+                     and row['optimization']['sample_count'] == expected_uses
+                     and type(row['optimization'].get('early_stopped')) is bool
+                     and row['optimization']['early_stopped'] == (steps < row['optimization']['planned_optimizer_steps']),
+                     'parent optimization accounting differs from actual frozen minibatch prefix')
+            all_rows += 1
+            all_samples += row['batch_samples']
+            all_steps += row['optimization']['optimizer_steps']
+            all_uses += row['optimization']['sample_count']
+            if row['stage_index'] == endpoint['stage_index']:
+                matching_count += 1
+            if row['update'] == endpoints[stage_index-stage_offset]['cumulative_successful_updates']:
+                _adam_step_proof(stage_learning[stage_index]['optimizer'],prior_optimizer_steps+all_steps)
+    metric_receipt = {'path':str(metrics_path),'sha256':metric_sha.hexdigest(),'bytes':metrics_before.st_size}
+    metrics_after = metrics_path.stat()
+    _require(_sha(metrics_path) == metric_receipt['sha256']
+             and (metrics_before.st_dev,metrics_before.st_ino,metrics_before.st_size,metrics_before.st_mtime_ns)
+             == (metrics_after.st_dev,metrics_after.st_ino,metrics_after.st_size,metrics_after.st_mtime_ns),
+             'parent metrics changed while verifying')
+    _require(all_rows == completion['recorded_metric_updates'] and all_samples == completion['recorded_full_rollout_samples']
+             and all_steps == completion.get('optimizer_steps') and all_uses == completion.get('optimization_sample_uses'),
+             'parent actual metrics differ from completion accounting')
+    for key in ('optimizer_steps','optimization_sample_uses','automatic_retries'):
+        _integer(completion.get(key), 'parent completion '+key, 0)
+    _require(matching_count == endpoint['stage_updates'], 'parent stage complete metrics count differs')
+    proof_inputs.extend(((parent_root/'request.json',request_receipt),
+                         (parent_root/'reservation.json',reservation_receipt),
+                         (parent_root/'completion.json',completion_receipt), (metrics_path,metric_receipt)))
+    for path, identity in proof_inputs:
+        _require(_input_path(str(path)).stat().st_size == identity['bytes'], 'parent inputs size changed after preflight')
+        _require(_sha(path) == identity['sha256'], 'parent inputs changed after preflight')
+    return {'endpoint':endpoint,'receipt':actual_receipt,'request':request_receipt,'reservation':reservation_receipt,
+        'completion':completion_receipt,'metrics':metric_receipt,'config':parent_config,
+        'protected_trees':tuple(protected_trees), 'proof_inputs':proof_inputs,
+        'cumulative_optimizer_steps':prior_optimizer_steps+all_steps}
+
+
+def train_exposure_segment(stage, env_factory, environment_reference, output_root, *,
+                           job_id, rollout_steps, training_seed, retention_seed,
+                           evaluation_seeds, device, expected_initial_model_sha256,
+                           max_seconds, parent_endpoint=None, should_stop=None, protected_paths=()):
+    """Train one stage in a fresh OS worker; resume a sealed completed parent.
+
+    An external controller reserves the whole job once. This layer writes only
+    a segment itemization, with local and cumulative actual learning counters.
+    Parent verification is CPU-only and precedes output/environment construction.
+    """
+    _require(callable(env_factory) and (should_stop is None or callable(should_stop)),
+             'environment and optional stop callbacks must be callable')
+    plan, configs = _definition([stage], job_id=job_id, rollout_steps=rollout_steps,
+        training_seed=training_seed, retention_seed=retention_seed, evaluation_seeds=evaluation_seeds,
+        device=device, expected_initial_model_sha256=expected_initial_model_sha256,
+        max_seconds=max_seconds, environment_reference=environment_reference)
+    parent = _segment_parent(parent_endpoint, plan, configs[0]) if parent_endpoint is not None else None
+    value = {k:v for k,v in plan.items() if k != 'sha256'}
+    value.update(format='transformer_rl.exposure_segment_request',
+        stage_index=parent['endpoint']['stage_index']+1 if parent else 0,
+        parent_endpoint=deepcopy(parent['receipt']) if parent else None,
+        parent_completion=deepcopy(parent['completion']) if parent else None,
+        parent_request=deepcopy(parent['request']) if parent else None,
+        parent_reservation=deepcopy(parent['reservation']) if parent else None,
+        parent_metrics=deepcopy(parent['metrics']) if parent else None,
+        charge_scope='segment_itemization_of_external_whole_job_reservation',
+        whole_job_reservation_created=False)
+    plan = {**value,'sha256':digest(value)}
+    return _run_exposure_plan(plan, configs, env_factory, environment_reference, output_root,
+        job_id=job_id, rollout_steps=rollout_steps, training_seed=training_seed,
+        retention_seed=retention_seed, evaluation_seeds=evaluation_seeds, device=device,
+        expected_initial_model_sha256=expected_initial_model_sha256, max_seconds=max_seconds,
+        should_stop=should_stop, protected_paths=(*protected_paths, *parent['protected_trees']) if parent else protected_paths,
+        parent=parent, segment=True)
