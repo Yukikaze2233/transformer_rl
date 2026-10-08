@@ -15,7 +15,8 @@ import numpy as np
 
 
 class FrameRuntime:
-    def __init__(self, directory, *, observation_schema, policy_dt_s, backend="onnx", threads=1):
+    def __init__(self, directory, *, observation_schema, policy_dt_s, backend="onnx", threads=1,
+                 priming_iterations=50):
         self.directory = Path(directory)
         self.manifest = json.loads((self.directory / "manifest.json").read_text())
         if self.manifest.get("format") != "transformer_rl.packed_policy" or self.manifest.get("schema_version") != 1:
@@ -25,13 +26,15 @@ class FrameRuntime:
             raise ValueError("deployment observation schema or policy interval differs from training")
         if type(threads) is not int or threads < 1:
             raise ValueError("threads must be positive")
+        if type(priming_iterations) is not int or priming_iterations < 1:
+            raise ValueError("priming_iterations must be a positive integer")
         self.dt = policy_dt_s
         policy = self.manifest["model"]["policy"]
         self.length, self.frame_dim, self.action_dim = policy["history_length"], policy["frame_dim"], policy["action_dim"]
         self.bounds = np.asarray(control["action_bounds"], dtype=np.float32)
         self.scale = np.asarray(control["target_scale"], dtype=np.float32)
         self.offset = np.asarray(control["target_offset"], dtype=np.float32)
-        self.frames = np.empty((1, self.length, self.frame_dim), dtype=np.float32)
+        self.frames = np.zeros((1, self.length, self.frame_dim), dtype=np.float32)
         self.last_time = None
         name = {"onnx": "policy.onnx", "torchscript": "policy.pt"}.get(backend)
         if name is None or name not in self.manifest["files"]:
@@ -51,9 +54,35 @@ class FrameRuntime:
             self.torch = torch
             torch.set_num_threads(threads)
             self.session = torch.jit.load(str(graph_path), map_location="cpu").eval()
+        self.preparation = self._prime(priming_iterations)
+
+    def _mean_forward(self, frames):
+        if self.backend == "onnx":
+            mean = self.session.run(["mean"], {"frames": frames})[0]
+        else:
+            with self.torch.inference_mode():
+                mean = self.session(self.torch.from_numpy(frames)).numpy()
+        if (mean.dtype != np.float32 or mean.shape != (1, self.action_dim)
+                or not np.isfinite(mean).all()):
+            raise FloatingPointError("deployment policy produced invalid actions")
+        return mean[0].copy()
+
+    def _prime(self, iterations):
+        """Exercise the loaded graph before arming, without issuing any actions."""
+        frames = np.zeros_like(self.frames)
+        started = time.perf_counter_ns()
+        try:
+            for _ in range(iterations):
+                self._mean_forward(frames)
+        finally:
+            self.reset()
+        return {"iterations": iterations,
+                "duration_ms": (time.perf_counter_ns() - started) / 1e6,
+                "scope": "prearm CPU mean graph only; excludes sensor I/O and action issuance"}
 
     def reset(self):
         self.last_time = None
+        self.frames.fill(0)
 
     def step(self, frame, timestamp_s):
         frame = np.asarray(frame)
@@ -70,14 +99,11 @@ class FrameRuntime:
             self.frames[:, :-1] = self.frames[:, 1:].copy()
             self.frames[:, -1] = frame
         self.last_time = timestamp_s
-        if self.backend == "onnx":
-            mean = self.session.run(["mean"], {"frames": self.frames})[0][0]
-        else:
-            with self.torch.inference_mode():
-                mean = self.session(self.torch.from_numpy(self.frames)).numpy()[0].copy()
-        if mean.shape != (self.action_dim,) or not np.isfinite(mean).all():
+        try:
+            mean = self._mean_forward(self.frames)
+        except Exception:
             self.reset()
-            raise FloatingPointError("deployment policy produced invalid actions")
+            raise
         issued = np.clip(mean, -self.bounds, self.bounds)
         return {"mean": mean, "issued": issued, "targets": self.offset + self.scale * issued}
 

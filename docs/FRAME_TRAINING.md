@@ -193,6 +193,8 @@ python -m transformer_rl frame benchmark \
 
 部署运行时 [`FrameRuntime`](../src/transformer_rl/frame_runtime.py) 仅需要 NumPy 和 ONNX Runtime；TorchScript 后端另需 PyTorch。硬件输入按 manifest 中的顺序和缩放构造 float32 35D 观测；退出、失步或故障恢复后显式清空历史。
 
+构造运行时会先加载并验证模型，再默认执行 50 次静态形状的均值前向预热。预热发生在启动控制循环之前，不读取传感器、不生成或发送动作；结束后清空历史，第一帧真实观测填满历史窗口。预热中的输出形状、float32 类型或有限数检查失败时，构造直接报错。次数可通过 `priming_iterations` 指定为正整数，预热耗时记录在 `runtime.preparation`。模型加载和预热不计入控制循环或稳态 benchmark 的耗时；控制循环仍保留原有截止时间检查，预热不保证后续调用满足实时预算。
+
 ```python
 from transformer_rl.frame_runtime import FrameRuntime, run_control_loop
 
