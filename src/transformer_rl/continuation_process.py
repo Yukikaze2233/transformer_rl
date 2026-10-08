@@ -26,6 +26,7 @@ from .cli import _StopBudget, _factory
 from .experiments import source_identity
 from .frame_config import FrameTrainConfig, digest, json_bytes
 from .frame_continuation import FrameContinuation
+from .frame_training import reward_component_scalars
 
 
 _FIELDS = {"format", "schema_version", "config", "environment_factory", "checkpoint",
@@ -340,6 +341,8 @@ def run_request(request):
                             for name, value in items.items():
                                 if type(value) in (int, float, bool):
                                     writer.add_scalar(f"{group}/{name}", value, session.update)
+                        for name, value in reward_component_scalars(record["collection"]).items():
+                            writer.add_scalar(name, value, session.update)
                     print(json.dumps({"update": session.update, "transitions": session.collector.total_transitions}), flush=True)
                     if session.update % execution["checkpoint_interval"] == 0:
                         stage = "checkpoint"
@@ -413,6 +416,10 @@ def run_request(request):
         "shutdown_errors": shutdown, "episode_state_restored": False, "history_reset": "repeat_first",
         "sample_count_scope": "collector-confirmed returned vector environment steps; failed step side effects are not estimated",
         "retry_policy": "reserve_remaining_budget_no_automatic_retry"}
+    if session is not None and session.collector is not None:
+        components = session.collector.last_metrics.get("reward_components")
+        if components is not None:
+            report["last_collection_reward_components"] = components
     if error is not None:
         report["error"] = f"{type(error).__name__}: {error}"
     _write(run / ("failure.json" if error is not None else "completion.json"), report)

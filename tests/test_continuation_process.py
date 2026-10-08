@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import signal
 import sys
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -334,6 +335,104 @@ def test_complete_updates_publish_interval_and_final_without_tensorboard(rig, mo
     assert len(records) == 2
     assert [entry["batch_samples"] for entry in records] == [4, 4]
     assert sum(path.stat().st_size for path in rig.directory.rglob("*") if path.is_file()) < 1_000_000
+
+
+@pytest.mark.parametrize("outcome", ["completed", "stopped", "invalid_source"])
+def test_worker_preserves_reward_windows_and_partial_failure_accounting(rig, monkeypatch, outcome):
+    from transformer_rl.reward_components import RewardComponentStatistics
+
+    original_init, original_step = PackedFixture.__init__, PackedFixture.step
+    budgets, writers = [], []
+
+    class ControlledBudget(rig.worker._StopBudget):
+        def __init__(self, seconds):
+            super().__init__(seconds)
+            budgets.append(self)
+
+    class Writer:
+        def __init__(self, path):
+            self.scalars, self.closed = [], False
+            writers.append(self)
+
+        def add_scalar(self, tag, value, update):
+            self.scalars.append((tag, value, update))
+
+        def close(self):
+            self.closed = True
+
+    def initialize(self, **kwargs):
+        original_init(self, **kwargs)
+        self.enable_reward_components = False
+        self.reward_statistics = RewardComponentStatistics(self.num_envs, self.dt)
+        self.reward_source_error = None
+        self.reward_observed_steps = 0
+
+    def step(self, action):
+        result = original_step(self, action)
+        if self.enable_reward_components:
+            self.reward_observed_steps += 1
+            density = torch.full_like(result.reward, 2. * self.tick)
+            if outcome == "invalid_source" and self.tick == 2:
+                density[0] = float("nan")
+            if self.reward_source_error is None:
+                try:
+                    self.reward_statistics.observe(result.reward, {"height": density})
+                except ValueError as error:
+                    self.reward_source_error = str(error)
+                except FloatingPointError as error:
+                    self.reward_source_error = str(error)
+        if outcome == "stopped":
+            budgets[0].deadline = -1.
+        return result
+
+    def drain(self):
+        result = self.reward_statistics.drain()
+        result.update(observation_error=self.reward_source_error,
+                      observed_vector_steps=self.reward_observed_steps)
+        self.reward_source_error, self.reward_observed_steps = None, 0
+        return result
+
+    monkeypatch.setattr(PackedFixture, "__init__", initialize)
+    monkeypatch.setattr(PackedFixture, "step", step)
+    monkeypatch.setattr(PackedFixture, "drain_reward_components", drain, raising=False)
+    monkeypatch.setattr(rig.worker, "_StopBudget", ControlledBudget)
+    monkeypatch.setitem(sys.modules, "torch.utils.tensorboard", SimpleNamespace(SummaryWriter=Writer))
+    request = deepcopy(rig.request)
+    request["execution"]["tensorboard"] = True
+    reseal(request)
+    if outcome == "invalid_source":
+        with pytest.raises(ValueError, match="invalid reward component telemetry.*nonfinite"):
+            rig.worker.run_request(request)
+        report = json.loads((rig.directory / "failure.json").read_text())
+        assert report["actual_samples"] == report["failed_collection_samples"] == 4
+        assert report["attempted_updates"] == report["completed_updates"] == 0
+        assert report["failed_optimizer_samples"] == 0
+        window = report["last_collection_reward_components"]
+        assert (window["steps"], window["samples"], window["observed_vector_steps"]) == (1, 2, 2)
+        assert "nonfinite" in window["observation_error"]
+    else:
+        report = rig.worker.run_request(request)
+        assert report["status"] == outcome
+        window = report["last_collection_reward_components"]
+        records = [json.loads(line) for line in (rig.directory / "metrics.jsonl").read_text().splitlines()]
+        if outcome == "stopped":
+            assert report["actual_samples"] == report["partial_samples"] == 2
+            assert report["attempted_updates"] == report["completed_updates"] == 0
+            assert (window["steps"], window["samples"]) == (1, 2)
+            assert not records
+        else:
+            assert report["actual_samples"] == 8 and report["completed_updates"] == 2
+            assert len(records) == 2
+            assert window == records[-1]["collection"]["reward_components"]
+            densities = [entry["collection"]["reward_components"]["continuous_components"]
+                         ["terms"]["height"]["density"]["mean"] for entry in records]
+            assert densities == [3., 7.]
+            tags = {(tag, update): value for tag, value, update in writers[0].scalars}
+            assert tags["reward_components/density_per_s/height", 1] == 3.
+            assert tags["reward_components/step_contribution/height", 2] == pytest.approx(.07)
+    assert window["event_components"]["available"] is False
+    assert window["gate_coverage"]["available"] is False
+    assert writers[0].closed and rig.environments[0].closed
 
 
 def test_positive_retention_checkpoint_keeps_private_sampler_state(rig, tmp_path):

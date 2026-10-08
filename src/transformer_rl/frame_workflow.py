@@ -19,7 +19,7 @@ from .evaluation import _MetricAccumulator
 from .experiments import source_identity
 from .frame_checkpoint import load_frame_checkpoint, restore_rng, save_frame_checkpoint
 from .frame_config import FrameTrainConfig, digest
-from .frame_training import FrameActorCritic, FrameCollector, FrameHistory
+from .frame_training import FrameActorCritic, FrameCollector, FrameHistory, reward_component_scalars
 from .ppo import PPOTrainer
 from .retention import AnchorRegularizer, save_anchors
 from .stability import EpisodeSignalStatistics
@@ -226,6 +226,8 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
                         for name, value in record.get("environment_diagnostics", {}).items():
                             if type(value) in (float, int, bool):
                                 writer.add_scalar(f"environment/{name}", value, update)
+                        for name, value in reward_component_scalars(record["collection"]).items():
+                            writer.add_scalar(name, value, update)
                     print(json.dumps({"update": update, "reward_mean": collector.last_metrics["reward_mean"],
                                       "transitions": collector.total_transitions}), flush=True)
                     metadata["collected_transitions"] = prior_transitions + collector.total_transitions
@@ -241,6 +243,8 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
                       "cumulative_transitions": metadata["collected_transitions"], "checkpoint": str(final_path),
                       "checkpoint_sha256": hashlib.sha256(final_path.read_bytes()).hexdigest(),
                       "elapsed_s": time.monotonic() - started, "config_sha256": digest(config.to_dict())}
+            if "reward_components" in collector.last_metrics:
+                report["last_collection_reward_components"] = collector.last_metrics["reward_components"]
             _write_json(run_dir / "completion.json", report)
             return report
     except BaseException as error:
@@ -248,6 +252,7 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
         _write_json(run_dir / "failure.json", {"status": "failed", "completed_updates": update - start_update,
             "attempted_updates": attempted_updates,
             "consumed_transitions": collector.total_transitions if collector else 0,
+            "last_collection": collector.last_metrics if collector else None,
             "error": f"{type(error).__name__}: {error}"})
         raise
     finally:

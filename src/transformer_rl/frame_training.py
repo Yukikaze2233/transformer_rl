@@ -151,6 +151,11 @@ class FrameCollector(RolloutCollector):
                 or not (self.bounds > 0).all()):
             raise ValueError("action bounds require one positive finite value per action")
         super().__init__(env, model, ppo_config)
+        self._reward_component_drain_failed = False
+        self.reward_components_enabled = (hasattr(env, "enable_reward_components")
+                                         and callable(getattr(env, "drain_reward_components", None)))
+        if self.reward_components_enabled:
+            env.enable_reward_components = True
 
     def _new_history(self):
         return FrameHistory(self.model.config, self.num_envs, self.device)
@@ -159,13 +164,74 @@ class FrameCollector(RolloutCollector):
         return raw_action.clamp(-self.bounds, self.bounds)
 
     def collect(self, steps, should_stop=None):
-        batch = super().collect(steps, should_stop)
-        if batch is not None:
-            import time
-            from .action_statistics import action_statistics
-            started = time.perf_counter()
-            self.last_metrics.update(action_statistics(
-                batch.raw_action, batch.issued_action, batch.old_mean, self.bounds))
-            self.last_metrics["action_statistics_elapsed_s"] = time.perf_counter() - started
-            self.last_metrics["elapsed_s"] += self.last_metrics["action_statistics_elapsed_s"]
-        return batch
+        # Reject invalid calls before draining or replacing a prior window.
+        if type(steps) is not int or steps < 0:
+            raise ValueError("steps must be a nonnegative integer")
+        if should_stop is not None and not callable(should_stop):
+            raise TypeError("should_stop must be callable")
+        if self._reward_component_drain_failed:
+            raise RuntimeError("reward component drain failed; use a fresh environment and collector")
+        collection_error = None
+        try:
+            batch = super().collect(steps, should_stop)
+            if batch is not None:
+                import time
+                from .action_statistics import action_statistics
+                started = time.perf_counter()
+                self.last_metrics.update(action_statistics(
+                    batch.raw_action, batch.issued_action, batch.old_mean, self.bounds))
+                self.last_metrics["action_statistics_elapsed_s"] = time.perf_counter() - started
+                self.last_metrics["elapsed_s"] += self.last_metrics["action_statistics_elapsed_s"]
+            return batch
+        except BaseException as error:
+            collection_error = error
+            raise
+        finally:
+            if self.reward_components_enabled:
+                import time
+                started = time.perf_counter()
+                drained = False
+                try:
+                    report = self.env.drain_reward_components()
+                    drained = True
+                    self.last_metrics["reward_components"] = report
+                    issue = report.get("observation_error")
+                    if not issue and (report["samples"] != self.last_metrics["transitions"]
+                                      or report["steps"] != self.last_metrics["vector_steps"]):
+                        issue = "reward component window differs from returned collection samples"
+                    if issue:
+                        self._observation = None
+                        raise ValueError(f"invalid reward component telemetry: {issue}")
+                except BaseException as error:
+                    self._observation = None
+                    if not drained:
+                        # A failed drain may retain an earlier window. Reset
+                        # must not permit those samples to enter another batch.
+                        self._reward_component_drain_failed = True
+                    if collection_error is None:
+                        raise
+                    collection_error.add_note(f"reward component drain failed: {type(error).__name__}: {error}")
+                finally:
+                    self.last_metrics["reward_component_drain_elapsed_s"] = time.perf_counter() - started
+                    self.last_metrics["elapsed_s"] = (self.last_metrics.get("elapsed_s", 0.)
+                                                       + self.last_metrics["reward_component_drain_elapsed_s"])
+
+
+def reward_component_scalars(collection):
+    """Separate unit-labelled rollout tags from the legacy last-step diagnostics."""
+    report = collection.get("reward_components")
+    if report is None or report.get("observation_error"):
+        return {}
+    result = {}
+    total = report["actual_total_reward"]
+    if total["available"]:
+        result["reward_components/total_step_mean"] = total["mean"]
+    for name, term in (report["continuous_components"]["terms"] or {}).items():
+        result[f"reward_components/density_per_s/{name}"] = term["density"]["mean"]
+        result[f"reward_components/step_contribution/{name}"] = term["step_reward"]["mean"]
+    for name, term in (report["event_components"]["terms"] or {}).items():
+        result[f"reward_components/event_step_contribution/{name}"] = term["mean"]
+    residual = report["residual_step_reward"]
+    if residual["available"]:
+        result["reward_components/unattributed_step_mean"] = residual["statistics"]["mean"]
+    return result

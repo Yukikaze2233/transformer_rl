@@ -344,6 +344,11 @@ class ChassisFrameAdapter:
         self.env, self.config, self.metadata = env, config, metadata
         self.enable_control_metrics = enable_control_metrics
         self.enable_episode_outcomes = False
+        self.enable_reward_components = False
+        self._reward_components = None
+        self._reward_component_error = None
+        self._reward_component_steps = 0
+        self._reward_component_elapsed_s = 0.
         self._reset_transform = reset_transform
         self._last_environment_metrics = {}
         self._control_motor_indices = None
@@ -394,6 +399,21 @@ class ChassisFrameAdapter:
         if getattr(self.env, "perturbations", None) is not None:
             result["transfer/noise_enabled_fraction"] = self.env.perturbations.enabled.float().mean().item()
         return result
+
+    def drain_reward_components(self):
+        """Whole-window producer contributions; source gates are not inferred."""
+        from .reward_components import RewardComponentStatistics
+        if self._reward_components is None:
+            self._reward_components = RewardComponentStatistics(self.num_envs, .01)
+        report = self._reward_components.drain()
+        report.update(observation_error=self._reward_component_error,
+                      observed_vector_steps=self._reward_component_steps,
+                      observer_host_elapsed_s=self._reward_component_elapsed_s,
+                      observer_clock="perf_counter_host_no_explicit_cuda_synchronize")
+        self._reward_component_error = None
+        self._reward_component_steps = 0
+        self._reward_component_elapsed_s = 0.
+        return report
 
     def set_training_progress(self, updates, transitions):
         self.env.stage_actor_update = updates
@@ -500,6 +520,22 @@ class ChassisFrameAdapter:
         from .types import StepResult
         nominal_scaling = self._nominal_effort_scaling() if self.enable_control_metrics else None
         raw, reward, done, extras = self.env.step(issued_action)
+        if self.enable_reward_components:
+            import time
+            from .reward_components import RewardComponentStatistics
+            started = time.perf_counter()
+            self._reward_component_steps += 1
+            if self._reward_components is None:
+                self._reward_components = RewardComponentStatistics(self.num_envs, .01)
+            if self._reward_component_error is None:
+                try:
+                    self._reward_components.observe(reward, extras.get("native_reward_components"),
+                                                    extras.get("native_reward_events"))
+                except (ValueError, TypeError, ArithmeticError) as error:
+                    # Reject diagnostics at the collection boundary, after the
+                    # collector can account for returned physical transitions.
+                    self._reward_component_error = f"{type(error).__name__}: {error}"
+            self._reward_component_elapsed_s += time.perf_counter() - started
         self._last_environment_metrics = dict(extras.get("log", {}))
         diagnostic = extras["diagnostics"]
         final_critic = raw["critic"].clone()

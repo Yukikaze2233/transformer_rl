@@ -91,6 +91,28 @@ mixed 的另一个评估 seed 9701 已完成，名义站立指标逐数相同；
 
 选型仍使用高度、速度、角速度偏差/RMSE，速度范数和位移，回合内波动，目标与实际力矩变化、饱和，固定请求首回合的完整时长/健康完整时长统计，以及样本和计算成本。课程干预单独比较；旧成功标记不追补为新的健康存活率。新实验仍需满足原队列闭合与资源准入，本文没有启动新的训练。
 
+## 整段 rollout 的奖励分项记录
+
+后续使用新源码的 frame collector 会启用独立的 `RewardComponentStatistics`。adapter 在源环境 step 返回后、手动 reset 之前，读取逐环境 `native_reward_components`，按整段采集窗口累计实际总奖励与各连续项。统计包括 terminal 和 reset 转移，不是去掉前 200 步的稳态统计，也没有按 PPO learning mask 过滤。物理稳态指标继续独立计算。
+
+每项保留样本数、和、均值、RMS、最小值、最大值；连续密度与乘以 0.01 s 后的单步贡献分别标明 `reward/s`、`reward/step`。没有保存样本，因而不提供分位数。每次 collection 边界 drain，包括提前停止、空采集和异常退出；partial window 不会混进下次 collection。普通训练保留原有非空 partial batch 行为，continuation 仍丢弃不足完整 rollout 的训练尾段，报告中的 `last_collection_reward_components` 只表示最后一次采集，不保证已经用于优化。
+
+显式事件只能来自逐环境 `native_reward_events`。当前冻结环境未提供这个字段，因此事件分项标为不可用，不从 `done` 或总奖励余量推断。余量定义为实际单步奖励减去已报告连续项的单步贡献与显式事件；它可能同时包含未记录的连续项和事件，不自动解释为记账错误。源未提供实际 gate 权重，启用比例同样标为不可用；零贡献不能恢复 support/quiet/jumping coverage。
+
+`metrics.jsonl` 在 `collection.reward_components` 保存整段报告。新增 TensorBoard 标签如下；旧 `environment/reward/*` 曲线继续表示最后一步的跨环境均值，历史日志不会回填或改变含义。
+
+| 标签 | 统计内容 |
+|---|---|
+| `reward_components/total_step_mean` | 整段所有返回样本的实际单步奖励均值 |
+| `reward_components/density_per_s/<term>` | 连续奖励密度均值，reward/s |
+| `reward_components/step_contribution/<term>` | 连续项单步贡献均值，reward/step |
+| `reward_components/event_step_contribution/<term>` | 源显式提供的事件单步贡献均值 |
+| `reward_components/unattributed_step_mean` | 未归属的单步奖励均值 |
+
+组件 shape、device、有限值、窗口内字段一致性验证失败时，adapter 先保留错误，并让物理 step 正常返回供 collector 计数；collector 在采集边界、PPO 开始前拒绝该窗口。失败记录分别保留有效前缀统计、已观察物理步数与 collector 返回样本数，不能把前缀统计称为完整窗口。原有采集异常保持为主异常。若 drain 本身失败，collector 停止接受后续采集，即使显式 reset 也不能重用；需要重新创建环境和 collector，防止未清空窗口混入下一批。
+
+累计使用设备上的 float64 归约，不保留源 tensor alias；每个 observer 调用有一次合并有限值检查的主机同步，drain 再复制归约结果。报告记录 observer 与 drain 的主机耗时；collector 的总采集时间包含这些开销。尚未用实际 SDK/CUDA 验证开销，不将 CPU 接口测试解释成仿真训练或 100 Hz 部署证明。新功能没有热改已经冻结、正在运行的 worker；它也不修复 dense 配方与旧 `diagnostic_logging` 的兼容问题。
+
 ## 本地证据索引
 
 以下 audit 是本机运行证据，不作为模型或运行数据提交进 Git：
