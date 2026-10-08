@@ -191,13 +191,18 @@ def verify_result(protocol, endpoint_receipt, cells, directory, request_receipt)
              and request["cells"] == cells and request["directory"] == str(definition._path(directory)),
              "result belongs to a different authorized evaluation")
     directory = definition._path(directory)
+    from . import runtime_paths
     artifact_names = ("report.json", "trace.npz", "evaluation.completion.json",
-                      "worker.completion.json", "worker.process.json")
+                      "worker.completion.json", "worker.process.json", runtime_paths.PROFILE_FILENAME)
     artifacts = {name: definition._receipt(directory / name) for name in artifact_names}
     control = campaign._read(directory / "report.json")
     completed = campaign._read(directory / "evaluation.completion.json")
     worker = campaign._read(directory / "worker.completion.json")
     process = campaign._read(directory / "worker.process.json")
+    runtime_profile = definition._receipt(directory / runtime_paths.PROFILE_FILENAME)
+    runtime_paths.validate_runtime_artifact(directory, runtime_profile)
+    _require(worker.get("runtime_profile") == process.get("runtime_profile") == runtime_profile,
+             "physical worker runtime profile differs from its parent publication")
     command = [sys.executable, "-B", "-m", "transformer_rl.exposure_evaluation", "worker",
                "--request", request_receipt["path"], "--expected-request-sha256", request_receipt["sha256"]]
     handle = worker.get("process", {})
@@ -219,7 +224,8 @@ def verify_result(protocol, endpoint_receipt, cells, directory, request_receipt)
              "evaluation worker has no exact normal terminal evidence")
     _require(digest(completed) == digest({"format": "transformer_rl.exposure_evaluation_completion", "schema_version": 1,
         "request": request_receipt, "report": definition._receipt(directory / "report.json"),
-        "source": protocol["source"], "status": "completed", "hardware_verified": False}),
+        "source": protocol["source"], "status": "completed", "runtime_profile": runtime_profile,
+        "hardware_verified": False}),
         "physical completion differs from actual publication")
     checkpoint = batch["endpoint"]["checkpoint"]
     config, evaluation = batch["config"], protocol["evaluation"]
@@ -289,6 +295,8 @@ def verify_result(protocol, endpoint_receipt, cells, directory, request_receipt)
 def run_worker(request_receipt):
     request, protocol, batch = _request(request_receipt, child=True)
     directory = Path(request["directory"])
+    from . import runtime_paths
+    runtime_profile = runtime_paths.profile_receipt(runtime_paths.validate_runtime_profile(directory))
     cache = Path(os.environ.get("PYTHONPYCACHEPREFIX", ""))
     _require(cache == directory / "empty_python_cache" and cache.is_dir() and not list(cache.iterdir()),
              "evaluation worker did not start with a new empty bytecode cache")
@@ -309,10 +317,12 @@ def run_worker(request_receipt):
         if stop_requested:
             return True
         campaign._checked(request_receipt)
+        _require(runtime_paths.profile_receipt(runtime_paths.validate_runtime_profile(directory)) == runtime_profile,
+                 "physical worker runtime profile changed")
         campaign._checked(request["storage_contract"])
         campaign.validate_controller_lease(protocol, request["leases"], request["controller"])
         _require(source_identity() == protocol["source"], "physical worker source changed")
-        campaign.worker_storage_guard(protocol, contract, directory, request["required_remaining_bytes"],
+        campaign.worker_storage_guard(protocol, contract, directory, request["required_remaining_bytes"], active_worker=True,
             trace_prefix=directory / "trace.npz", trace_sample_limit=sum(c["expected_policy_samples"] for c in request["cells"]))
         return False
 
@@ -327,11 +337,13 @@ def run_worker(request_receipt):
         for s, handler in previous.items():
             signal.signal(s, handler)
     _request(request_receipt, child=True)
+    _require(not guard(), "physical worker stopped before result publication")
     campaign._new(directory / "report.json", report)
     campaign._new(directory / "evaluation.completion.json", {
         "format": "transformer_rl.exposure_evaluation_completion", "schema_version": 1,
         "request": request_receipt, "report": definition._receipt(directory / "report.json"),
-        "source": protocol["source"], "status": "completed", "hardware_verified": False})
+        "source": protocol["source"], "status": "completed", "runtime_profile": runtime_profile,
+        "hardware_verified": False})
     return 0
 
 

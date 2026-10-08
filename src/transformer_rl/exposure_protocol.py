@@ -74,33 +74,103 @@ def _read(path):
     return value
 
 
-def _tree(root):
+def _tree(root, *, mutable_subdirectories=()):
     """Actual declared input bytes, excluding Git and rebuildable Python caches."""
     root = _path(root)
     _require(root.is_dir(), 'runtime/input tree must exist')
+    mutable = [Path(value) for value in mutable_subdirectories]
+    _require(all(not value.is_absolute() and value.parts
+                 and '..' not in value.parts and str(value) == original
+                 for value, original in zip(mutable, mutable_subdirectories)),
+             'exact relative SDK mutable subdirectories required')
+    mutable_device = root.lstat().st_dev
+
+    def is_mutable(path):
+        return any(path.relative_to(root).is_relative_to(value) for value in mutable)
+
     files = {}
     for base, directories, names in os.walk(root, followlinks=False):
         # Exclusions waive cache bytes, never path/type checks. A symlink with
         # an excluded name must not silently escape the declared input tree.
         for name in sorted(directories):
             path = _path(Path(base) / name)
-            _require(stat.S_ISDIR(path.lstat().st_mode), 'input tree contains a special directory')
+            observed = path.lstat()
+            _require(stat.S_ISDIR(observed.st_mode), 'input tree contains a special directory')
+            if is_mutable(path):
+                _require(observed.st_uid == os.getuid() and observed.st_dev == mutable_device,
+                         'SDK mutable directory is foreign-owned or crosses its filesystem')
         # Still traverse excluded directories to reject unsafe descendant
         # types; only their regular file bytes are omitted from the receipt.
         directories[:] = sorted(directories)
         for name in sorted(names):
             path = _path(Path(base) / name)
-            _require(stat.S_ISREG(path.lstat().st_mode), 'regular input file required')
+            observed = path.lstat()
+            _require(stat.S_ISREG(observed.st_mode), 'regular input file required')
+            if is_mutable(path):
+                _require(observed.st_uid == os.getuid() and observed.st_dev == mutable_device,
+                         'SDK mutable file is foreign-owned or crosses its filesystem')
+                continue
             if name.endswith('.pyc') or any(
                     part in ('.git', '__pycache__') for part in path.relative_to(root).parts[:-1]):
                 continue
             files[str(path.relative_to(root))] = _receipt(path)
     _require(bool(files), 'declared runtime/input tree must not be empty')
-    return {'root': str(root), 'files': files, 'sha256': digest(files),
-            'exclusions': ['.git directories', '__pycache__ directories', '*.pyc']}
+    value = {'root': str(root), 'files': files, 'sha256': digest(files),
+             'exclusions': ['.git directories', '__pycache__ directories', '*.pyc']}
+    if mutable:
+        value['mutable_subdirectories'] = sorted(map(str, mutable))
+    return value
 
 
-def runtime_identity(runtime_roots):
+def _sdk_mutable_subdirectories(roots, mutable_paths):
+    """Recognize exact writable Kit directories without importing the SDK.
+
+    A directory called cache is not sufficient evidence. The inspected Isaac
+    bootstrap, SimulationApp source and native app plugin must share the same
+    declared installation root. Extension caches and shipped shaders are
+    executable inputs and can never be declared writable exclusions.
+    """
+    _require(type(mutable_paths) in (list, tuple), 'explicit SDK mutable path list required')
+    paths = [_path(path) for path in mutable_paths]
+    _require(len(paths) == len(set(paths)), 'SDK mutable paths must be distinct')
+    result = {root: [] for root in roots}
+    recognized = set()
+    for path in sorted(paths):
+        owners = [root for root in roots if path.is_relative_to(root)]
+        _require(len(owners) == 1, 'SDK mutable path must belong to one declared SDK root')
+        root = owners[0]
+        relative = path.relative_to(root)
+        _require(str(relative) in ('kit/cache', 'kit/data', 'kit/logs'),
+                 'only exact Isaac Kit cache, data and logs directories may be mutable')
+        observed = path.lstat()
+        _require(stat.S_ISDIR(observed.st_mode) and observed.st_uid == os.getuid()
+                 and observed.st_dev == root.lstat().st_dev,
+                 'SDK mutable path must be an owned directory on its installation filesystem')
+        if root not in recognized:
+            initializers = (root / '__init__.py', root / 'python_packages/isaacsim/__init__.py')
+            actual_initializers = [candidate for candidate in initializers if candidate.is_file()]
+            _require(len(actual_initializers) == 1, 'recognized Isaac SDK bootstrap layout required')
+            bootstrap = _receipt(actual_initializers[0])
+            bootstrap_source = _path(bootstrap['path']).read_text(encoding='utf-8')
+            application_path = root / 'exts/isaacsim.simulation_app/isaacsim/simulation_app/simulation_app.py'
+            application = _receipt(application_path)
+            application_source = application_path.read_text(encoding='utf-8')
+            plugin_path = root / 'kit/kernel/plugins/libomni.kit.app.plugin.so'
+            plugin = _receipt(plugin_path)
+            with plugin_path.open('rb') as stream:
+                native_header = stream.read(4)
+            _require(all(marker in bootstrap_source for marker in ('bootstrap_kernel', 'CARB_APP_PATH', 'ISAAC_PATH'))
+                     and all(marker in application_source for marker in ('class SimulationApp', 'CARB_APP_PATH',
+                                                                           'kernel/plugins', 'load_plugins'))
+                     and native_header == b'\x7fELF', 'recognized Isaac SimulationApp and native Kit plugin required')
+            _require(_receipt(actual_initializers[0]) == bootstrap and _receipt(application_path) == application
+                     and _receipt(plugin_path) == plugin, 'Isaac SDK layout changed during recognition')
+            recognized.add(root)
+        result[root].append(str(relative))
+    return result
+
+
+def runtime_identity(runtime_roots, mutable_paths=None):
     """Read CPU runtime identity and all explicitly declared external SDK trees.
 
     Torch/NumPy import and native extension bytes are pinned. This does not
@@ -112,6 +182,7 @@ def runtime_identity(runtime_roots):
     _require(len(roots) == len(set(roots)), 'runtime roots must be distinct')
     _require(not any(a.is_relative_to(b) for i, a in enumerate(roots)
                      for j, b in enumerate(roots) if i != j), 'runtime roots must not overlap')
+    mutable = _sdk_mutable_subdirectories(roots, [] if mutable_paths is None else mutable_paths)
     # Both modules have already been imported on CPU; reading these origins
     # does not invoke Isaac AppLauncher or a GPU availability probe.
     from numpy._core import _multiarray_umath
@@ -124,7 +195,7 @@ def runtime_identity(runtime_roots):
             'python_prefix': sys.prefix, 'python_base_prefix': sys.base_prefix,
             'platform': platform.platform(), 'torch_version': str(torch.__version__),
             'numpy_version': np.__version__, 'files': files,
-            'declared_sdk_trees': [_tree(path) for path in sorted(roots)],
+            'declared_sdk_trees': [_tree(path, mutable_subdirectories=mutable[path]) for path in sorted(roots)],
             'coverage': 'interpreter/import/native origins and explicitly declared SDK trees',
             'hardware_and_complete_system_runtime_verified': False}
 
@@ -185,6 +256,7 @@ def _protected_roots(history, descriptor, dependencies, runtime_roots, environme
 
 def freeze(history_root, *, output_root, retention_seed, device, curriculum_summary,
            diagnostic_summary, learning_summary, resource_lock, runtime_roots,
+           runtime_mutable_paths=None,
            worker_timeout_seconds=86700., max_wait_seconds=1814400., poll_seconds=20.,
            _allow_existing_output=False):
     """Reconstruct the full grid and all file bindings; create no output or process."""
@@ -216,7 +288,12 @@ def freeze(history_root, *, output_root, retention_seed, device, curriculum_summ
              'two distinct original resource locks required')
     for pin in locks:
         _require(predecessors._lock_signature(pin['path']) == pin, 'original lock inode changed')
-    runtime = runtime_identity(runtime_roots)
+    _require(runtime_mutable_paths is None or type(runtime_mutable_paths) in (list, tuple),
+             'explicit SDK mutable path list required')
+    mutable_paths = sorted(str(_path(path)) for path in (runtime_mutable_paths or []))
+    _require(len(mutable_paths) == len(set(mutable_paths)), 'SDK mutable paths must be distinct')
+    runtime = (runtime_identity(runtime_roots, mutable_paths=mutable_paths) if mutable_paths
+               else runtime_identity(runtime_roots))
     configs = {}
     for route in plan['configs']:
         path = _path(history / 'study' / route)
@@ -284,8 +361,10 @@ def freeze(history_root, *, output_root, retention_seed, device, curriculum_summ
     _require(validate_history_study(history) == descriptor
              and _receipt(history / 'history_plan.json') == history_receipt
              and source_identity() == plan['source'], 'history inputs or learner changed while freezing')
+    final_runtime = (runtime_identity(runtime_roots, mutable_paths=mutable_paths) if mutable_paths
+                     else runtime_identity(runtime_roots))
     _require(_environment_inputs(list(configs.values())) == environment
-             and runtime_identity(runtime_roots) == runtime, 'environment or runtime bytes changed while freezing')
+             and final_runtime == runtime, 'environment or runtime bytes changed while freezing')
     final_dependencies, final_locks = predecessors._dependencies(
         curriculum_summary, diagnostic_summary, learning_summary, str(_path(resource_lock)))
     _require(final_dependencies == dependencies and final_locks == locks,
@@ -297,6 +376,7 @@ def freeze(history_root, *, output_root, retention_seed, device, curriculum_summ
         'history_manifest': history_receipt, 'history_sha256': descriptor['sha256'],
         'packed_plan_sha256': plan['sha256'], 'source': source_identity(), 'output_root': str(destination),
         'runtime_roots': list(map(str, map(_path, runtime_roots))), 'runtime': runtime,
+        'runtime_mutable_paths': mutable_paths,
         'environment_inputs': environment, 'environment_factory': spec['environment_factory'],
         'retention_seed': retention_seed, 'jobs': jobs, 'evaluation_cells': cells, 'budget': budget,
         'evaluation': deepcopy(spec['evaluation']), 'scenarios': deepcopy(spec['scenarios']),
@@ -339,7 +419,8 @@ def validate_protocol(protocol):
         retention_seed=protocol['retention_seed'], device=execution['device'],
         curriculum_summary=dependencies[0]['summary_path'], diagnostic_summary=dependencies[1]['summary_path'],
         learning_summary=dependencies[2]['summary_path'], resource_lock=next(iter(shared)),
-        runtime_roots=protocol['runtime_roots'], worker_timeout_seconds=execution['worker_timeout_seconds'],
+        runtime_roots=protocol['runtime_roots'], runtime_mutable_paths=protocol['runtime_mutable_paths'],
+        worker_timeout_seconds=execution['worker_timeout_seconds'],
         max_wait_seconds=execution['max_wait_seconds'], poll_seconds=execution['poll_seconds'],
         _allow_existing_output=True)
     _require(protocol == expected, 'exposure source, inputs, runtime, jobs, cells or budget changed')
@@ -354,6 +435,8 @@ def main(argv=None):
                  'diagnostic-summary', 'learning-summary', 'resource-lock'):
         prepare.add_argument('--' + name, type=Path, required=True)
     prepare.add_argument('--runtime-roots', type=Path, nargs='+', required=True)
+    prepare.add_argument('--runtime-mutable-path', type=Path, action='append', default=[],
+                         help='Exact recognized Isaac kit/cache, kit/data or kit/logs directory; repeat as needed')
     prepare.add_argument('--retention-seed', type=int, required=True)
     prepare.add_argument('--device', required=True)
     prepare.add_argument('--worker-timeout-seconds', type=float, default=86700.)
@@ -367,6 +450,7 @@ def main(argv=None):
             protocol = freeze(args.history_root, output_root=args.output_root, retention_seed=args.retention_seed,
                 device=args.device, curriculum_summary=args.curriculum_summary, diagnostic_summary=args.diagnostic_summary,
                 learning_summary=args.learning_summary, resource_lock=args.resource_lock, runtime_roots=args.runtime_roots,
+                runtime_mutable_paths=args.runtime_mutable_path,
                 worker_timeout_seconds=args.worker_timeout_seconds, max_wait_seconds=args.max_wait_seconds,
                 poll_seconds=args.poll_seconds)
             destination = _path(args.protocol_output)

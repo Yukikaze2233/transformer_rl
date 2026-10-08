@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -21,6 +22,9 @@ from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig, dige
 from transformer_rl.frame_policy import FramePolicyConfig
 from transformer_rl.frame_training import FrameActorCritic
 from transformer_rl.frame_workflow import _model_state_sha256
+
+
+REAL_RUNTIME_IDENTITY = protocol.runtime_identity
 
 
 def write_json(path, value):
@@ -613,3 +617,151 @@ def test_ambiguous_nonfinite_or_nonobject_input_json_is_rejected(tmp_path, raw):
     path.write_bytes(raw)
     with pytest.raises(ValueError):
         protocol._read(path)
+
+
+def recognized_sdk(root):
+    """Synthetic layout bytes only; no SDK import or simulator qualification."""
+    initializer = root / "__init__.py"
+    initializer.write_text("def bootstrap_kernel():\n    CARB_APP_PATH = ISAAC_PATH = 'fixture'\n")
+    application = root / "exts/isaacsim.simulation_app/isaacsim/simulation_app/simulation_app.py"
+    application.parent.mkdir(parents=True)
+    application.write_text("class SimulationApp:\n    CARB_APP_PATH = 'fixture/kernel/plugins'\n"
+                           "    def load_plugins(self): pass\n")
+    plugin = root / "kit/kernel/plugins/libomni.kit.app.plugin.so"
+    plugin.parent.mkdir(parents=True)
+    plugin.write_bytes(b"\x7fELFsynthetic layout marker, never loaded")
+    mutable = []
+    for name in ("cache", "data", "logs"):
+        directory = root / "kit" / name
+        directory.mkdir()
+        (directory / "original.bin").write_bytes(b"mutable synthetic SDK output")
+        mutable.append(str(directory))
+    return mutable
+
+
+def test_sdk_default_freezes_cache_names_and_only_exact_declared_kit_outputs_are_mutable(tmp_path):
+    sdk = tmp_path / "sdk"
+    sdk.mkdir()
+    paths = recognized_sdk(sdk)
+    before_default = REAL_RUNTIME_IDENTITY([str(sdk)])
+    before_mutable = REAL_RUNTIME_IDENTITY([str(sdk)], mutable_paths=paths)
+    trees = before_mutable["declared_sdk_trees"]
+    assert trees[0]["mutable_subdirectories"] == ["kit/cache", "kit/data", "kit/logs"]
+    assert not any(route.startswith(("kit/cache/", "kit/data/", "kit/logs/"))
+                   for route in trees[0]["files"])
+    assert "kit/kernel/plugins/libomni.kit.app.plugin.so" in trees[0]["files"]
+    for path in paths:
+        (Path(path) / "original.bin").write_bytes(b"different regular runtime output")
+        (Path(path) / "nested").mkdir()
+        (Path(path) / "nested/new.bin").write_bytes(b"new actual output")
+    assert REAL_RUNTIME_IDENTITY([str(sdk)]) != before_default
+    assert REAL_RUNTIME_IDENTITY([str(sdk)], mutable_paths=paths) == before_mutable
+    shipped = sdk / "kit/extscache/shadercache/input.shader"
+    shipped.parent.mkdir(parents=True)
+    shipped.write_bytes(b"immutable shipped shader")
+    assert REAL_RUNTIME_IDENTITY([str(sdk)], mutable_paths=paths) != before_mutable
+
+
+@pytest.mark.parametrize("route", ["kit", "kit/kernel", "kit/extscache", "kit/cache/nested",
+                                   "cache", "unrelated/cache"])
+def test_sdk_exclusion_cannot_be_an_arbitrary_cache_or_executable_tree(tmp_path, route):
+    sdk = tmp_path / "sdk"
+    sdk.mkdir()
+    recognized_sdk(sdk)
+    candidate = sdk / route
+    candidate.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(ValueError, match="only exact Isaac Kit"):
+        REAL_RUNTIME_IDENTITY([str(sdk)], mutable_paths=[str(candidate)])
+
+
+@pytest.mark.parametrize("kind", ["plain_directory", "missing_plugin", "non_native_plugin", "changed_application",
+                                   "symlink_root", "symlink_descendant", "fifo_descendant", "outside_root",
+                                   "duplicate", "noncanonical"])
+def test_explicit_mutable_path_requires_actual_recognized_layout_and_safe_descendants(tmp_path, kind):
+    sdk = tmp_path / "sdk"
+    sdk.mkdir()
+    paths = recognized_sdk(sdk)
+    target = Path(paths[0])
+    if kind == "plain_directory":
+        (sdk / "__init__.py").unlink()
+    elif kind == "missing_plugin":
+        (sdk / "kit/kernel/plugins/libomni.kit.app.plugin.so").unlink()
+    elif kind == "non_native_plugin":
+        (sdk / "kit/kernel/plugins/libomni.kit.app.plugin.so").write_bytes(b"not ELF")
+    elif kind == "changed_application":
+        (sdk / "exts/isaacsim.simulation_app/isaacsim/simulation_app/simulation_app.py").write_text("class Unrelated: pass\n")
+    elif kind == "symlink_root":
+        moved = target.with_name("original_cache")
+        target.rename(moved)
+        target.symlink_to(moved, target_is_directory=True)
+    elif kind == "symlink_descendant":
+        (target / "ignored.pyc").symlink_to(sdk / "__init__.py")
+    elif kind == "fifo_descendant":
+        os.mkfifo(target / "ignored.pyc")
+    elif kind == "outside_root":
+        target = tmp_path / "outside"
+        target.mkdir()
+    elif kind == "duplicate":
+        paths = [str(target), str(target)]
+    elif kind == "noncanonical":
+        paths = [str(target / ".." / "cache")]
+    if kind not in ("duplicate", "noncanonical"):
+        paths = [str(target)]
+    with pytest.raises((ValueError, FileNotFoundError)):
+        REAL_RUNTIME_IDENTITY([str(sdk)], mutable_paths=paths)
+
+
+@pytest.mark.parametrize("field", ["st_uid", "st_dev"])
+@pytest.mark.parametrize("kind", ["directory", "file"])
+def test_declared_mutable_sdk_output_rejects_foreign_owner_and_filesystem(tmp_path, monkeypatch, field, kind):
+    sdk = tmp_path / "sdk"
+    sdk.mkdir()
+    paths = recognized_sdk(sdk)
+    target = Path(paths[0]) if kind == "directory" else Path(paths[0]) / "original.bin"
+    actual_lstat = Path.lstat
+
+    def changed_stat(path, *args, **kwargs):
+        observed = actual_lstat(path, *args, **kwargs)
+        if path != target:
+            return observed
+        values = {name: getattr(observed, name) for name in dir(observed) if name.startswith("st_")}
+        values[field] += 1
+        return SimpleNamespace(**values)
+
+    monkeypatch.setattr(Path, "lstat", changed_stat)
+    with pytest.raises(ValueError, match="owned|filesystem"):
+        REAL_RUNTIME_IDENTITY([str(sdk)], mutable_paths=[paths[0]])
+
+
+def test_explicit_sdk_mutability_is_bound_to_protocol_and_snapshot_keeps_its_default_rules(prepared, monkeypatch):
+    p = prepared
+    paths = recognized_sdk(p["sdk"])
+    monkeypatch.setattr(protocol, "runtime_identity", REAL_RUNTIME_IDENTITY)
+    value = freeze(p, runtime_mutable_paths=paths)
+    assert value["runtime_mutable_paths"] == sorted(paths)
+    assert protocol.validate_protocol(value) == value
+    (Path(paths[0]) / "new_output.bin").write_bytes(b"regular excluded runtime output")
+    assert protocol.validate_protocol(value) == value
+    raw = resign(value, lambda definition: definition.update(runtime_mutable_paths=[]))
+    with pytest.raises(ValueError, match="changed"):
+        protocol.validate_protocol(raw)
+    extra = p["snapshot"] / "kit/cache/new_output.bin"
+    extra.parent.mkdir(parents=True)
+    extra.write_bytes(b"snapshot membership is always immutable")
+    with pytest.raises(ValueError, match="snapshot inventory"):
+        protocol.validate_protocol(value)
+
+
+def test_cli_explicit_sdk_mutable_paths_are_published_and_reconstructed(prepared, monkeypatch, capsys):
+    p = prepared
+    paths = recognized_sdk(p["sdk"])
+    monkeypatch.setattr(protocol, "runtime_identity", REAL_RUNTIME_IDENTITY)
+    destination = p["tmp"] / "explicit_mutability_protocol.json"
+    arguments = cli_freeze_arguments(p, destination)
+    for path in paths:
+        arguments.extend(["--runtime-mutable-path", path])
+    assert protocol.main(arguments) == 0
+    capsys.readouterr()
+    value = protocol._read(destination)
+    assert value["runtime_mutable_paths"] == sorted(paths)
+    assert protocol.main(["validate", "--protocol", str(destination)]) == 0

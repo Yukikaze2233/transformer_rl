@@ -170,7 +170,8 @@ def test_storage_actual_measurements_and_remaining_complete_matrix(campaign_inpu
     caps = p["storage"]["caps"]
     assert full - remaining == (caps["checkpoint_bytes"]
         + job["stages"][0]["updates"] * caps["metric_bytes_per_update"]
-        + cell["expected_policy_samples"] * caps["trace_bytes_per_policy_sample"])
+        + cell["expected_policy_samples"] * caps["trace_bytes_per_policy_sample"]
+        + caps["inflight_bytes"] + caps["runtime_cache_bytes"])
     bad = deepcopy(p["storage"])
     bad["caps"]["checkpoint_bytes"] = 1
     with pytest.raises(campaign.CampaignIntegrityError, match="actual measured"):
@@ -203,6 +204,54 @@ def test_trace_measurement_units_must_match_actual_steps_times_rows(campaign_inp
         campaign._validate_storage(bad, p["protocol"], protocol._receipt(p["protocol_path"]))
 
 
+def test_full_remaining_budget_counts_each_retained_stage_and_evaluation_namespace():
+    # Two stages and four independent role/seed batches. Each batch has two
+    # cases; closing one case cannot release its still-required namespace.
+    value = {"jobs": [{"id": "job_a", "stages": [{"index": 0, "updates": 3},
+                                                      {"index": 1, "updates": 5}]}],
+        "evaluation_cells": [{"id": f"cell_{role}_{seed}_{case}", "job_id": "job_a",
+            "stage_index": 0, "role": role, "seed": seed, "expected_policy_samples": samples}
+            for role in ("validation", "held_out") for seed in (701, 1701)
+            for case, samples in (("case_a", 10), ("case_b", 20))]}
+    caps = {"checkpoint_bytes": 100, "trace_bytes_per_policy_sample": 2,
+        "metric_bytes_per_update": 7, "inflight_bytes": 11, "runtime_cache_bytes": 13,
+        "free_margin_bytes": 17}
+    contract = {"caps": caps}
+    expected = 2 * 100 + 8 * 7 + 120 * 2 + 30 * 2 + 100 + 7 * (11 + 13) + 17
+    initial = campaign.remaining_storage_bytes(value, contract)
+    assert initial == expected
+    after_stage = campaign.remaining_storage_bytes(value, contract, [("job_a", 0)])
+    assert initial - after_stage == 100 + 3 * 7 + 11 + 13
+    first = value["evaluation_cells"][0]["id"]
+    second = value["evaluation_cells"][1]["id"]
+    after_case = campaign.remaining_storage_bytes(value, contract, [("job_a", 0)], [first])
+    assert after_stage - after_case == 10 * 2
+    after_batch = campaign.remaining_storage_bytes(value, contract, [("job_a", 0)], [first, second])
+    assert after_case - after_batch == 20 * 2 + 11 + 13
+    closed = [cell["id"] for cell in value["evaluation_cells"]]
+    final = campaign.remaining_storage_bytes(value, contract, [("job_a", 0), ("job_a", 1)], closed)
+    # All historic namespaces remain on disk and reduce statvfs available;
+    # zero future workers means no repeated cache/inflight reservation.
+    assert final == 100 + 17
+
+
+def test_publication_peak_tracks_largest_actual_remaining_batch_not_worker_count():
+    value = {"jobs": [], "evaluation_cells": [
+        {"id": "large", "job_id": "job_a", "stage_index": 0, "role": "validation",
+         "seed": 701, "expected_policy_samples": 100},
+        {"id": "small", "job_id": "job_a", "stage_index": 0, "role": "held_out",
+         "seed": 1701, "expected_policy_samples": 25}]}
+    caps = {"checkpoint_bytes": 100, "trace_bytes_per_policy_sample": 2,
+        "metric_bytes_per_update": 7, "inflight_bytes": 11, "runtime_cache_bytes": 13,
+        "free_margin_bytes": 17}
+    contract = {"caps": caps}
+    initial = campaign.remaining_storage_bytes(value, contract)
+    remaining = campaign.remaining_storage_bytes(value, contract, closed_cells=["large"])
+    # Release only this batch's retained archive, namespace and change in the
+    # one concurrent staging/archive peak. There is no per-worker peak copy.
+    assert initial - remaining == 100 * 2 + 11 + 13 + (100 - 25) * 2
+
+
 @pytest.fixture
 def worker_storage(tmp_path, monkeypatch):
     directory = tmp_path / "worker"
@@ -214,6 +263,53 @@ def worker_storage(tmp_path, monkeypatch):
     monkeypatch.setattr(campaign.os, "statvfs", lambda path: SimpleNamespace(
         f_bavail=available["bytes"], f_frsize=1))
     return directory, contract, available
+
+
+def test_exact_boundary_reserve_survives_current_runtime_cap_without_future_credit(worker_storage):
+    directory, contract, available = worker_storage
+    contract["caps"].update(runtime_cache_bytes=4096, inflight_bytes=4096)
+    value = {"jobs": [{"id": "job_a", "stages": [{"index": 0, "updates": 1},
+                                                      {"index": 1, "updates": 1}]}],
+             "evaluation_cells": []}
+    boundary = campaign.remaining_storage_bytes(value, contract)
+    namespace_cap = contract["caps"]["runtime_cache_bytes"] + contract["caps"]["inflight_bytes"]
+    active = boundary - namespace_cap
+    available["bytes"] = boundary
+    campaign.check_disk(directory, boundary)
+    cache = directory / "runtime"
+    cache.mkdir()
+    cache_file, log_file = cache / "current_cache.bin", directory / "stdout.txt"
+    cache_file.write_bytes(b"r" * 4096)
+    log_file.write_bytes(b"s" * 4096)
+    # The disk availability observation is controlled, while both category
+    # bytes and allocated blocks come from the real written fixture files.
+    written = sum(path.stat().st_blocks * 512 for path in (cache_file, log_file))
+    assert written == namespace_cap
+    available["bytes"] -= written
+    checked = campaign.worker_storage_guard(value, contract, directory, boundary, active_worker=True)
+    assert checked["required_bytes"] == active == available["bytes"]
+    assert checked["active_runtime_headroom_bytes"] == namespace_cap
+    assert checked["owned_bytes"]["cache"] == 4096 and checked["owned_bytes"]["other"] == 4096
+    assert checked["credited_declared_output_bytes"] == checked["undeclared_output_budget_credit"] == 0
+    after_stage = campaign.remaining_storage_bytes(value, contract, [("job_a", 0)])
+    assert boundary - after_stage == (contract["caps"]["checkpoint_bytes"]
+        + contract["caps"]["metric_bytes_per_update"] + namespace_cap)
+    campaign.check_disk(directory, after_stage)
+    assert cache_file.is_file() and log_file.is_file()
+
+
+@pytest.mark.parametrize("flag", [1, "true", None])
+def test_active_namespace_headroom_requires_explicit_boolean(worker_storage, flag):
+    directory, contract, _ = worker_storage
+    with pytest.raises(campaign.CampaignIntegrityError, match="flag must be boolean"):
+        campaign.worker_storage_guard({}, contract, directory, 1000, active_worker=flag)
+
+
+def test_active_namespace_headroom_cannot_spend_the_entire_reservation(worker_storage):
+    directory, contract, _ = worker_storage
+    namespace_cap = contract["caps"]["inflight_bytes"] + contract["caps"]["runtime_cache_bytes"]
+    with pytest.raises(campaign.CampaignIntegrityError, match="headroom must fit"):
+        campaign.worker_storage_guard({}, contract, directory, namespace_cap, active_worker=True)
 
 
 def test_stdout_cannot_spend_later_jobs_reserved_storage(worker_storage):
@@ -349,6 +445,82 @@ def test_checkpoint_sidecar_temporary_is_inflight_and_never_checkpoint_credit(wo
     with pytest.raises(campaign.CampaignIntegrityError, match="other storage cap exceeded"):
         campaign.worker_storage_guard({}, contract, directory, 1000,
             checkpoint_paths=(checkpoint,), checkpoint_limit=128)
+
+
+def test_whole_worker_runtime_tree_is_cache_with_no_future_output_credit(worker_storage):
+    directory, contract, _ = worker_storage
+    runtime = directory / "runtime/home/nested"
+    runtime.mkdir(parents=True)
+    (runtime / "sdk_cache.bin").write_bytes(b"r" * 24)
+    (directory / "runtime.profile.json").write_bytes(b"profile" * 4)
+    result = campaign.worker_storage_guard({}, contract, directory, 1000)
+    assert result["owned_bytes"]["cache"] == 24 and result["owned_bytes"]["other"] == 28
+    assert result["credited_declared_output_bytes"] == 0 and result["required_bytes"] == 1000
+    (runtime / "later_cache.bin").write_bytes(b"x" * 9)
+    with pytest.raises(campaign.CampaignIntegrityError, match="cache storage cap exceeded"):
+        campaign.worker_storage_guard({}, contract, directory, 1000)
+
+
+@pytest.mark.parametrize("kind", ["directory_symlink", "file_symlink", "fifo"])
+def test_worker_runtime_cache_cannot_hide_links_or_special_entries(worker_storage, kind):
+    directory, contract, _ = worker_storage
+    cache = directory / "runtime"
+    cache.mkdir()
+    sentinel = directory.parent / "outside_original.bin"
+    sentinel.write_bytes(b"outside file must remain intact")
+    if kind == "directory_symlink":
+        (cache / "mounted_cache").symlink_to(directory.parent, target_is_directory=True)
+    elif kind == "file_symlink":
+        (cache / "foreign.bin").symlink_to(sentinel)
+    else:
+        os.mkfifo(cache / "special.bin")
+    with pytest.raises(campaign.CampaignIntegrityError, match="symlink|regular file"):
+        campaign.worker_storage_guard({}, contract, directory, 1000)
+    assert sentinel.read_bytes() == b"outside file must remain intact"
+
+
+@pytest.mark.parametrize("field", ["st_uid", "st_dev"])
+@pytest.mark.parametrize("kind", ["root", "directory", "file"])
+def test_foreign_owner_or_filesystem_cannot_spend_the_worker_output_reserve(worker_storage, monkeypatch, field, kind):
+    directory, contract, _ = worker_storage
+    cache = directory / "runtime"
+    cache.mkdir()
+    file = cache / "sdk_cache.bin"
+    file.write_bytes(b"actual owned regular fixture")
+    target = {"root": directory, "directory": cache, "file": file}[kind]
+    actual_lstat = Path.lstat
+
+    def changed_stat(path, *args, **kwargs):
+        observed = actual_lstat(path, *args, **kwargs)
+        if path != target:
+            return observed
+        values = {name: getattr(observed, name) for name in dir(observed) if name.startswith("st_")}
+        values[field] += 1
+        return SimpleNamespace(**values)
+
+    # Only the ownership/device observation is counterfactual. The actual
+    # path traversal, file contents, budget and statvfs guard are unchanged.
+    monkeypatch.setattr(Path, "lstat", changed_stat)
+    if kind == "root" and field == "st_dev":
+        message = "filesystem"
+    else:
+        message = "owned|owner|filesystem"
+    with pytest.raises(campaign.CampaignIntegrityError, match=message):
+        campaign.worker_storage_guard({}, contract, directory, 1000)
+
+
+@pytest.mark.parametrize("name", sorted(campaign.runtime_paths.RESERVED_ENVIRONMENT))
+def test_worker_environment_cannot_override_any_protected_runtime_path(tmp_path, monkeypatch, name):
+    directory = tmp_path / "new_worker"
+    directory.mkdir()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid runtime environment must fail before Popen")
+
+    monkeypatch.setattr(campaign.subprocess, "Popen", forbidden)
+    with pytest.raises(campaign.CampaignIntegrityError, match="runtime path isolation"):
+        REAL_LAUNCH([sys.executable, "-B", "-c", "pass"], directory, [], 1., lambda *a, **k: None,
+                    worker_env={name: "/unowned/override"})
 
 
 def test_pending_original_processes_do_not_launch_or_reserve(campaign_inputs, monkeypatch):
@@ -490,7 +662,7 @@ def test_actual_parent_monitor_output_burst_signals_only_owned_pidfd_and_preserv
     directory = tmp_path / "monitored_worker"
     directory.mkdir()
     contract = {"caps": {"checkpoint_bytes": 128, "metric_bytes_per_update": 64,
-        "trace_bytes_per_policy_sample": 256, "inflight_bytes": 4096,
+        "trace_bytes_per_policy_sample": 256, "inflight_bytes": 65536,
         "runtime_cache_bytes": 32, "free_margin_bytes": 16}}
     original_api, original_popen = campaign.predecessors._pidfd_api, campaign.subprocess.Popen
     launches, signals = [], []
@@ -517,7 +689,7 @@ def test_actual_parent_monitor_output_burst_signals_only_owned_pidfd_and_preserv
 
     monkeypatch.setattr(campaign.predecessors, "_pidfd_api", observed_api)
     monkeypatch.setattr(campaign.subprocess, "Popen", popen)
-    program = "import pathlib,sys,time;pathlib.Path(sys.argv[1]).write_bytes(b'x'*8192);time.sleep(20)"
+    program = "import pathlib,sys,time;pathlib.Path(sys.argv[1]).write_bytes(b'x'*262144);time.sleep(20)"
     command = [sys.executable, "-B", "-c", program, str(directory / "sdk_burst.bin")]
     with pytest.raises(campaign.CampaignIntegrityError, match="other storage cap exceeded"):
         REAL_LAUNCH(command, directory, [], 10., lambda *a, **k: None,
@@ -530,8 +702,48 @@ def test_actual_parent_monitor_output_burst_signals_only_owned_pidfd_and_preserv
     assert terminal["returncode"] == -signal.SIGTERM and terminal["timed_out"] is False
     assert signals == [(os.getpid(), 0), (launches[0], signal.SIGTERM)]
     assert campaign.predecessors._process(launches[0]) is None
-    assert (directory / "sdk_burst.bin").stat().st_size == 8192
+    assert (directory / "sdk_burst.bin").stat().st_size == 262144
     assert not list(directory.rglob("endpoint.pt")) and not list(directory.rglob("endpoint.json"))
+
+
+def test_actual_runtime_output_burst_keeps_profiles_pinned_and_only_terminates_the_owned_child(tmp_path):
+    directory = tmp_path / "runtime_burst_worker"
+    directory.mkdir()
+    contract = {"caps": {"checkpoint_bytes": 128, "metric_bytes_per_update": 64,
+        "trace_bytes_per_policy_sample": 256, "inflight_bytes": 65536,
+        "runtime_cache_bytes": 64, "free_margin_bytes": 16}}
+    program = ("import os,pathlib,time;"
+               "pathlib.Path(os.environ['XDG_CACHE_HOME'],'sdk_burst.bin').write_bytes(b'x'*512);"
+               "time.sleep(20)")
+    command = [sys.executable, "-B", "-c", program]
+    with pytest.raises(campaign.CampaignIntegrityError, match="cache storage cap exceeded"):
+        REAL_LAUNCH(command, directory, [], 10., lambda *a, **k: None,
+            monitor=lambda: campaign.worker_storage_guard({}, contract, directory, 100_000))
+    actual = json.loads((directory / "worker.process.json").read_bytes())
+    terminal = json.loads((directory / "worker.completion.json").read_bytes())
+    assert actual["process"] == terminal["process"] and terminal["returncode"] == -signal.SIGTERM
+    assert actual["runtime_profile"] == terminal["runtime_profile"]
+    profile = campaign.runtime_paths.validate_runtime_artifact(directory, actual["runtime_profile"])
+    assert (Path(profile["paths"]["xdg_cache"]) / "sdk_burst.bin").read_bytes() == b"x" * 512
+    assert campaign.predecessors._process(actual["process"]["pid"]) is None
+
+
+def test_actual_child_runtime_profile_tamper_is_terminal_without_relaunch(tmp_path):
+    directory = tmp_path / "tampered_runtime_worker"
+    directory.mkdir()
+    program = ("import os,pathlib,time;time.sleep(.2);"
+               "p=pathlib.Path(os.environ['TRANSFORMER_RL_RUNTIME_PROFILE']);"
+               "p.write_bytes(p.read_bytes()+b' ');time.sleep(20)")
+    command = [sys.executable, "-B", "-c", program]
+    with pytest.raises(ValueError, match="external SHA-256"):
+        REAL_LAUNCH(command, directory, [], 10., lambda *a, **k: None)
+    actual = json.loads((directory / "worker.process.json").read_bytes())
+    terminal = json.loads((directory / "worker.completion.json").read_bytes())
+    assert terminal["command"] == command and terminal["process"] == actual["process"]
+    assert terminal["returncode"] == -signal.SIGTERM and not terminal["timed_out"]
+    assert actual["runtime_profile"] == terminal["runtime_profile"]
+    with pytest.raises(ValueError, match="external SHA-256"):
+        campaign.runtime_paths.validate_runtime_artifact(directory, terminal["runtime_profile"])
 
 
 def test_pidfd_both_APIs_are_probed_before_Popen(tmp_path, monkeypatch):

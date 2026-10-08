@@ -448,6 +448,10 @@ def run_physical_worker(p):
             EXPOSURE_CPU_FIXTURE_PROTOCOL=str(p["protocol_path"]), CUDA_VISIBLE_DEVICES="",
             OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
         Path(environment["PYTHONPYCACHEPREFIX"]).mkdir()
+        from transformer_rl import runtime_paths
+        environment = runtime_paths.prepare_worker_runtime(p["directory"], environment)
+        runtime_profile = runtime_paths.profile_receipt(
+            runtime_paths.validate_runtime_profile(p["directory"], environ=environment))
         with (p["directory"] / "stdout.txt").open("xb") as stdout, (p["directory"] / "stderr.txt").open("xb") as stderr:
             child = subprocess.Popen(planned["command"], stdout=stdout, stderr=stderr, env=environment,
                                      pass_fds=tuple(lease["descriptor"] for lease in leases), start_new_session=True)
@@ -456,7 +460,8 @@ def run_physical_worker(p):
             try:
                 identity = campaign._startup_identity(child.pid, planned["command"], 60.)
                 process = {"format": "transformer_rl.exposure_worker_process", "schema_version": 1,
-                           "process": identity, "command": planned["command"], "leases": leases}
+                           "process": identity, "command": planned["command"], "leases": leases,
+                           "runtime_profile": runtime_profile}
                 canonical(p["directory"] / "worker.process.json", process)
                 code = child.wait(timeout=60.)
             except BaseException:
@@ -469,7 +474,8 @@ def run_physical_worker(p):
                 os.close(handle)
         canonical(p["directory"] / "worker.completion.json", {
             "format": "transformer_rl.exposure_worker_completion", "schema_version": 1,
-            "process": identity, "command": planned["command"], "returncode": code, "timed_out": False})
+            "process": identity, "command": planned["command"], "returncode": code, "timed_out": False,
+            "runtime_profile": runtime_profile})
         assert code == 0, (p["directory"] / "stderr.txt").read_text()
         return planned
 
@@ -491,6 +497,9 @@ def test_actual_canonical_worker_and_complete_physical_result_reconstruction(phy
                  lambda worker, process: worker.update(schema_version=True),
                  lambda worker, process: process.update(schema_version=True),
                  lambda worker, process: worker["process"].update(pid=os.getpid()),
+                 lambda worker, process: worker.pop("runtime_profile"),
+                 lambda worker, process: worker["runtime_profile"].update(bytes=1),
+                 lambda worker, process: process["runtime_profile"].update(sha256="0" * 64),
                  lambda worker, process: worker["command"].append("--extra"),
                  lambda worker, process: (worker["process"].update(argv=["fabricated"]),
                                           process["process"].update(argv=["fabricated"]))]

@@ -17,6 +17,7 @@ from . import exposure_campaign as campaign
 from . import exposure_evaluation as evaluation
 from . import exposure_protocol as definition
 from .frame_config import FrameTrainConfig, digest
+from . import runtime_paths
 
 
 FORMAT = "transformer_rl.exposure_validation_choice"
@@ -93,6 +94,10 @@ class _Pins:
 def _terminal(directory, command, leases, pins):
     worker = pins.read(directory / "worker.completion.json")
     process = pins.read(directory / "worker.process.json")
+    profile_receipt = pins.receipt(directory / runtime_paths.PROFILE_FILENAME)
+    runtime_paths.validate_runtime_artifact(directory, profile_receipt)
+    _require(worker.get("runtime_profile") == process.get("runtime_profile") == profile_receipt,
+             "closed worker runtime profile differs from parent and child bindings")
     handle = worker.get("process", {})
     _require(type(handle) is dict and set(handle) == {"pid", "start", "argv"}
              and type(handle["pid"]) is int and handle["pid"] > 0
@@ -195,6 +200,7 @@ def _training(protocol, raw, job, controller_receipt, pins):
         _require(outcome.get("format") == "transformer_rl.exposure_stage_outcome"
                  and type(outcome.get("schema_version")) is int and outcome["schema_version"] == 1
                  and outcome["request"] == request_receipt and outcome["source"] == protocol["source"]
+                 and outcome.get("runtime_profile") == worker["runtime_profile"]
                  and digest(outcome["process"]) == digest(worker["process"])
                  and outcome["shutdown_errors"] == [] and outcome["error"] is None,
                  "closed training outcome differs from actual worker")

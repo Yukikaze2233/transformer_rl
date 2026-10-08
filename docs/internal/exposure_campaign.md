@@ -31,7 +31,9 @@ run_protocol(
 
 启动前实际探测 `pidfd_open` 和 `pidfd_send_signal(..., 0)`。超时或中断只向当前 child 的内核 pidfd 发信号，不按复用 PID 或整个进程组猜测目标。获取 child pidfd 失败时停止执行，不冒险给一个未绑定句柄发信号。controller 关闭自己的 FD 而不执行 `LOCK_UN`，仍存活的 orphan child 会继续持有继承的锁，直到它退出。
 
-每个 child 使用新的空 `PYTHONPYCACHEPREFIX`，启动前不存在、创建后为空；`-B` 配合该路径避免读取此前 checkout 的陈旧 bytecode。实际 runtime origin、SDK、snapshot 和 contract 在完整边界验证；rollout 回调继续检查源、协议/请求/父身份、两锁和磁盘。完整模型重建不放在每个物理 step 的回调里，否则会改变控制工作量。
+每个 child 使用新的空 `PYTHONPYCACHEPREFIX`，启动前不存在、创建后为空；`-B` 配合该路径避免读取此前 checkout 的陈旧 bytecode。controller 另独占创建该 worker 的 `runtime/` 和 `runtime.profile.json`，固定临时目录、XDG、Warp、Torch、CUDA 与 OmniClient 的输出位置，以及 Kit portable root、tokens 与 settings。profile 的原始 SHA 通过继承环境传入，process/completion/outcome 使用同一份实际收据；用户的 `worker_env` 不能覆盖受保护的路径或 profile 绑定。profile 与所有固定目录的 UID、inode、类型和文件系统在实际启动及等待期间持续核验。
+
+实际 runtime origin、SDK、snapshot 和 contract 在完整边界验证；rollout 回调继续检查源、协议/请求/父身份、两锁、runtime profile 和磁盘。完整模型重建不放在每个物理 step 的回调里，否则会改变控制工作量。实际 chassis 启动还读取 Kit 的解析结果，再核对声明 tokens/settings；合成 CPU worker 只能证明 profile 继承与检查，不具有真实 Kit readback。
 
 `exposure_process` 使用已有应用注册表，在自己的独立进程中关闭该阶段创建的应用。实际 Isaac、CUDA、部署延迟及完整操作系统动态库仍需真实运行证据，CPU 检查不代表这些内容已经验证。
 
@@ -43,20 +45,22 @@ storage contract 是单独固定的 canonical JSON，绑定 protocol 原始 SHA 
 - `trace_bytes_per_policy_sample`：未压缩物理 trace 每个 policy sample 的上限；
 - `metric_bytes_per_update`：优化日志每次更新的上限；
 - `inflight_bytes`：请求、报告和其它在途出版文件的额外空间；
-- `runtime_cache_bytes`：worker 输出目录内 `empty_python_cache` 的额外空间；
+- `runtime_cache_bytes`：worker 输出目录内完整 `runtime/` 与 `empty_python_cache` 的额外空间；
 - `free_margin_bytes`：保留可用空间。
 
 `measurements` 必须具有 checkpoint、trace、metric、runtime_cache 四种实测材料，每项为 `{kind, receipt, units}`；实际文件凭据和单位重新检查，cap 不能低于观测大小。测量材料是大小依据，不具有教师、模型性能或安全资格。
 
 runtime_cache 材料不是一个小标记文件。它是格式为 `transformer_rl.exposure_runtime_cache_measurement` 的完整目录清单，字段为 `format/schema_version/root/files/total_bytes`，其中 `files` 为所有实际文件收据，按绝对路径排序。材料核验会重新遍历其声明的 `root`、核对成员和实际总字节，按**目录总字节**核对 cap。这证明清单完整覆盖该声明目录，不表示已经确认生产 SDK 的真实缓存路径；测试中的小 CPU cache 只证明检查机制。
 
-当前运行时的类别 cap 扫描范围限于本 worker 输出目录：`empty_python_cache` 计入 runtime-cache，其它目录内 SDK 输出计入 inflight。HOME 或 SDK 安装树等输出目录外的 cache 未绑定这些类别 cap；与输出目录处于同一文件系统的增长受 `statvfs` 可用空间检查间接保护，其他文件系统的增长不在当前检查范围内。
+当前运行时的类别 cap 扫描范围限于本 worker 输出目录：完整 `runtime/` 与 `empty_python_cache` 计入 runtime-cache，profile JSON 及其它目录内 SDK 输出计入 inflight。输出根、全部子目录和文件均检查当前 UID、普通类型、无 symlink 与同一 `st_dev`；跨文件系统的目录或文件会拒绝，不能假设它们消耗或释放了输出所在文件系统的预算。runtime-cache 不获得后续 job 的抵扣。
 
-生产启动前需要固定 Kit 实际解析出的 cache、data、log、temp 根路径及其文件系统，分离不可变 SDK 安装树，并用真实冷启动、运行和关闭过程的峰值占用校准预算。声明目录清单和 CPU 检查不替代这些路径与峰值证据，也不表示已经对全系统缓存施加 cap。
+隔离保留调用者 HOME 与只读 SDK 输入。声明路径和实际 Kit readback 不证明 SDK helper、GPU 驱动或所有第三方库均没有其它写入；输出目录外、其它文件系统的增长不属于该类别 cap。生产启动前仍需用真实冷启动、运行、checkpoint/trace 发布及关闭过程的峰值占用校准预算，并检查实际写入范围。声明目录清单和 CPU 检查不替代这些峰值证据，也不表示已经对全系统缓存施加 cap。
 
-每个边界按剩余阶段 checkpoint、更新日志及**全部尚未闭合评价单元**的原始 trace 预留空间，另加最大评价 batch 的临时 memmap/未压缩 NPZ 共存峰值、checkpoint 发布副本、runtime cache、在途文件和可用空间余量。不假设压缩能省空间。trace 测量使用真实 NPZ 的全部未压缩成员字节，样本量由 `episode_id` 的实际 steps × rows 核对。
+每个边界按剩余阶段 checkpoint、更新日志及**全部尚未闭合评价单元**的原始 trace 预留空间。独立 worker 的 namespace 不共享，也不在关闭后自动删除；每个尚待训练的阶段与尚待评价的完整 role/seed batch 都分别预留 `runtime_cache_bytes + inflight_bytes`。只要仍有待执行 worker，边界再增加一份相同大小的活动 worker 安全头寸。实际 worker 的 `worker_storage_guard(..., active_worker=True)` 固定去掉这一份头寸，让合法的当前 namespace 写入能够使用它，并记录 `active_runtime_headroom_bytes`；这是启动前确定的常量，不依据已写 cache/log 抵扣预算，底部仍守住完整 cache、inflight 和 free margin。一个场景闭合而同 batch 仍有未闭合场景时，不能提前释放该 worker 的 namespace 预留。已闭合目录仍在盘上，其实际占用已反映在 `statvfs` 可用空间中，不能抵扣未来 job 的上限。
 
-child 只从未花费预算中扣减本 worker 明确声明的 checkpoint、metrics 和 trace 字节，并分别核对类别 cap。抵扣额取逻辑字节与 `st_blocks × 512` 实际已占用字节的较小值；稀疏 memmap 尚未写入的空洞仍占用未来写入预算。该 checkpoint 同目录的 `.endpoint.pt.<随机名>.tmp` 随发布文件计入同一个 checkpoint cap，`.endpoint.pt.json.<随机名>.tmp` 是 sidecar 临时文件，计入 inflight 且不获得 checkpoint 抵扣；同类别真实 hardlink 只计一次空间，跨预算类别 hardlink 拒绝。本 worker 输出目录中的 stdout、SDK 输出、JSON 和普通临时文件合计不得超过 inflight cap，不获得后续 job 的预算抵扣；其中 `empty_python_cache` 单独受 runtime-cache cap 限制。训练 worker 只允许该阶段唯一的 `endpoint.pt`，不遍历或抵扣其他阶段目录。每次采样检查、最后一次优化后的 checkpoint 封存前，以及关闭 worker 资源后都重新核对实际文件用量。任何超限都停止，不缩小评价分母，也不删除其他训练文件。
+出版并发峰值只另外计算一次最大剩余评价 batch 的临时 memmap/未压缩 NPZ 共存空间，以及一份 checkpoint 发布副本与可用空间余量，不能把最大 batch 乘以全部 worker 数。这里只使用实际校准合同的 cap 和完整原矩阵计数；还未测量的 SDK 冷启动/关闭峰值不具有数值证据。不假设压缩能省空间。trace 测量使用真实 NPZ 的全部未压缩成员字节，样本量由 `episode_id` 的实际 steps × rows 核对。
+
+child 只从未花费预算中扣减本 worker 明确声明的 checkpoint、metrics 和 trace 字节，并分别核对类别 cap。抵扣额取逻辑字节与 `st_blocks × 512` 实际已占用字节的较小值；稀疏 memmap 尚未写入的空洞仍占用未来写入预算。该 checkpoint 同目录的 `.endpoint.pt.<随机名>.tmp` 随发布文件计入同一个 checkpoint cap，`.endpoint.pt.json.<随机名>.tmp` 是 sidecar 临时文件，计入 inflight 且不获得 checkpoint 抵扣；同类别真实 hardlink 只计一次空间，跨预算类别 hardlink 拒绝。本 worker 输出目录中的 stdout、SDK 输出、JSON 和普通临时文件合计不得超过 inflight cap，不获得后续 job 的预算抵扣；其中完整 `runtime/` 和 `empty_python_cache` 单独受 runtime-cache cap 限制。训练 worker 只允许该阶段唯一的 `endpoint.pt`，不遍历或抵扣其他阶段目录。每次采样检查、最后一次优化后的 checkpoint 封存前，以及关闭 worker 资源后都重新核对实际文件用量。任何超限都停止，不缩小评价分母，也不删除其他训练文件。
 
 controller 还在等待 child 期间按最长一秒的等待间隔检查该 worker 的实际用量，并在 child 退出后再检查。物理调用或优化器尚未返回时，本 worker 输出目录内的 SDK/日志增长也受上述限制；停止只通过该 child 的真实 pidfd，保留已写输出与进程终态，不重试。
 

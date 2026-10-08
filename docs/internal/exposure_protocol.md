@@ -26,6 +26,10 @@ validation 与 held-out 单独标记。两类矩阵都预声明，但选择器�
 
 `runtime_identity()` 在 CPU 上读取解释器实际文件、Python/version/prefix、Torch/NumPy 的导入文件及 native extension 字节，并遍历调用者明确声明的外部 SDK 树。SDK 树不得与历史、learner、原 spec/base 或 snapshot 树重叠。它不会初始化 CUDA 或 Isaac 应用，也没有覆盖整个操作系统动态库、GPU 驱动、传感器或硬件时序；`hardware_and_complete_system_runtime_verified=false` 保留。后续 worker 仍需使用新空 bytecode cache 路径，核验实际启动 runtime 与环境 provenance。
 
+除了上述 Git/bytecode 例外，SDK 默认冻结普通输入，包括名为 cache 的目录、`extscache` 与随安装提供的 shader。只有调用者显式提供 `runtime_identity(runtime_roots, mutable_paths=[...])`，或 `freeze(..., runtime_mutable_paths=[...])` 时，才可声明实际 Isaac 安装根下的精确 `kit/cache`、`kit/data`、`kit/logs`。识别读取该根的 Isaac bootstrap、SimulationApp 源与实际 native Kit app plugin；目录名称本身不构成识别依据。每个 mutable 路径必须是存在的绝对 canonical 目录、当前用户拥有且与 SDK 根同一文件系统。所有后代仍遍历并检查普通类型、UID、文件系统及无 symlink，不能用排除名掩盖 FIFO 或逃逸路径。
+
+protocol 保存排序后的 `runtime_mutable_paths`，每份 SDK tree 保存精确相对 `mutable_subdirectories`；它们属于调用者固定的原协议字节。只有这些目录的普通可写文件字节不计入 SDK 输入摘要；`extscache`、kernel/plugin、代码及 shipped shader 仍冻结。环境 snapshot 的 `_tree` 调用不接受此例外，额外 cache 名称仍会改变 snapshot 成员。这项拆分不校准 SDK 峰值，也不授权生产运行。不同源需要新 prepare/freeze，不能续签旧协议后启动。
+
 冻结前后重新检查 history、learner、snapshot/contract、声明 runtime、原队列关联和两把锁的实际 inode，避免把构造初始化摘要期间发生的输入更改封存为完整定义。定义保存原课程、诊断与学习率队列的原始关联、helper/file 收据及原 controller 身份。冻结允许原队列仍在运行；真正执行必须另用 `check_dependency(..., require_complete=True)` 核验三队列完整闭合、controller/worker 终止，再获取原锁并向精确 child 继承 FD。
 
 ## 阶段进程与预算
@@ -57,3 +61,5 @@ python -B -m transformer_rl.exposure_protocol validate \
 ```
 
 路径和私有 seed 均须换成真实输入。协议文件不得写入任何原输入、SDK、learner 或未来 campaign 输出树。直接从源码 checkout 调用时设置 `PYTHONPATH` 为当前 `src`；使用实际目标 Python 环境，不能把另一个解释器的静态定义当成相同 runtime。
+
+如实际识别的 SDK 存在需拆分的可写目录，可在 freeze 命令逐项追加 `--runtime-mutable-path /absolute/actual/isaacsim/kit/cache`、`--runtime-mutable-path /absolute/actual/isaacsim/kit/data` 或 `--runtime-mutable-path /absolute/actual/isaacsim/kit/logs`。未声明时完全冻结；不存在、布局不符、任意 cache 目录或 `extscache` 均拒绝。CPU 布局 fixture 只验证识别和排除机制，不证明真实 Isaac 路径或硬件行为。

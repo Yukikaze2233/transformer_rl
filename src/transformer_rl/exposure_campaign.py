@@ -30,6 +30,7 @@ import numpy as np
 from . import exposure_protocol as definition
 from . import exposure_training as training
 from . import retention_campaign as predecessors
+from . import runtime_paths
 from .experiments import source_identity
 from .frame_config import FrameTrainConfig, digest, json_bytes
 
@@ -172,12 +173,20 @@ def measured_trace_bytes(path, units):
 
 def worker_storage_guard(protocol, contract, directory, required_remaining_bytes, *,
                          checkpoint_paths=(), checkpoint_limit=0, metric_paths=(), metric_limit=0,
-                         trace_prefix=None, trace_sample_limit=0):
+                         trace_prefix=None, trace_sample_limit=0, active_worker=False):
     """Credit only this worker's declared outputs; cap all other owned bytes."""
     directory = definition._path(directory)
+    root_stat = directory.lstat()
+    _require(stat.S_ISDIR(root_stat.st_mode) and root_stat.st_uid == os.getuid(),
+             "worker output must be an owned directory")
     caps = contract["caps"]
     _require(type(required_remaining_bytes) is int and required_remaining_bytes > 0,
              "fixed positive remaining storage reservation required")
+    _require(type(active_worker) is bool, "active worker reservation flag must be boolean")
+    active_headroom = caps["inflight_bytes"] + caps["runtime_cache_bytes"] if active_worker else 0
+    _require(required_remaining_bytes > active_headroom,
+             "active namespace headroom must fit the fixed storage reservation")
+    effective_remaining = required_remaining_bytes - active_headroom
     checkpoint_paths, metric_paths = set(map(Path, checkpoint_paths)), set(map(Path, metric_paths))
     _require(all(p.is_absolute() and p.is_relative_to(directory)
                  for p in checkpoint_paths | metric_paths)
@@ -192,9 +201,23 @@ def worker_storage_guard(protocol, contract, directory, required_remaining_bytes
     credits = {name: 0 for name in sizes}
     trace_directories, seen = set(), {}
     for base, directories, names in os.walk(directory, followlinks=False):
+        base_path = definition._path(base)
+        base_stat = base_path.lstat()
+        _require(stat.S_ISDIR(base_stat.st_mode) and base_stat.st_uid == os.getuid()
+                 and base_stat.st_dev == root_stat.st_dev,
+                 "worker directory is not owned or crosses its filesystem")
+        retained = []
         for name in directories:
             p = Path(base) / name
-            _require(not p.is_symlink(), "worker output contains a symlink")
+            try:
+                observed = p.lstat()
+            except FileNotFoundError:
+                continue
+            _require(stat.S_ISDIR(observed.st_mode) and observed.st_uid == os.getuid()
+                     and observed.st_dev == root_stat.st_dev,
+                     "worker directory contains a symlink, special entry, foreign owner or filesystem")
+            retained.append(name)
+        directories[:] = retained
         for name in names:
             p = Path(base) / name
             try:
@@ -204,11 +227,12 @@ def worker_storage_guard(protocol, contract, directory, required_remaining_bytes
                 # memmaps concurrently. Not crediting a vanished file is
                 # conservative; stable required artifacts are checked later.
                 continue
-            _require(stat.S_ISREG(s.st_mode) and s.st_uid == os.getuid(),
-                     "worker output is not an owned regular file")
+            _require(stat.S_ISREG(s.st_mode) and s.st_uid == os.getuid()
+                     and s.st_dev == root_stat.st_dev,
+                     "worker output is not an owned regular file on its filesystem")
             relative = p.relative_to(directory)
             category = "other"
-            if relative.parts[0] == "empty_python_cache":
+            if relative.parts[0] in ("empty_python_cache", "runtime"):
                 category = "cache"
             elif p in checkpoint_paths or any(p.parent == cp.parent and re.fullmatch(
                     re.escape("." + cp.name + ".") + r"[a-zA-Z0-9_-]+\.tmp", p.name) for cp in checkpoint_paths):
@@ -247,9 +271,9 @@ def worker_storage_guard(protocol, contract, directory, required_remaining_bytes
                  "published uncompressed trace exceeds measured cap")
     credited = sum(credits[name] for name in ("checkpoint", "metric", "trace_maps", "trace_archive"))
     floor = sum(caps[name] for name in ("inflight_bytes", "runtime_cache_bytes", "free_margin_bytes"))
-    disk = check_disk(directory, max(floor, required_remaining_bytes - credited))
+    disk = check_disk(directory, max(floor, effective_remaining - credited))
     return {**disk, "credited_declared_output_bytes": credited, "owned_bytes": sizes,
-            "undeclared_output_budget_credit": 0}
+            "undeclared_output_budget_credit": 0, "active_runtime_headroom_bytes": active_headroom}
 
 
 def remaining_storage_bytes(protocol, contract, completed_stages=(), closed_cells=()):
@@ -258,6 +282,8 @@ def remaining_storage_bytes(protocol, contract, completed_stages=(), closed_cell
 The caller supplies measured caps rather than assuming compression or silently
 discarding traces. Completed bytes already occupy the filesystem and are not
 counted again. Missing cells may be closed explicitly; unexecuted cells remain.
+Boundary checks retain one extra active namespace headroom. The running worker
+guard consumes that fixed headroom without crediting any cache/log bytes.
 """
     caps = contract["caps"]
     completed, closed = set(completed_stages), set(closed_cells)
@@ -275,12 +301,21 @@ counted again. Missing cells may be closed explicitly; unexecuted cells remain.
             key = (cell["job_id"], cell["stage_index"], cell["role"], cell["seed"])
             batches[key] = batches.get(key, 0) + cell["expected_policy_samples"]
     largest_trace = max(batches.values(), default=0) * caps["trace_bytes_per_policy_sample"]
+    # Every OS stage/batch keeps its own namespace and runtime proof. Closed
+    # files already reduce statvfs available bytes; future caches and ordinary
+    # publications must each be reserved, rather than assuming one shared
+    # reusable cache or silently deleting historical worker evidence.
+    future_worker_count = checkpoint_count + len(batches)
+    namespace_cap = caps["inflight_bytes"] + caps["runtime_cache_bytes"]
+    active_headroom = namespace_cap if future_worker_count else 0
     return (checkpoint_count * caps["checkpoint_bytes"]
             + updates * caps["metric_bytes_per_update"]
             + samples * caps["trace_bytes_per_policy_sample"]
             + largest_trace
-            + caps["checkpoint_bytes"] + caps["inflight_bytes"]
-            + caps["runtime_cache_bytes"] + caps["free_margin_bytes"])
+            + caps["checkpoint_bytes"]
+            + future_worker_count * namespace_cap
+            + active_headroom
+            + caps["free_margin_bytes"])
 
 
 def check_disk(root, required_bytes):
@@ -363,7 +398,7 @@ def _worker_environment(directory):
     cache.mkdir(mode=0o700)
     environment = predecessors._environment(directory)
     environment["PYTHONPYCACHEPREFIX"] = str(cache)
-    return environment
+    return runtime_paths.prepare_worker_runtime(directory, environment)
 
 
 def launch_owned_worker(command, directory, leases, timeout, publish, *, worker_env=None, monitor=None):
@@ -376,9 +411,20 @@ def launch_owned_worker(command, directory, leases, timeout, publish, *, worker_
     directory = definition._path(directory)
     environment = _worker_environment(directory)
     if worker_env is not None:
-        _require(type(worker_env) is dict and not ({"PYTHONPATH", "PYTHONPYCACHEPREFIX",
-            "PYTHONDONTWRITEBYTECODE"} & set(worker_env)), "worker environment cannot override input isolation")
+        _require(type(worker_env) is dict
+                 and not (runtime_paths.RESERVED_ENVIRONMENT & set(worker_env)),
+                 "worker environment cannot override input or runtime path isolation")
         environment.update(worker_env)
+    runtime_profile = runtime_paths.profile_receipt(
+        runtime_paths.validate_runtime_profile(directory, environ=environment))
+
+    def guard_runtime():
+        _require(runtime_paths.profile_receipt(runtime_paths.validate_runtime_profile(
+            directory, environ=environment)) == runtime_profile,
+            "worker runtime profile changed during execution")
+        if monitor is not None:
+            monitor()
+
     opening, sending = predecessors._pidfd_api()
     # Verify both pidfd opening AND signal support before Popen. Signal zero is
     # an existence/permission probe and does not modify the controller.
@@ -399,23 +445,21 @@ def launch_owned_worker(command, directory, leases, timeout, publish, *, worker_
             identity = _startup_identity(process.pid, command, timeout)
             _new(directory / "worker.process.json", {"format": "transformer_rl.exposure_worker_process",
                 "schema_version": 1, "process": identity, "command": command, "leases": leases,
+                "runtime_profile": runtime_profile,
                 "started_at": datetime.now(timezone.utc).isoformat()})
             while True:
-                if monitor is not None:
-                    monitor()
+                guard_runtime()
                 remaining = timeout - (time.monotonic() - started)
                 if remaining <= 0:
                     timed_out = True
                     break
                 try:
-                    process.wait(timeout=min(1. if monitor is not None else 20., remaining))
-                    if monitor is not None:
-                        monitor()
+                    process.wait(timeout=min(1., remaining))
+                    guard_runtime()
                     break
                 except subprocess.TimeoutExpired:
                     if process.poll() is not None:
-                        if monitor is not None:
-                            monitor()
+                        guard_runtime()
                         break
                     live = predecessors._process(process.pid)
                     if live is not None:
@@ -442,8 +486,7 @@ def launch_owned_worker(command, directory, leases, timeout, publish, *, worker_
                             timed_out = True
                             break
                         raise CampaignIntegrityError("child exit observation did not become terminal")
-                    if monitor is not None:
-                        monitor()
+                    guard_runtime()
                     break
         except BaseException as error:
             failure = error
@@ -465,6 +508,7 @@ def launch_owned_worker(command, directory, leases, timeout, publish, *, worker_
                 os.close(handle)
     result = {"format": "transformer_rl.exposure_worker_completion", "schema_version": 1,
               "process": identity, "command": command,
+              "runtime_profile": runtime_profile,
               "returncode": process.returncode if process else None,
               "timed_out": timed_out, "elapsed_s": time.monotonic() - started}
     _new(directory / "worker.completion.json", result)
@@ -673,7 +717,8 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
             _checked(controller_receipt)
             _require(source_identity() == protocol["source"], "physical worker inputs changed")
             return worker_storage_guard(protocol, contract, evaluation_root, request["required_remaining_bytes"],
-                trace_prefix=evaluation_root / "trace.npz", trace_sample_limit=sum(c["expected_policy_samples"] for c in cells))
+                trace_prefix=evaluation_root / "trace.npz", trace_sample_limit=sum(c["expected_policy_samples"] for c in cells),
+                active_worker=True)
 
         publish("evaluating", active_job=job["id"], active_stage=stage["index"],
                 active_evaluation_role=first["role"], active_evaluation_seed=first["seed"])
@@ -731,7 +776,8 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
                         return worker_storage_guard(protocol, contract, directory, remaining,
                             checkpoint_paths=[checkpoint_path], checkpoint_limit=contract["caps"]["checkpoint_bytes"],
                             metric_paths=[directory / "train" / "metrics.jsonl"],
-                            metric_limit=stage["updates"] * contract["caps"]["metric_bytes_per_update"])
+                            metric_limit=stage["updates"] * contract["caps"]["metric_bytes_per_update"],
+                            active_worker=True)
 
                     worker = launch_owned_worker(command, directory, leases,
                         protocol["execution"]["worker_timeout_seconds"], publish, monitor=monitor_training)
@@ -741,6 +787,9 @@ def run_protocol(protocol_path, *, expected_protocol_sha256, storage_contract_pa
                     _require(outcome.get("request") == request_receipt, "worker outcome request differs")
                     _require(outcome.get("source") == protocol["source"], "worker outcome source differs")
                     _require(worker["process"] == outcome.get("process"), "worker outcome process identity differs")
+                    _require(worker["runtime_profile"] == outcome.get("runtime_profile"),
+                             "worker outcome runtime profile differs")
+                    runtime_paths.validate_runtime_artifact(directory, worker["runtime_profile"])
                     item = {"stage_index": stage["index"], "worker": worker,
                             "outcome": definition._receipt(outcome_path)}
                     result["stages"].append(item)

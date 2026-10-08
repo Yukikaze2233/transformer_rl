@@ -11,6 +11,7 @@ import hashlib
 import importlib
 import json
 import math
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -522,9 +523,34 @@ class ChassisFrameAdapter:
         self.env.sim.stop()
 
 
+def _launch_application(device):
+    """Apply owned runtime bindings before SDK startup and verify their readback."""
+    from .frame_process import register_app
+    from . import runtime_paths
+    profile = None
+    if runtime_paths.PROFILE_ENV in os.environ or runtime_paths.PROFILE_SHA_ENV in os.environ:
+        profile = runtime_paths.validate_runtime_profile()
+    from isaaclab.app import AppLauncher
+    arguments = (runtime_paths.kit_arguments(profile) if profile is not None
+                 else "--/exts/omni.kit.telemetry/skipDeferredStartup=true")
+    app = AppLauncher({"headless": True, "enable_cameras": False, "device": str(device),
+                       "kit_args": arguments})
+    # Register before readback: a rejected startup still belongs to this worker
+    # and must close through its existing lifecycle registry.
+    register_app(app.app)
+    readback = None
+    if profile is not None:
+        import carb.settings
+        import carb.tokens
+        readback = runtime_paths.verify_kit_runtime(profile,
+            carb.tokens.get_tokens_interface().resolve, carb.settings.get_settings().get,
+            app._sim_experience_file)
+    return app, readback
+
+
 def make_env(model_config, environment_config, device):
     import torch
-    from .frame_process import register_app, require_worker
+    from .frame_process import require_worker
     require_worker()
     snapshot = Path(environment_config["snapshot"]).resolve()
     identity = json.loads((snapshot / "snapshot.json").read_text())
@@ -553,10 +579,7 @@ def make_env(model_config, environment_config, device):
     if control_contract(config, manifest) != identity["control"]:
         raise ValueError("effective action mapping differs from the deployment contract")
     sys.path.insert(0, str(snapshot / "src"))
-    from isaaclab.app import AppLauncher
-    app = AppLauncher({"headless": True, "enable_cameras": False, "device": str(device),
-                       "kit_args": "--/exts/omni.kit.telemetry/skipDeferredStartup=true"})
-    register_app(app.app)
+    app, runtime_readback = _launch_application(device)
     env_module = importlib.import_module("wheeled_tasks.chassis.env")
     if not Path(env_module.__file__).resolve().is_relative_to(snapshot / "src"):
         raise ValueError("worker imported another environment source")
@@ -587,6 +610,8 @@ def make_env(model_config, environment_config, device):
         "control_packet_joint_order": list(config["policy_action_order"]),
         "physics_hz": 1 / config["physics_dt"], "policy_hz": 1 / config["policy_dt"], "preflight": "packed_study_not_baseline_campaign",
         **({"evaluation_groups": list(env.scene_groups)} if config["evaluation_exact_cases"] else {})}
+    if runtime_readback is not None:
+        metadata["runtime_paths"] = runtime_readback
     reset_transform = None
     if config.get("transfer_evaluation"):
         from .transfer_profiles import configure_transfer_evaluation, apply_reset_profiles

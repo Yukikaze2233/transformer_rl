@@ -15,6 +15,7 @@ from .continuation_process import _ApplicationRegistry
 from .experiments import source_identity
 from .frame_continuation import FrameContinuation
 from .ppo import PPOTrainer
+from . import runtime_paths
 
 
 def run_request(request, request_receipt):
@@ -23,6 +24,7 @@ def run_request(request, request_receipt):
     cache = Path(os.environ.get("PYTHONPYCACHEPREFIX", ""))
     campaign._require(cache == directory / "empty_python_cache" and cache.is_dir()
                       and not list(cache.iterdir()), "worker did not start with a new empty bytecode cache")
+    runtime_profile = runtime_paths.profile_receipt(runtime_paths.validate_runtime_profile(directory))
     own = campaign._identity(os.getpid())
     registry = _ApplicationRegistry()
     numerical = {"origin": None}
@@ -42,12 +44,14 @@ def run_request(request, request_receipt):
         if stop_requested:
             return True
         campaign._checked(request_receipt)
+        campaign._require(runtime_paths.profile_receipt(runtime_paths.validate_runtime_profile(directory))
+                          == runtime_profile, "worker runtime profile changed")
         campaign.validate_controller_lease(protocol, request["leases"], request["controller"])
         campaign._require(source_identity() == protocol["source"], "worker learner source changed")
         # Only this stage's declared data may spend its output reserve. SDK,
         # stdout and publication temporaries cannot consume future jobs' caps.
         campaign.worker_storage_guard(protocol, contract, directory,
-            request["required_remaining_bytes"], checkpoint_paths=(checkpoint,),
+            request["required_remaining_bytes"], active_worker=True, checkpoint_paths=(checkpoint,),
             checkpoint_limit=contract["caps"]["checkpoint_bytes"],
             metric_paths=(output_root / "metrics.jsonl",),
             metric_limit=stage["updates"] * contract["caps"]["metric_bytes_per_update"])
@@ -129,6 +133,7 @@ def run_request(request, request_receipt):
     outcome = {"format": "transformer_rl.exposure_stage_outcome", "schema_version": 1,
         "request": deepcopy(request_receipt), "source": source_identity(), "process": own,
         "status": status, "typed_numerical_origin": numerical["origin"],
+        "runtime_profile": runtime_profile,
         "training_completion": campaign.definition._receipt(Path(request["output_root"]) / "completion.json")
             if completion is not None else None,
         "shutdown_errors": errors, "error": caught}
