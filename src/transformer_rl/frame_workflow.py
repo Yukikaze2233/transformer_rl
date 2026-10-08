@@ -260,17 +260,29 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
 @torch.no_grad()
 def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, device="cpu",
                           settle_steps=200, min_steady_samples=200, anchor_output=None, max_anchors=2048,
-                          group_anchor_directory=None, control_metrics=False, trace_output=None, trace_replicas=2):
+                          group_anchor_directory=None, control_metrics=False, trace_output=None, trace_replicas=2,
+                          history_control=False, should_stop=None):
     """Task metrics and episode_success are owned PRE-reset environment diagnostics."""
     _positive_integer(steps, "steps")
     _positive_integer(max_anchors, "max_anchors")
     EpisodeSignalStatistics.validate_protocol(settle_steps, min_steady_samples)
+    if should_stop is not None and not callable(should_stop):
+        raise ValueError("evaluation stop callback must be callable")
+
+    def check_stop():
+        if should_stop is not None and should_stop():
+            raise InterruptedError("evaluation interrupted before complete publication")
+
+    check_stop()
     if trace_output is not None and not control_metrics:
         raise ValueError("trace_output requires control_metrics=True")
+    if type(history_control) is not bool or history_control and not control_metrics:
+        raise ValueError("history_control requires control_metrics=True")
     if trace_output is not None and Path(trace_output).exists():
         raise FileExistsError(trace_output)
     _seed(seed)
     model, _, config, update, metadata, _ = load_frame_checkpoint(checkpoint)
+    check_stop()
     env = env_factory(model_config=config.model, environment_config=environment, device=torch.device(device))
     trace = None
     try:
@@ -284,6 +296,11 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
             env.enable_control_metrics = True
             controls = ControlMetrics(env.num_envs, config.control["policy_dt_s"],
                 settle_steps=settle_steps, min_steady_samples=min_steady_samples)
+        history_controls = None
+        if history_control:
+            from .history_control import HistoryControlStatistics
+            history_controls = HistoryControlStatistics(env.num_envs, model.config.history_length,
+                config.control["policy_dt_s"], settle_steps=settle_steps, min_steady_samples=min_steady_samples)
         contract = _TensorEnvContract(model.config, env.num_envs, env.device)
         history = FrameHistory(model.config, env.num_envs, env.device)
         current = history.append(contract.observation(env.reset(seed=seed)))
@@ -301,6 +318,9 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                 if control_metrics:
                     groups[name]["control"] = ControlMetrics(len(indices), config.control["policy_dt_s"],
                         settle_steps=settle_steps, min_steady_samples=min_steady_samples)
+                if history_control:
+                    groups[name]["history_control"] = HistoryControlStatistics(len(indices), model.config.history_length,
+                        config.control["policy_dt_s"], settle_steps=settle_steps, min_steady_samples=min_steady_samples)
         checkpoint_sha = hashlib.sha256(Path(checkpoint).read_bytes()).hexdigest()
         if trace_output is not None:
             from .control_trace import ControlTrace
@@ -321,6 +341,8 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
         anchor_count = 0
         capture_interval = max(1, math.ceil(steps * env.num_envs / max_anchors))
         for index in range(steps):
+            check_stop()
+            input_ages = ages.clone() if history_control else None
             mean = contract.tensor("mean", model.actor(current), (env.num_envs, model.config.action_dim))
             action = mean.clamp(-bounds, bounds)
             if anchor_output is not None and index % capture_interval == 0 and anchor_count < max_anchors:
@@ -337,8 +359,14 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                 packet = result.info.get("control_packet")
                 if not isinstance(packet, dict):
                     raise ValueError("control evaluation requires PRE-reset control_packet tensors")
+                if history_control and "command_request" in packet:
+                    if "request" in packet and not torch.equal(packet["request"], packet["command_request"]):
+                        raise ValueError("request aliases disagree")
+                    packet = {**packet, "request": packet["command_request"]}
                 controls.update(packet, done)
-                if trace is not None:
+                if history_controls is not None:
+                    history_controls.update(packet, done, input_ages, mean, action)
+                if trace is not None and not history_control:
                     trace.add(packet, done)
             present = "episode_success" in result.info
             if success_available is not None and present != success_available:
@@ -362,10 +390,31 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
             for name, values in physical.items():
                 metrics[name].add(contract.tensor(name, values, (env.num_envs,)))
             statistics.update(result.info.get("evaluation_signals", {}), result.info.get("evaluation_signal_time"), done)
+            if trace is not None and history_control:
+                import re
+                signals = result.info.get("evaluation_signals", {})
+                if not present or not signals or any(not re.fullmatch(r"[a-z][a-z0-9_]*", n)
+                                                     for n in (*physical, *signals)):
+                    raise ValueError("history trace requires task success and named physical metrics/signals")
+                trace.metadata.update(history_length=model.config.history_length,
+                    pre_inference_age_semantics="policy steps since reset, captured before actor inference",
+                    evaluation_metric_names=sorted(physical), evaluation_signal_names=sorted(signals))
+                recorded = {key: value for key, value in packet.items() if key != "request"}
+                if "request" in packet:
+                    recorded["command_request"] = packet["request"]
+                recorded.update(pre_inference_episode_age=input_ages, raw_policy_mean=mean, issued_action=action,
+                    eval_reward=result.reward, eval_episode_success=success,
+                    eval_signal_time=result.info["evaluation_signal_time"])
+                recorded.update({"eval_metric_" + name: value for name, value in physical.items()})
+                recorded.update({"eval_signal_" + name: value for name, value in signals.items()})
+                trace.add(recorded, done)
             for group in groups.values():
                 rows = group["indices"]
                 if controls is not None:
                     group["control"].update({name: value[rows] for name, value in packet.items()}, done[rows])
+                if history_control:
+                    group["history_control"].update({name: value[rows] for name, value in packet.items()},
+                        done[rows], input_ages[rows], mean[rows], action[rows])
                 group["completed"] += int(done[rows].sum())
                 group["successes"] += int(success[rows].sum())
                 group["failures"] += int((done[rows] & ~success[rows]).sum())
@@ -386,6 +435,7 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
             ages[done] = 0
             history.reset(done)
             current = history.append(result.observation)
+            check_stop()
         report = {"format": "transformer_rl.packed_evaluation", "schema_version": 1,
                   "checkpoint_sha256": checkpoint_sha, "checkpoint_update": update,
                   "model": config.to_dict()["model"], "control_sha256": digest(config.control),
@@ -397,6 +447,8 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                   "stability": statistics.report(), "policy": "deterministic_raw_mean_then_declared_action_limits"}
         if controls is not None:
             report["control"] = controls.report()
+        if history_controls is not None:
+            report["history_control"] = history_controls.report()
         if anchor_output is not None:
             if not anchor_count:
                 raise ValueError("no behavior samples available for anchors")
@@ -417,6 +469,8 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                     stability=group["statistics"].report())
                 if controls is not None:
                     grouped["control"] = group["control"].report()
+                if history_control:
+                    grouped["history_control"] = group["history_control"].report()
                 if group_anchor_directory is not None:
                     # Group names must be safe before being used as file routes.
                     import re
@@ -428,7 +482,9 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                 report["groups"][name] = grouped
         json.dumps(report, allow_nan=False)
         if trace is not None:
+            check_stop()
             report["trace"] = trace.publish()
+            check_stop()
         return report
     finally:
         if trace is not None:
