@@ -21,6 +21,7 @@ import torch
 
 from .control_metrics import ControlMetrics
 from .evaluation import _MetricAccumulator
+from .episode_outcomes import EpisodeOutcomeStatistics, TRACE_FIELDS, TRACE_METADATA_KEY, trace_metadata
 from .stability import EpisodeSignalStatistics
 
 
@@ -246,6 +247,31 @@ def _evaluation_fields(expected):
     return fields, names
 
 
+def _episode_fields(expected, trace, rows):
+    _require(type(trace) is dict, "trace report requires a dictionary")
+    declaration = trace.get(TRACE_METADATA_KEY)
+    if declaration is None:
+        _require(TRACE_METADATA_KEY not in trace and TRACE_METADATA_KEY not in expected,
+                 "missing declared episode outcome trace protocol")
+        available = False
+    else:
+        _require(type(declaration) is dict and type(declaration.get("available")) is bool
+                 and _canonical(declaration) == _canonical(trace_metadata(declaration["available"])),
+                 "episode outcome trace protocol differs")
+        available = declaration["available"]
+    contract = expected.get("episode_outcome_contract")
+    if contract is not None:
+        _require(available and type(contract) is dict
+                 and set(contract) == {"episode_horizon_ticks", "survival_applicable"},
+                 "explicit available episode outcome contract required")
+        for name, dtype in (("episode_horizon_ticks", int), ("survival_applicable", bool)):
+            values = contract[name]
+            _require(type(values) is list and len(values) == rows and all(type(v) is dtype for v in values)
+                     and (dtype is bool or all(0 < v < 2**63 for v in values)),
+                     "invalid declared episode outcome row contract")
+    return {name: () for name in TRACE_FIELDS} if available else {}, available, contract
+
+
 def verify_trace_archive(path, trace, expected, *, steps, rows, history_length,
                          action_bounds, settle_steps, min_steady_samples):
     """Validate every payload and replay all authorized rows, including failures.
@@ -259,12 +285,18 @@ def verify_trace_archive(path, trace, expected, *, steps, rows, history_length,
     dt, labels = _arguments(expected, steps, rows, history_length, action_bounds,
                             settle_steps, min_steady_samples)
     evaluation_fields, evaluation_names = _evaluation_fields(expected)
-    shapes = {**_SHAPES, **evaluation_fields}
+    episode_fields, episode_available, episode_contract = _episode_fields(expected, trace, rows)
+    episode_contract_tensors = ({name: torch.tensor(values, dtype=torch.bool if name == "survival_applicable" else torch.int64)
+                                for name, values in episode_contract.items()} if episode_contract is not None else {})
+    # Row contracts are authorization inputs, not evidence self-declared by the
+    # trace producer. All ordinary provenance keys remain archive-bound.
+    expected_metadata = {k: v for k, v in expected.items() if k != "episode_outcome_contract"}
+    shapes = {**_SHAPES, **evaluation_fields, **episode_fields}
     path = _path(path)
     identity = _identity(path)
     _require(type(trace) is dict and _path(trace["path"]) == path, "trace report path differs")
     _require(_canonical(trace.get("rows")) == _canonical(list(range(rows)))
-             and all(_canonical(trace.get(k)) == _canonical(v) for k, v in expected.items()),
+             and all(_canonical(trace.get(k)) == _canonical(v) for k, v in expected_metadata.items()),
              "trace report provenance differs")
     required = set(shapes) | _SPECIAL
     with path.open("rb") as source:
@@ -310,7 +342,9 @@ def verify_trace_archive(path, trace, expected, *, steps, rows, history_length,
                         else:
                             suffix = shapes.get(field, (3,))
                             _require(header["shape"] == (steps, rows, *suffix), f"trace shape differs: {field}")
-                            kind = "b" if field in _BOOL or field == "eval_episode_success" else "i" if field in _INTEGER else "f"
+                            episode_kind = TRACE_FIELDS.get(field)
+                            kind = ("b" if field in _BOOL or field == "eval_episode_success" or episode_kind == "bool"
+                                    else "i" if field in _INTEGER or episode_kind == "int64" else "f")
                             _require(dtype.kind == kind, f"trace dtype differs: {field}")
                             _require(field not in ("time_s", "eval_signal_time") or dtype.itemsize == 8,
                                      "physical signal time requires float64")
@@ -319,7 +353,7 @@ def verify_trace_archive(path, trace, expected, *, steps, rows, history_length,
                                               "tick_bytes": rows * math.prod(suffix) * dtype.itemsize}
                         _require(not stream.read(1), "extra NPY payload bytes")
                 _require(type(metadata) is dict and all(
-                    _canonical(metadata.get(k)) == _canonical(v) for k, v in expected.items()), "trace archive metadata differs")
+                    _canonical(metadata.get(k)) == _canonical(v) for k, v in expected_metadata.items()), "trace archive metadata differs")
                 _require(_canonical(metadata) == _canonical({k: v for k, v in trace.items() if k not in _ARTIFACT_KEYS}),
                          "trace report and archive metadata differ")
 
@@ -328,7 +362,8 @@ def verify_trace_archive(path, trace, expected, *, steps, rows, history_length,
                                                        min_steady_samples=min_steady_samples),
                             "history_control": HistoryControlStatistics(count, history_length, dt,
                                 settle_steps=settle_steps,
-                                min_steady_samples=min_steady_samples)}
+                                min_steady_samples=min_steady_samples),
+                            "episode_outcomes": EpisodeOutcomeStatistics(count, dt)}
                     if evaluation_names is not None:
                         result["evaluation"] = {"reward": _MetricAccumulator(),
                             "metrics": {name: _MetricAccumulator() for name in
@@ -387,9 +422,35 @@ def verify_trace_archive(path, trace, expected, *, steps, rows, history_length,
                                      "evaluation success disagrees with physical terminal flags")
                             _require(torch.equal(values["eval_signal_time"], time),
                                      "evaluation signal time differs from PRE-reset physical time")
+                        outcome = None
+                        if episode_available:
+                            outcome = {name.removeprefix("outcome_"): values[name] for name in episode_fields
+                                       if name not in ("outcome_height", "outcome_tilt")}
+                            _require(torch.equal(outcome["episode_ticks"], age + 1),
+                                     "episode outcome ticks differ from pre-inference age")
+                            if previous is not None:
+                                active = ~previous["done"]
+                                for name in ("episode_horizon_ticks", "survival_applicable"):
+                                    _require(torch.equal(outcome[name][active], previous["outcome_" + name][active]),
+                                             "episode outcome protocol changed within an episode")
+                            _require(torch.equal(outcome["environment_failure"], values["failure"])
+                                     and torch.equal(outcome["task_success"], values["success"]),
+                                     "episode outcome terminal flags differ from physical evidence")
+                            _require(not bool(((outcome["boundary"] | outcome["blocked"]) & ~done).any()),
+                                     "episode outcome collection cut requires done")
+                            for name, physical in (("height", values["actual"][:, 2]), ("tilt", values["tilt"])):
+                                recorded = values["outcome_" + name]
+                                _require(recorded.dtype == physical.dtype and torch.equal(recorded, physical),
+                                         f"episode outcome {name} differs from PRE-reset physical evidence")
+                            if episode_contract is not None:
+                                for name, declared in episode_contract_tensors.items():
+                                    _require(torch.equal(outcome[name], declared),
+                                             f"episode outcome {name} differs from authorized case contract")
+                        overall["episode_outcomes"].update(outcome, values.get("outcome_height"),
+                                                          values.get("outcome_tilt"), done)
                         packet = {key: value for key, value in values.items() if key not in
                                   {"episode_id", "done", "pre_inference_episode_age", "raw_policy_mean", "issued_action"}
-                                  and key not in evaluation_fields}
+                                  and key not in evaluation_fields and key not in episode_fields}
                         if "command_request" in packet:
                             packet["request"] = packet.pop("command_request")
                         raw_mean, issued = values["raw_policy_mean"], values["issued_action"]
@@ -407,6 +468,10 @@ def verify_trace_archive(path, trace, expected, *, steps, rows, history_length,
                             group["history_control"].update(grouped, done[indices], age[indices], raw_mean[indices], issued[indices])
                             if evaluation_names is not None:
                                 evaluation_update(group["evaluation"], {key: value[indices] for key, value in values.items()}, done[indices])
+                            group["episode_outcomes"].update(
+                                {key: value[indices] for key, value in outcome.items()} if outcome is not None else None,
+                                values["outcome_height"][indices] if episode_available else None,
+                                values["outcome_tilt"][indices] if episode_available else None, done[indices])
                         previous = values
                     _require(all(not stream.read(1) for stream in streams.values()), "extra trace replay payload")
                 finally:
@@ -418,7 +483,8 @@ def verify_trace_archive(path, trace, expected, *, steps, rows, history_length,
     _require(_path(path) == path and _identity(path) == identity and final_sha == initial_sha,
              "trace changed during verification")
     def report(state):
-        result = {"control": state["control"].report(), "history_control": state["history_control"].report()}
+        result = {"control": state["control"].report(), "history_control": state["history_control"].report(),
+                  "episode_outcomes": state["episode_outcomes"].report()}
         if evaluation_names is not None:
             item = state["evaluation"]
             result.update(metrics={name: value.report() for name, value in item["metrics"].items()},
@@ -432,6 +498,8 @@ def verify_trace_archive(path, trace, expected, *, steps, rows, history_length,
         "steps": steps, "rows": rows, "fields": sorted(fields - _SPECIAL), "metadata": metadata,
         "all_physical_arrays_finite": True, "complete_payload_and_crc_checked": True,
         "episode_done_time_consistent": True, "pre_inference_history_age_checked": True,
+        "episode_outcome_evidence": "explicit PRE-reset replay" if episode_available else "unavailable; no inference from legacy done",
+        "episode_outcome_contract_checked": episode_contract is not None,
         "replay": "all authorized rows; original recorded precision; no outcome subsampling",
         "hardware_verified": False},
         **report(overall), "groups": {label: report(group) for label, group in groups.items()}}

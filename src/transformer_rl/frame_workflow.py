@@ -295,7 +295,7 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
         if provenance["identity"] != metadata["environment_provenance"]["identity"]:
             raise ValueError("evaluation source/assets differ from training")
         model.to(device).eval()
-        from .episode_outcomes import EpisodeOutcomeStatistics
+        from .episode_outcomes import EpisodeOutcomeStatistics, TRACE_METADATA_KEY, trace_metadata, trace_packet
         env.enable_episode_outcomes = True
         episode_outcomes = EpisodeOutcomeStatistics(env.num_envs, config.control["policy_dt_s"])
         controls = None
@@ -413,6 +413,12 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                 trace.metadata.update(history_length=model.config.history_length,
                     pre_inference_age_semantics="policy steps since reset, captured before actor inference",
                     evaluation_metric_names=sorted(physical), evaluation_signal_names=sorted(signals))
+                trace.metadata[TRACE_METADATA_KEY] = trace_metadata(outcome is not None)
+                if outcome is not None:
+                    for name, values in (("height", packet["actual"][:, 2]), ("tilt", packet["tilt"])):
+                        if (outcome_state[name].dtype != values.dtype
+                                or not torch.equal(outcome_state[name], values)):
+                            raise ValueError(f"episode outcome {name} differs from PRE-reset physical packet")
                 recorded = {key: value for key, value in packet.items() if key != "request"}
                 if "request" in packet:
                     recorded["command_request"] = packet["request"]
@@ -421,6 +427,7 @@ def evaluate_frame_policy(checkpoint, env_factory, environment, *, steps, seed, 
                     eval_signal_time=result.info["evaluation_signal_time"])
                 recorded.update({"eval_metric_" + name: value for name, value in physical.items()})
                 recorded.update({"eval_signal_" + name: value for name, value in signals.items()})
+                recorded.update(trace_packet(outcome, outcome_state.get("height"), outcome_state.get("tilt")))
                 trace.add(recorded, done)
             for group in groups.values():
                 rows = group["indices"]

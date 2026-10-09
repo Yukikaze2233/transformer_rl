@@ -14,6 +14,28 @@ _BOOLEAN_FIELDS = ("time_out", "environment_failure", "task_success", "boundary"
 _FIELDS = _INTEGER_FIELDS + _BOOLEAN_FIELDS
 _END_REASONS = ("environment_failure", "boundary", "blocked", "task_success",
                 "full_horizon", "other_truncation", "other_termination")
+TRACE_METADATA_KEY = "episode_outcome_protocol"
+TRACE_FIELDS = {"outcome_" + name: "int64" if name in _INTEGER_FIELDS else "bool"
+                for name in _FIELDS}
+TRACE_FIELDS.update(outcome_height="float", outcome_tilt="float")
+
+
+def trace_metadata(available):
+    """Describe recorded evidence, without inferring an absent episode protocol."""
+    if type(available) is not bool:
+        raise ValueError("episode outcome trace availability must be bool")
+    return {"id": "transformer_rl.episode_outcome_trace.v1", "available": available,
+            "fields": sorted(TRACE_FIELDS) if available else [],
+            "sample_scope": "explicit PRE-reset episode metadata and original-precision absolute height/tilt",
+            "unavailable_semantics": "no inferred horizons, terminal reasons or health qualification"}
+
+
+def trace_packet(metadata, height, tilt):
+    """Preserve the tensors already validated by EpisodeOutcomeStatistics."""
+    if metadata is None:
+        return {}
+    return {**{"outcome_" + name: metadata[name] for name in _FIELDS},
+            "outcome_height": height, "outcome_tilt": tilt}
 
 
 @dataclass

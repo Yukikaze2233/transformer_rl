@@ -54,6 +54,8 @@ class SixMotorFixture:
         self.age = torch.zeros(self.num_envs, dtype=torch.int64, device=self.device)
         self.episodes = torch.zeros_like(self.age)
         self.periods = 4 + 2 * (torch.arange(self.num_envs, device=self.device) % 2)
+        self.horizons = self.periods.clone()
+        self.survival_applicable = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         self.tick = 0
         self.closed = False
         self.enable_control_metrics = False
@@ -65,6 +67,10 @@ class SixMotorFixture:
             contract = merge_evaluation_contracts(Path(environment_config["snapshot"]), environment_config["contracts"])
             labels = [case["name"] for case in contract["evaluation"]["cases"]
                       for _ in range(environment_config["contracts"][0]["num_envs"])]
+            # Model the SDK's permitted clone permutation; replicas remain fixed.
+            replicas = environment_config["contracts"][0]["num_envs"]
+            labels = [labels[case * replicas + row] for row in range(replicas)
+                      for case in range(len(contract["evaluation"]["cases"]))]
             self.metadata["contract_sha256"] = digest(contract)
         elif "contract" in environment_config:
             contract = json.loads((Path(environment_config["snapshot"]) / environment_config["contract"]).read_bytes())
@@ -75,6 +81,13 @@ class SixMotorFixture:
                 + ["beta"] * (self.num_envs - self.num_envs // 2))
         if labels is not None:
             self.metadata["evaluation_groups"] = labels
+        if "contracts" in environment_config:
+            cases = {case["name"]: case for case in contract["evaluation"]["cases"]}
+            self.horizons = torch.tensor([round(cases[label].get("episode_seconds", contract["episode_seconds"])
+                                                / self.dt) for label in labels], dtype=torch.int64, device=self.device)
+            self.survival_applicable = torch.tensor([cases[label]["task"] == "survive" for label in labels],
+                                                    dtype=torch.bool, device=self.device)
+            self.periods = torch.minimum(self.periods, self.horizons)
 
     def _observation(self):
         frame = torch.cat((torch.ones(self.num_envs, 1, device=self.device), self.state, self.previous), -1)
@@ -133,6 +146,15 @@ class SixMotorFixture:
                                                                     self.age.float() * .002), -1), dim=-1),
                     "issued_action_rate_rms": issued_rate},
                 "evaluation_signals": signals, "evaluation_signal_time": time.clone()}
+        task_success = successes & ~self.survival_applicable
+        if getattr(self, "enable_episode_outcomes", False):
+            info["evaluation_episode"] = {"episode_ticks": self.age.clone(),
+                "episode_horizon_ticks": self.horizons.clone(),
+                "time_out": done & ~failures & self.survival_applicable,
+                "environment_failure": failures.clone(), "task_success": task_success.clone(),
+                "boundary": torch.zeros_like(done), "blocked": torch.zeros_like(done),
+                "survival_applicable": self.survival_applicable.clone()}
+            info["evaluation_state"] = {"height": actual[:, 2].clone(), "tilt": torch.zeros_like(vx_error)}
         if self.enable_control_metrics:
             info["control_packet"] = {"time_s": time.clone(), "command_reference": reference.clone(),
                 "actual": actual.clone(), "position_xy": positions.clone(),
@@ -144,7 +166,7 @@ class SixMotorFixture:
                 "effort_bounds": torch.tensor([[-.5, .5]], device=self.device).expand(self.num_envs, 6, 2).clone(),
                 "scaled_nominal_requested_motor_effort": requested.clone(),
                 "scaled_nominal_effort_bounds": torch.tensor([[-.5, .5]], device=self.device).expand(self.num_envs, 6, 2).clone(),
-                "failure": failures.clone(), "success": successes.clone()}
+                "failure": failures.clone(), "success": task_success.clone()}
         reward = 1. - vx_error.square() - height_error.square()
         self.state[done] = 0.
         self.previous[done] = 0.
@@ -204,7 +226,8 @@ def replay(report, path, config):
     trace = report["trace"]
     expected = {key: trace[key] for key in ("checkpoint_sha256", "checkpoint_update", "seed", "steps",
         "policy_dt_s", "sampling_hz", "control_sha256", "row_indices", "group_labels", "history_length",
-        "pre_inference_age_semantics", "evaluation_metric_names", "evaluation_signal_names")}
+        "pre_inference_age_semantics", "evaluation_metric_names", "evaluation_signal_names",
+        "episode_outcome_protocol")}
     return verify_trace_archive(path, trace, expected, steps=report["steps"], rows=report["num_envs"],
         history_length=config.model.history_length, action_bounds=config.control["action_bounds"],
         settle_steps=1, min_steady_samples=1)
@@ -231,7 +254,7 @@ def test_actual_trained_policy_history_age_and_raw_action_full_trace_replay(tmp_
     assert created[0].closed and created[0].enable_control_metrics
     reconstructed = replay(report, trace_path, config)
     fields = ("control", "history_control", "metrics", "reward_mean", "stability",
-              "completed_episodes", "failed_episodes", "success_metric_available", "success_rate")
+              "completed_episodes", "failed_episodes", "success_metric_available", "success_rate", "episode_outcomes")
     for key in fields:
         assert evaluator._same_metrics(report[key], reconstructed[key]), key
         for name in ("alpha", "beta"):
@@ -287,6 +310,52 @@ def canonical(path, value):
     path.write_bytes(json_bytes(value) + b"\n")
 
 
+def test_history_trace_missing_explicit_episode_metadata_stays_unavailable(tmp_path):
+    config = configuration()
+    checkpoint, _ = trained_checkpoint(tmp_path, config)
+    def factory(**arguments):
+        env = make_six_motor_env(**arguments)
+        step = env.step
+        def missing(action):
+            result = step(action)
+            result.info.pop("evaluation_episode", None)
+            result.info.pop("evaluation_state", None)
+            return result
+        env.step = missing
+        return env
+    path = tmp_path / "legacy.npz"
+    report = evaluate_frame_policy(checkpoint, factory, config.environment, steps=7, seed=701,
+        settle_steps=1, min_steady_samples=1, control_metrics=True, history_control=True,
+        trace_output=path, trace_replicas=2)
+    assert report["trace"]["episode_outcome_protocol"]["available"] is False
+    assert not any(field.startswith("outcome_") for field in report["trace"]["fields"])
+    reconstructed = replay(report, path, config)
+    assert reconstructed["episode_outcomes"] == report["episode_outcomes"]
+    assert not reconstructed["episode_outcomes"]["available"]
+    assert reconstructed["episode_outcomes"]["survival"]["healthy_full_horizon_rate"] is None
+
+
+@pytest.mark.parametrize("field", ("height", "tilt"))
+def test_history_trace_rejects_outcome_state_different_from_physical_state(tmp_path, field):
+    config = configuration()
+    checkpoint, _ = trained_checkpoint(tmp_path, config)
+    def factory(**arguments):
+        env = make_six_motor_env(**arguments)
+        step = env.step
+        def changed(action):
+            result = step(action)
+            result.info["evaluation_state"][field] += .001
+            return result
+        env.step = changed
+        return env
+    path = tmp_path / "invalid.npz"
+    with pytest.raises(ValueError, match=f"episode outcome {field} differs"):
+        evaluate_frame_policy(checkpoint, factory, config.environment, steps=2, seed=701,
+            settle_steps=1, min_steady_samples=1, control_metrics=True, history_control=True,
+            trace_output=path, trace_replicas=2)
+    assert not path.exists()
+
+
 def synthetic_closed(*args, **kwargs):
     return {"status": "completed", "controller_live": False, "live_workers": [],
             "fixture": "synthetic predecessor closure only; no production queue proof"}
@@ -307,7 +376,9 @@ def physical_protocol(prepared, monkeypatch):
         replicas = 4 if name in ("first", "second") else 2
         value = {"name": "common_synthetic_physics", "target_num_envs": replicas,
                  "physics_dt": .005, "policy_dt": .01, "evaluation_exact_cases": True,
-                 "evaluation": {"cases": [{"name": name, "terrain": "flat", "task": "survive"}],
+                 "episode_seconds": .06,
+                 "evaluation": {"cases": [{"name": name, "terrain": "flat", "task": "survive",
+                                            "episode_seconds": .04 if name == "normal" else .06}],
                                 "episodes_per_case": 2, "stable_case_layout": False}}
         path = p["snapshot"] / "contracts" / f"{name}.json"
         write_json(path, value)
@@ -487,6 +558,11 @@ def test_actual_canonical_worker_and_complete_physical_result_reconstruction(phy
     assert result["status"] == "completed" and set(result["cells"]) == {cell["id"] for cell in p["cells"]}
     assert all(record["identity"] == cell for cell in p["cells"] for record in [result["cells"][cell["id"]]])
     assert result["trace_validation"]["steps"] == 13
+    assert result["trace_validation"]["episode_outcome_contract_checked"]
+    assert result["trace_validation"]["metadata"]["group_labels"] == ["normal", "new_skill", "normal", "new_skill"]
+    assert all(record["metrics"]["episode_outcomes"]["available"]
+               and record["metrics"]["episode_outcomes"]["requested_episodes"] == cell["num_envs"]
+               for cell in p["cells"] for record in [result["cells"][cell["id"]]])
     assert result["hardware_verified"] is False and result["formal_architecture_selection"] is False
     assert campaign.predecessors._process(json.loads((p["directory"] / "worker.completion.json").read_bytes())["process"]["pid"]) is None
     worker_path, process_path = p["directory"] / "worker.completion.json", p["directory"] / "worker.process.json"
@@ -593,6 +669,9 @@ def test_resealed_report_metrics_cannot_replace_full_physical_replay(physical_pr
         lambda report: report.update(completed_episodes=0),
         lambda report: report.update(failed_episodes=0),
         lambda report: report.update(success_rate=1.),
+        lambda report: report["episode_outcomes"]["survival"].update(healthy_full_horizon_rate=1.),
+        lambda report: report["groups"]["normal"]["episode_outcomes"].update(requested_episodes=1),
+        lambda report: report["groups"]["new_skill"]["episode_outcomes"]["first_episode_outcomes"][0].update(status="censored"),
         lambda report: report["metrics"]["vx_abs_error"].update(mean=0.),
         lambda report: report["control"]["full_interval"]["axes"]["vx"].update(mae=0.),
         lambda report: report["history_control"]["windows"]["reset_filled"].update(samples=0),

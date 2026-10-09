@@ -18,6 +18,7 @@ from transformer_rl.control_metrics import ControlMetrics
 from transformer_rl.control_trace import ControlTrace
 from transformer_rl.exposure_trace import verify_trace_archive
 from transformer_rl.evaluation import _MetricAccumulator
+from transformer_rl.episode_outcomes import EpisodeOutcomeStatistics, TRACE_METADATA_KEY, trace_metadata, trace_packet
 from transformer_rl.history_control import HistoryControlStatistics
 from transformer_rl.stability import EpisodeSignalStatistics
 
@@ -46,9 +47,11 @@ def make_trace(tmp_path, *, history_length=3, steps=7, command_change=None,
                           groups=labels, metadata=metadata)
     control = ControlMetrics(rows, dt, settle_steps=0, min_steady_samples=1)
     history = HistoryControlStatistics(rows, history_length, dt, settle_steps=0, min_steady_samples=1)
+    outcomes = EpisodeOutcomeStatistics(rows, dt)
     group_metrics = {label: {"control": ControlMetrics(1, dt, settle_steps=0, min_steady_samples=1),
                             "history_control": HistoryControlStatistics(1, history_length, dt,
-                                settle_steps=0, min_steady_samples=1)} for label in labels}
+                                settle_steps=0, min_steady_samples=1),
+                            "episode_outcomes": EpisodeOutcomeStatistics(1, dt)} for label in labels}
     def evaluation_state(count):
         return {"reward": _MetricAccumulator(),
                 "metrics": {name: _MetricAccumulator() for name in metadata["evaluation_metric_names"]},
@@ -105,6 +108,7 @@ def make_trace(tmp_path, *, history_length=3, steps=7, command_change=None,
                 "success": done & torch.tensor([False, True])}
             control.update(packet, done)
             history.update(packet, done, ages, raw, issued)
+            outcomes.update(None, None, None, done)
             extra = {}
             if include_evaluation:
                 vx_error = actual[:, 0] - reference[:, 0]
@@ -122,6 +126,7 @@ def make_trace(tmp_path, *, history_length=3, steps=7, command_change=None,
                 group_metrics[label]["control"].update(grouped, done[index:index + 1])
                 group_metrics[label]["history_control"].update(grouped, done[index:index + 1],
                     ages[index:index + 1], raw[index:index + 1], issued[index:index + 1])
+                group_metrics[label]["episode_outcomes"].update(None, None, None, done[index:index + 1])
                 if include_evaluation:
                     evaluation_update(evaluations[label], {name: value[index:index + 1] for name, value in extra.items()},
                                       done[index:index + 1])
@@ -136,6 +141,7 @@ def make_trace(tmp_path, *, history_length=3, steps=7, command_change=None,
         writer.close()
     expected = {**metadata, "steps": steps, "row_indices": list(range(rows)), "group_labels": labels}
     online = {"control": control.report(), "history_control": history.report(),
+              "episode_outcomes": outcomes.report(),
               "groups": {label: {name: value.report() for name, value in metrics.items()}
                          for label, metrics in group_metrics.items()}}
     if include_evaluation:
@@ -176,6 +182,175 @@ def rewrite(fixture, changes, *, extra_members=(), compression=zipfile.ZIP_DEFLA
 def array(fixture, field):
     with zipfile.ZipFile(fixture["path"]) as archive:
         return np.load(io.BytesIO(archive.read(field + ".npy")), allow_pickle=False)
+
+
+def make_episode_trace(tmp_path, *, horizons=(3, 5), steps=7, first_failures=(), physical=None, labels=None):
+    """Declare limits independently of done and preserve PRE-reset state."""
+    rows, dt = len(horizons), .01
+    labels = labels or [f"case_{index}" for index in range(rows)]
+    metadata = {"checkpoint_sha256": "a" * 64, "checkpoint_update": 7, "seed": 71,
+                "policy_dt_s": dt, "sampling_hz": 100., "control_sha256": "b" * 64,
+                "history_length": 3, TRACE_METADATA_KEY: trace_metadata(True)}
+    writer = ControlTrace(tmp_path / "trace.npz", steps=steps, num_envs=rows, replicas=rows,
+                          groups=labels, metadata=metadata)
+    ages, episodes = torch.zeros(rows, dtype=torch.int64), torch.zeros(rows, dtype=torch.int64)
+    limits = torch.tensor(horizons, dtype=torch.int64)
+    statistics = EpisodeOutcomeStatistics(rows, dt)
+    group_rows = {label: torch.tensor([row for row, name in enumerate(labels) if name == label])
+                  for label in sorted(set(labels))}
+    grouped = {label: EpisodeOutcomeStatistics(len(indices), dt) for label, indices in group_rows.items()}
+    try:
+        for index in range(steps):
+            ticks = ages + 1
+            failure = torch.tensor([row in first_failures for row in range(rows)]) & (episodes == 0) & (ticks == 1)
+            done = (ticks >= limits) | failure
+            height, tilt = (torch.full((rows,), .3, dtype=torch.float64), torch.zeros(rows, dtype=torch.float64))
+            if physical is not None:
+                height, tilt = physical(index, height, tilt)
+            outcome = {"episode_ticks": ticks.clone(), "episode_horizon_ticks": limits.clone(),
+                "time_out": done & ~failure, "environment_failure": failure,
+                "task_success": torch.zeros(rows, dtype=torch.bool), "boundary": torch.zeros(rows, dtype=torch.bool),
+                "blocked": torch.zeros(rows, dtype=torch.bool), "survival_applicable": torch.ones(rows, dtype=torch.bool)}
+            reference = torch.zeros(rows, 3, dtype=torch.float64)
+            reference[:, 2] = .3
+            actual = reference.clone()
+            actual[:, 2] = height
+            zeros = torch.zeros(rows, 6, dtype=torch.float64)
+            packet = {"time_s": ticks.double() * dt, "command_reference": reference, "actual": actual,
+                "position_xy": torch.zeros(rows, 2, dtype=torch.float64), "tilt": tilt,
+                "leg_target": zeros[:, :4], "wheel_target": zeros[:, :2], "motor_position": zeros,
+                "motor_velocity": zeros, "motor_effort": zeros, "requested_motor_effort": zeros,
+                "effort_bounds": torch.tensor([[[-1., 1.]] * 6] * rows, dtype=torch.float64),
+                "scaled_nominal_requested_motor_effort": zeros,
+                "scaled_nominal_effort_bounds": torch.tensor([[[-1., 1.]] * 6] * rows, dtype=torch.float64),
+                "failure": failure, "success": outcome["task_success"]}
+            statistics.update(outcome, height, tilt, done)
+            for label, item in grouped.items():
+                indices = group_rows[label]
+                item.update({key: value[indices] for key, value in outcome.items()},
+                            height[indices], tilt[indices], done[indices])
+            writer.add({**packet, **trace_packet(outcome, height, tilt), "pre_inference_episode_age": ages.clone(),
+                        "raw_policy_mean": zeros, "issued_action": zeros}, done)
+            ages = torch.where(done, 0, ticks)
+            episodes += done.to(torch.int64)
+        trace = writer.publish()
+    finally:
+        writer.close()
+    expected = {**metadata, "steps": steps, "row_indices": list(range(rows)), "group_labels": labels,
+                "episode_outcome_contract": {"episode_horizon_ticks": list(horizons), "survival_applicable": [True] * rows}}
+    return {"path": tmp_path / "trace.npz", "trace": trace, "expected": expected, "steps": steps,
+            "rows": rows, "history_length": 3, "outcomes": statistics.report(),
+            "group_outcomes": {label: item.report() for label, item in grouped.items()}}
+
+
+def test_first_cohort_replay_keeps_failure_and_censoring_after_successful_resets(tmp_path):
+    fixture = make_episode_trace(tmp_path, horizons=(2, 20), steps=7, first_failures=(0,))
+    result = verify(fixture)
+    assert result["episode_outcomes"] == fixture["outcomes"]
+    assert {name: item["episode_outcomes"] for name, item in result["groups"].items()} == fixture["group_outcomes"]
+    outcomes = result["episode_outcomes"]
+    assert outcomes["requested_episodes"] == outcomes["survival"]["requested_episodes"] == 2
+    assert outcomes["completed_episodes"] == outcomes["censored_episodes"] == 1
+    assert outcomes["environment_failure_episodes"] == 1 and outcomes["observed_samples"] == 8
+    assert outcomes["survival"]["healthy_full_horizon_rate"] == 0
+    assert not outcomes["all_requested_accounted"]
+    assert result["control"]["full_interval"]["samples"] == 14
+
+
+@pytest.mark.parametrize("field,value,healthy", [("height", .20, True),
+    ("height", np.nextafter(.20, -np.inf), False), ("tilt", .60, True),
+    ("tilt", np.nextafter(.60, np.inf), False)])
+def test_health_replay_uses_original_precision_and_includes_warmup(tmp_path, field, value, healthy):
+    def physical(index, height, tilt):
+        if index < 20:
+            (height if field == "height" else tilt)[0] = value
+        return height, tilt
+    fixture = make_episode_trace(tmp_path, horizons=(22, 22), steps=22, physical=physical)
+    # All 22 samples precede the stability warmup, but health still sees them.
+    result = verify(fixture, settle_steps=200)
+    assert result["episode_outcomes"] == fixture["outcomes"]
+    assert result["groups"]["case_0"]["episode_outcomes"]["survival"]["healthy_full_horizon_rate"] == int(healthy)
+    assert result["episode_outcomes"]["survival"]["full_horizon_survival_rate"] == 1
+
+
+def test_real_case_horizons_are_per_group_not_the_40_second_evaluation_window(tmp_path):
+    from transformer_rl.exposure_evaluation import _episode_outcome_rows
+    labels = ["short", "long", "medium", "short", "medium", "long"]
+    cases = {name: {"episode_horizon_ticks": ticks, "survival_applicable": True}
+             for name, ticks in (("short", 1000), ("medium", 1600), ("long", 2800))}
+    contract = _episode_outcome_rows(cases, labels)
+    assert contract["episode_horizon_ticks"] == [1000, 2800, 1600, 1000, 1600, 2800]
+    fixture = make_episode_trace(tmp_path, horizons=tuple(contract["episode_horizon_ticks"]), steps=4001, labels=labels)
+    fixture["expected"]["episode_outcome_contract"] = contract
+    result = verify(fixture)
+    outcomes = result["episode_outcomes"]
+    assert outcomes == fixture["outcomes"]
+    assert outcomes["requested_episodes"] == outcomes["completed_episodes"] == 6
+    assert outcomes["observed_samples"] == 10800
+    assert outcomes["survival"]["healthy_full_horizon_rate"] == 1
+    assert [row["observed_duration_s"] for row in outcomes["first_episode_outcomes"]] == [10., 28., 16., 10., 16., 28.]
+    assert result["control"]["full_interval"]["samples"] == 24006
+    assert {name: item["episode_outcomes"] for name, item in result["groups"].items()} == fixture["group_outcomes"]
+    assert all(item["episode_outcomes"]["requested_episodes"] == 2 for item in result["groups"].values())
+
+
+@pytest.mark.parametrize("field", ["episode_ticks", "episode_horizon_ticks", "time_out", "environment_failure",
+                                  "task_success", "boundary", "blocked", "survival_applicable"])
+def test_resealed_episode_evidence_tampering_is_rejected(tmp_path, field):
+    fixture = make_episode_trace(tmp_path)
+    values = array(fixture, "outcome_" + field).copy()
+    if field == "episode_ticks":
+        values[0, 0] += 1
+    elif field == "episode_horizon_ticks":
+        values[:, 0] -= 1  # Even a consistent shorter horizon violates authorization.
+    else:
+        values[0, 0] = ~values[0, 0]
+    with pytest.raises(ValueError, match="episode outcome|requires done"):
+        verify(fixture, trace=rewrite(fixture, {"outcome_" + field + ".npy": values}))
+
+
+@pytest.mark.parametrize("mutation", ("missing", "integer_dtype", "boolean_dtype", "height", "tilt"))
+def test_episode_field_coverage_dtype_and_physical_identity_are_required(tmp_path, mutation):
+    fixture = make_episode_trace(tmp_path)
+    if mutation == "missing":
+        changes = {"outcome_blocked.npy": None}
+    elif mutation == "integer_dtype":
+        changes = {"outcome_episode_ticks.npy": array(fixture, "outcome_episode_ticks").astype(np.float64)}
+    elif mutation == "boolean_dtype":
+        changes = {"outcome_blocked.npy": array(fixture, "outcome_blocked").astype(np.int64)}
+    else:
+        value = array(fixture, "outcome_" + mutation).copy()
+        value[0, 0] += .001
+        changes = {"outcome_" + mutation + ".npy": value}
+    with pytest.raises(ValueError):
+        verify(fixture, trace=rewrite(fixture, changes))
+
+
+def test_legacy_outcomes_are_explicitly_unavailable_and_cannot_gain_health_authorization(tmp_path):
+    fixture = make_trace(tmp_path)
+    result = verify(fixture)
+    assert not result["episode_outcomes"]["available"]
+    assert result["episode_outcomes"]["requested_episodes"] == 2
+    assert result["episode_outcomes"]["survival"]["healthy_full_horizon_rate"] is None
+    assert all(not group["episode_outcomes"]["available"] for group in result["groups"].values())
+    assert "unavailable" in result["trace_validation"]["episode_outcome_evidence"]
+    with pytest.raises(ValueError, match="missing declared"):
+        verify(fixture, expected={**fixture["expected"], TRACE_METADATA_KEY: trace_metadata(True)})
+
+
+@pytest.mark.parametrize("field,value", (("outcome_height", np.nextafter(.20, -np.inf)),
+                                        ("outcome_tilt", np.nextafter(.60, np.inf))))
+def test_trace_writer_rejects_dtype_change_instead_of_rounding_a_health_threshold(tmp_path, field, value):
+    writer = ControlTrace(tmp_path / "invalid.npz", steps=2, num_envs=1, replicas=1,
+                          groups=["case"], metadata={TRACE_METADATA_KEY: trace_metadata(True)})
+    done = torch.tensor([False])
+    try:
+        writer.add({field: torch.tensor([.3], dtype=torch.float32)}, done)
+        with pytest.raises(ValueError, match="dtype changed"):
+            writer.add({field: torch.tensor([value], dtype=torch.float64)}, done)
+    finally:
+        writer.close()
+    assert not (tmp_path / "invalid.npz").exists()
 
 
 def test_real_complete_trace_replay_matches_online_metrics_exactly(tmp_path):

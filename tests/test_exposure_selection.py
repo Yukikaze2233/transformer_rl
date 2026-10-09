@@ -181,7 +181,7 @@ def physical_grid(prepared, monkeypatch):
         replicas = 4 if name in ("first", "second") else 2
         path = p["snapshot"] / "contracts" / f"{name}.json"
         write_json(path, {"name": "common_synthetic_physics", "target_num_envs": replicas,
-            "physics_dt": .005, "policy_dt": .01, "evaluation_exact_cases": True,
+            "physics_dt": .005, "policy_dt": .01, "evaluation_exact_cases": True, "episode_seconds": .06,
             "evaluation": {"cases": [{"name": name, "terrain": "flat", "task": "survive"}],
                            "episodes_per_case": 2, "stable_case_layout": False}})
         contracts[name] = {"contract": str(path.relative_to(p["snapshot"])),

@@ -51,6 +51,8 @@ class ControlTrace:
         for name, value in values.items():
             if value.shape != self.maps[name].shape[1:]:
                 raise ValueError("control trace packet shape changed")
+            if value.dtype != self.maps[name].dtype:
+                raise ValueError("control trace packet dtype changed; original precision must stay fixed")
             self.maps[name][self.count] = value
         self.episode += done.detach().cpu().numpy().astype(np.int64)
         self.count += 1

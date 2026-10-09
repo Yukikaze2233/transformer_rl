@@ -74,12 +74,34 @@ def _batch(protocol, endpoint_receipt, cells, directory, selection_receipt=None)
     merged = merge_evaluation_contracts(snapshot, environments)
     _require([c["name"] for c in merged["evaluation"]["cases"]] == [c["scenario"] for c in cells],
              "effective cases differ from the declared batch")
+    # Match the immutable exact-case environment's episode_limits derivation.
+    # This binds survival to each case's own horizon, not to the
+    # evaluator's longer sampling window or to a producer's self-reported limit.
+    outcome_cases = {}
+    _require(merged.get("policy_dt") == saved.control["policy_dt_s"],
+             "physical case horizon clock differs from the trained policy interval")
+    for case, cell in zip(merged["evaluation"]["cases"], cells):
+        seconds = case.get("episode_seconds", merged.get("episode_seconds"))
+        _require(type(seconds) in (int, float) and math.isfinite(seconds) and seconds > 0
+                 and type(case.get("task")) is str and case["task"],
+                 "physical evaluation requires explicit positive case horizons and tasks")
+        ticks = round(seconds / saved.control["policy_dt_s"])
+        _require(0 < ticks < 2**63, "physical case horizon exceeds int64 or one policy tick")
+        outcome_cases[case["name"]] = {"episode_horizon_ticks": ticks,
+                                     "survival_applicable": case["task"] == "survive"}
     environment = {"snapshot": str(snapshot), "snapshot_sha256": environments[0]["snapshot_sha256"],
                    "contracts": deepcopy(environments), "num_envs": sum(e["num_envs"] for e in environments)}
     expected_directory = campaign.evaluation_directory(protocol, first)
     _require(definition._path(directory) == expected_directory, "evaluation escapes its fixed role/seed output")
     return {"job": job, "endpoint": endpoint, "config": saved, "environment": environment,
-            "effective_contract_sha256": digest(merged), "key": key, "configs": configs}
+            "effective_contract_sha256": digest(merged), "key": key, "configs": configs,
+            "episode_outcome_cases": outcome_cases}
+
+
+def _episode_outcome_rows(cases, labels):
+    """Bind immutable case limits to the simulator's actual clone row order."""
+    return {name: [cases[label][name] for label in labels]
+            for name in ("episode_horizon_ticks", "survival_applicable")}
 
 
 def _body(protocol, endpoint_receipt, cells, directory, leases, controller_receipt, selection_receipt=None,
@@ -259,6 +281,9 @@ def verify_result(protocol, endpoint_receipt, cells, directory, request_receipt)
         "history_length": config.model.history_length,
         "pre_inference_age_semantics": "policy steps since reset, captured before actor inference",
         "evaluation_metric_names": METRIC_NAMES, "evaluation_signal_names": SIGNAL_NAMES}
+    from .episode_outcomes import TRACE_METADATA_KEY, trace_metadata
+    trace_expected[TRACE_METADATA_KEY] = trace_metadata(True)
+    trace_expected["episode_outcome_contract"] = _episode_outcome_rows(batch["episode_outcome_cases"], labels)
     from .exposure_trace import verify_trace_archive
     replay = verify_trace_archive(directory / "trace.npz", control["trace"], trace_expected,
         steps=evaluation["steps"], rows=len(labels), history_length=config.model.history_length,
@@ -267,7 +292,7 @@ def verify_result(protocol, endpoint_receipt, cells, directory, request_receipt)
     from .frame_study import grade_report
     records = {}
     fields = ("control", "history_control", "metrics", "reward_mean", "stability", "completed_episodes",
-              "failed_episodes", "success_metric_available", "success_rate")
+              "failed_episodes", "success_metric_available", "success_rate", "episode_outcomes")
     _require(all(k in replay and _same_metrics(control.get(k), replay[k]) for k in fields),
              "reported aggregate metrics disagree with full trace replay")
     for cell in cells:
