@@ -6,7 +6,7 @@
 
 ## 1. 结论与证据边界
 
-**推荐将小型、固定窗口、无 KV cache 的 time-aware Transformer 作为在线 PPO 的可检验候选，同时保留 MLP 和 GRU 对照。**最值得检验的收益是：在有限可观测性、异步传感器、变化的延迟和动力学下，历史信息能否改善鲁棒性。没有证据承诺其在 V40 上比 MLP 更强、更省样本或更快。
+**推荐将小型、固定窗口、无 KV cache 的 time-aware Transformer 作为在线 PPO 的可检验候选，同时保留单帧 MLP 与历史 MLP 对照。**最值得检验的收益是：在有限可观测性、异步传感器、变化的延迟和动力学下，历史信息能否改善鲁棒性。没有证据承诺其在 V40 上比 MLP 更强、更省样本或更快。
 
 - 本仓库是独立 PyTorch 实现，算法与时序组件不依赖 RSL-RL。Transformer 可以直接接受在线 PPO 梯度，teacher 不是必需条件。
 - 旧 `isaac_wheeled_rl_deploy` 已由用户明确为 **demo**；不能作为可用部署链路、真实硬件频率、反馈协议、PID 参数或电机工作模式的证据。
@@ -14,16 +14,14 @@
 - 本仓库默认 `frame30`、左 padding + valid mask、当前命令 query，是新的接口选择；不能与前研究的 `frame25`、repeat-first padding、last-observation head 混称为同一模型或 checkpoint 合约。
 - 真实 V40 资产、下位机 PID 和真实通讯链路尚未接入本时序组件，具体待接入范围见第 8 节。
 
-## 2. 与 MLP、复旦速度 encoder、GRU、DT 的取舍
+## 2. MLP、状态估计器与 Transformer 的取舍
 
 | 路线 | 优势与可检验收益 | 代价与适用边界 | 公平比较要求 |
 |---|---|---|---|
 | 现有短窗 MLP | 结构简单、低计算量、易导出；短历史已能表达一定有限差分和局部动力学 | 固定 flatten 对更长窗口和非等间隔时间缺少专门归纳偏置；增加窗口通常增加第一层参数 | 先做原输入/动作/奖励合约的 trainer parity；再给 MLP 相同 frame30、时间信息与窗口，区分信息增加和 attention 的效果 |
 | 同长度长窗 MLP | 无隐状态陈旧问题，完整输入明确，强而便宜的对照 | 对窗口位置和长度绑定较强；参数匹配不等于算力匹配 | 同时报告同历史、同参数近似、同 wall-clock 三种预算口径 |
-| 复旦历史速度估计 MLP | 已核查plane分支：125→128→64→3估计线速度；当前25维＋latent3→128→64→32→6控制网络；速度监督有物理意义 | 三维速度瓶颈未必保留接触/延迟/执行器内部信息；监督域偏差和不可观测滑移不会自动消失 | 参考commit `8204e85`；actor使用`latent.detach()`，encoder由独立速度监督更新。应对比监督目标与表示结构，不能仅归因为网络大小 |
-| 有限窗 GRU | 用门控压缩历史；同固定窗从初态重算时，PPO 输入和当前参数语义容易说明 | 窗内计算依赖时间递推；压缩可能遗失细节；每次完整重算也有成本 | 同窗口、同时间特征、同初始态；独立报告吞吐与鲁棒性 |
-| Streaming GRU | 每次只处理新帧，隐状态容量不随 episode 时长线性增长，可保留更长记忆 | reset、连续序列 minibatch、BPTT/burn-in 更复杂；旧参数生成的 hidden state 在更新后存在 staleness，detach 不能修复 | 明确是精确重建还是有限 burn-in 近似；不把每个 PPO update 当作 episode reset |
-| 固定窗 time-aware Transformer | query 可按当前命令读取不同历史线索；显式时间 age 能区分“相隔一帧”和“相隔多少秒”；无参数化历史缓存 | 完整窗口重复编码，显存与计算明显高于短窗 MLP；短窗、简单任务未必受益；可能学成带滞后的平滑器 | 与同窗 MLP/GRU 使用相同 actor 信息、critic、随机化、奖励及训练预算 |
+| 历史状态估计 MLP | 展平历史估计线速度等显式状态；当前观测与估计量共同进入动作网络；监督有物理意义 | 低维状态瓶颈未必保留接触、延迟或执行器内部信息；监督域偏差和不可观测滑移不会自动消失 | 固定监督目标、当前帧直连与动作头，分别比较联合梯度和独立估计器。隔离梯度时由独立监督更新编码器，另行核验完整策略变化 |
+| 固定窗 time-aware Transformer | query 可按当前命令读取不同历史线索；显式时间 age 能区分“相隔一帧”和“相隔多少秒”；无参数化历史缓存 | 完整窗口重复编码，显存与计算明显高于短窗 MLP；短窗、简单任务未必受益；可能学成带滞后的平滑器 | 与同窗 MLP 使用相同 actor 信息、critic、随机化、奖励及训练预算 |
 | 原始 Decision Transformer（DT） | 适合以 desired return / return-to-go 条件化的离线轨迹序列建模，可利用现有高质量数据 | 依赖数据覆盖及回报条件的定义；没有数据质量证据时，不是纯在线 PPO 的直接替代 | 记录离线数据和生成 teacher 的成本。仅使用 Transformer 网络不构成 DT；本仓库 PPO 奖励进入 advantage，不是 return-to-go token |
 
 前研究核查了：Digit 的 Transformer student 主方法包含在线 PPO 与退火 teacher KL；GTrXL 原论文使用 V-MPO；LocoTransformer 官方实现支持直接 PPO，但 attention 主要跨空间/模态。它们支持研究可行性，不能直接证明本仓库的时间 query、V40 观测或无 teacher 训练会获得同样收益。若加入速度辅助监督或 teacher KL，应在各 backbone 上给出同等监督预算，避免把监督优势误归因于 Transformer。
@@ -61,7 +59,7 @@
 
 首版完整窗口重算的理由：
 
-- 原始观测与 issued 动作是已经发生的事实，可跨 PPO update 保留；KV、embedding、GRU hidden 是参数相关表示，不能作为当前参数的精确表示直接复用。
+- 原始观测与 issued 动作是已经发生的事实，可跨 PPO update 保留；KV 和 embedding 是参数相关表示，不能作为当前参数的精确表示直接复用。
 - 即使权重固定，移出最老 token 会改变后续 token 的深层因果上下文；这里 query 时刻改变还会改变历史 token 的 age 编码。简单移除旧 KV、追加新 KV 不等价于完整窗口重算。
 - 全窗口快照使 rollout/update/export 的条件分布容易逐 endpoint 核对；代价是重复计算和存储。未来 prefix/gather、SDPA 或 cache 优化必须证明行为等价，不能只证明没有未来泄漏。
 - 默认 L16、候选 policy100 Hz 时，16 个等间隔真实样本首尾跨度为 150 ms；L32 为 310 ms。真实跨度以 timestamp 为准，reset 初期有效窗口更短；这些不是推理时延，也不是硬件工作频率。
@@ -144,7 +142,7 @@ env 可将快照放进 `StepResult.info["command_channel"]` 供诊断，或通�
 8. **真实秒与折扣语义**：目前 PPO 配置的 gamma/lambda 是每 transition 的标量。将 policy_dt 加入 actor 不会自动把 GAE 变成连续时间折扣。若未来显著随机化 policy_dt，需明确保留“按事件折扣”，还是采用 `gamma_t = gamma_ref ** (dt_t / dt_ref)` 等显式定义，并一起处理 trace 衰减、奖励时间积分和 rollout next-value；本次不改该算法合约。
 9. **actuator / 导出一致**：channel 输出目标不等于执行器输出；decoder 顺序、限幅、模式、反馈刷新时刻与 checkpoint 合约必须一致。batch1 导出回放比较 mean，验证冷/热启动、partial reset 与 command 切换；模型 forward p99 和含拼窗/通信的端到端 p99 分别测量。
 
-未来算法验收至少比较原 MLP parity、同窗 MLP、有限窗 GRU、不同历史长度的 Transformer；对照使用相同 frame、时间特征、critic、奖励/随机化、动作语义、teacher/监督预算。配对 seed，建议至少三个独立训练 seed 起步，同时报告同 unique transitions 与同 wall-clock/GPU-hours 的结果；记录速度/转向/高度误差、失败率、恢复时间、动作变化/频谱、限幅与控制时延，不能只看 return 最好的一次。此处是后续验收定义，本轮未开展这些实验。
+未来算法验收至少比较原 MLP parity、同窗 MLP、不同历史长度与读出方式的 Transformer；对照使用相同 frame、时间特征、critic、奖励/随机化、动作语义、teacher/监督预算。配对 seed，建议至少三个独立训练 seed 起步，同时报告同 unique transitions 与同 wall-clock/GPU-hours 的结果；记录速度/转向/高度误差、失败率、恢复时间、动作变化/频谱、限幅与控制时延，不能只看 return 最好的一次。此处是后续验收定义，本轮未开展这些实验。
 
 ## 7. 单卡 RTX 4090：计算与内存仅为估算
 
@@ -200,7 +198,6 @@ PID/PD 的实际实现、增益、是否有 I 项、积分状态/饱和行为、
 
 ## 10. 公开研究来源
 
-- [复旦plane配置](https://github.com/yly-true/fudan_rl_wheel_leg/blob/8204e853dfd2ed06d85a322e1a998c3d20a3be2c/plane/wheel_legged_gym/envs/base/legged_robot_config.py)与[历史编码器](https://github.com/yly-true/fudan_rl_wheel_leg/blob/8204e853dfd2ed06d85a322e1a998c3d20a3be2c/plane/wheel_legged_gym/rsl_rl/modules/actor_critic_sequence.py)：仅作为已核查基线的引用，不作为本仓库依赖。
 - [Learning Humanoid Locomotion with Transformers](https://arxiv.org/abs/2303.03381v1)：教师辅助的Transformer在线RL。
 - [Stabilizing Transformers for Reinforcement Learning](https://arxiv.org/abs/1910.06764)：GTrXL与V-MPO；并非本仓库的固定窗PPO实现。
 - [Decision Transformer](https://arxiv.org/abs/2106.01345)与[Online Decision Transformer](https://arxiv.org/abs/2202.05607)：回报条件化轨迹学习路线，区别于本仓库的在线PPO。

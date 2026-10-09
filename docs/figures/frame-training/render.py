@@ -24,8 +24,8 @@ def render():
     fig.box(55, 168, 1690, 755, fill="#FBFAFD", stroke="#8254B7", dashed=True)
     fig.text(1705, 207, "Actor / 部署", 29, anchor="end", color="#8254B7")
 
-    fig.text(85, 246, "华南虎式", 31, bold=True)
-    fig.text(85, 280, "单帧 MLP", 25)
+    fig.text(85, 246, "单帧 MLP", 31, bold=True)
+    fig.text(85, 280, "当前帧映射", 25)
     labeled_box(fig, 275, 229, 215, ["当前观测", "35D"])
     labeled_box(fig, 590, 229, 565, ["Actor：全连接网络", "35 → 256 → 128 → 64 → 6"])
     labeled_box(fig, 1365, 229, 270, ["动作均值", "四路腿位 / 两路轮速"])
@@ -33,7 +33,7 @@ def render():
     fig.arrow("1155,274 1365,274")
     fig.math(1240, 260, variable("μ", "t"), 32)
 
-    fig.text(85, 435, "复旦式", 31, bold=True)
+    fig.text(85, 435, "历史 MLP", 31, bold=True)
     fig.text(85, 471, "历史编码", 25)
     labeled_box(fig, 275, 418, 215, ["历史观测", "31 × 35"])
     labeled_box(fig, 575, 418, 420, ["历史 MLP 编码器", "1085 → 128 → 64 → 3"])

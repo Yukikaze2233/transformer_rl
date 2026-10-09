@@ -2,7 +2,7 @@
 
 这个项目研究的是：**在机器人的控制任务里，什么形式的 Transformer 更合适？**
 
-我们关心机器人能否完成任务、站立时是否漂移、不同高度能否保持、动作是否平稳，以及这些表现需要多少训练和推理开销。对照集中于华南虎式单帧 MLP、复旦式历史 MLP 编码器与当前帧直连，以及多种 Transformer。
+我们关心机器人能否完成任务、站立时是否漂移、不同高度能否保持、动作是否平稳，以及这些表现需要多少训练和推理开销。对照集中于单帧 MLP、历史 MLP 编码器与当前帧直连，以及多种 Transformer。
 
 代码使用 PyTorch，实现独立 PPO、历史管理、学习状态恢复、课程验收、网络选型与 ONNX/TorchScript 部署，没有依赖 RSL-RL。35D 策略以 100 Hz 更新，31 帧覆盖 0.30 s 历史；物理与 PC 反馈控制以 1000 Hz 更新。
 
@@ -130,7 +130,7 @@ python -m transformer_rl.experiment_cli summarize \
 
 - [研究结论、实时控制取舍与代码索引](docs/RESEARCH_CONCLUSION.md)
 - [训练预算与网络选型计划](docs/TRAINING_EVALUATION_PLAN.md)
-- [估计器与控制网络训练方案](docs/ESTIMATOR_TRAINING_PLAN.md) / [华南虎、复旦与Transformer设计复核](docs/TRANSFORMER_APPLICATIONS.md)
+- [估计器与控制网络训练方案](docs/ESTIMATOR_TRAINING_PLAN.md) / [策略网络结构与控制应用设计复核](docs/TRANSFORMER_APPLICATIONS.md)
 - [训练方法](docs/KAISER_ESTIMATOR_RUN.md)
 - [本机与SSH训练启停控制](docs/TRAINING_CONTROL.md)
 - [实验配置、并发和结果汇总](docs/EXPERIMENTS.md)

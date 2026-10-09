@@ -25,12 +25,12 @@
 | `direct_transformer` | 标准Last-token，直接输出动作 | 时序表征 | PPO | 已有 |
 | `velocity_mlp` | MLP估计三维机体线速度 | 当前观测＋估计速度 | PPO＋独立速度监督 | CPU验证通过 |
 | `velocity_transformer` | Transformer估计相同速度 | 与上一行相同 | 与上一行相同 | CPU验证通过 |
-| `context_mlp` | HIM式MLP估计速度/高度及16维上下文 | 当前观测＋4维状态＋16维latent | PPO＋状态监督＋swap loss | CPU验证通过 |
-| `context_transformer` | Transformer替换HIM式历史encoder | 与上一行相同 | 与上一行相同 | CPU验证通过 |
+| `context_mlp` | MLP估计速度/高度及16维上下文 | 当前观测＋4维状态＋16维latent | PPO＋状态监督＋swap loss | CPU验证通过 |
+| `context_transformer` | Transformer编码历史并估计相同状态与上下文 | 与上一行相同 | 与上一行相同 | CPU验证通过 |
 
-`velocity`是复旦思想的受控移植，`context`是华南虎HIM思想的受控移植。
-两者统一到我们的机器人、30维输入和训练器，不称为原系统的逐项复现。
-DreamWaQ的随机latent、重建与KL属于后续单独实验，不与HIM混为一种估计器。
+`velocity`使用历史估计三维速度，`context`同时估计速度、高度与动态上下文。
+两者统一使用本项目的机器人、30维输入和训练器。
+随机latent、重建与KL约束属于后续单独实验，不与当前状态及上下文估计器混为一种结构。
 
 **主要因果比较是同一行组中的MLP与Transformer。** direct到velocity同时改变信息路径
 和监督，velocity到context同时增加高度标签、latent和预测目标；这些只能说明整套配方
@@ -74,8 +74,8 @@ ONNX中的非参数常量、buffer与图元数据单独统计，不能用文件�
 | direct Transformer | 69,446 | 39,798 | 实例化已有Actor |
 | 速度估计MLP＋控制头 | 89,001 | 52,073 | 实例化真实估计器Actor |
 | 速度估计Transformer＋控制头 | 84,265 | 54,633 | 同上 |
-| HIM式MLP＋控制头 | 92,282 | 55,354 | 同上 |
-| HIM式Transformer＋控制头 | 87,546 | 57,642 | 同上 |
+| 状态与上下文估计MLP＋控制头 | 92,282 | 55,354 | 同上 |
+| 状态与上下文估计Transformer＋控制头 | 87,546 | 57,642 | 同上 |
 
 主档Transformer：**d64、2层、4头、FFN128**；轻量档：**d48、2层、4头、FFN96**。
 主档MLP历史主干/估计器为 `[128,64]`，轻量档为 `[64,64]`。
@@ -134,8 +134,7 @@ p99合格不代表每次都能满足截止时间。FP16需有后端支持及数�
    配置LR开始。接受/拒绝次数、尝试与接受梯度步、实际计算时间分开记录。
 6. 另外记录从原behavior到最终完整策略的KL。辅助KL限制不等于完整策略的总KL上界。
 
-这项约束作用于两种encoder，而不是只给Transformer使用。它属于受控移植的新增规则，
-不是复旦/HIM原始配方。已通过回滚与重放测试；`detach()`本身不能防止估计器
+这项约束同时作用于MLP与Transformer两种encoder。已通过回滚与重放测试；`detach()`本身不能防止估计器
 更新改变动作分布。保存检查点时必须包含两个优化器以及辅助网络全部训练状态。
 
 ## 4. 分阶段预算

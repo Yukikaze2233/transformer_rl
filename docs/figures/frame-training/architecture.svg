@@ -5,8 +5,8 @@
 <text x="60" y="137" font-size="28" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">公共观测</tspan><tspan font-family="Times New Roman"> 35D </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">策略</tspan><tspan font-family="Times New Roman"> 100 Hz </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">历史</tspan><tspan font-family="Times New Roman"> 31 </tspan><tspan font-family="Noto Sans CJK SC">帧</tspan><tspan font-family="Times New Roman"> / 0.30 s </tspan><tspan font-family="Noto Sans CJK SC">·</tspan><tspan font-family="Times New Roman"> </tspan><tspan font-family="Noto Sans CJK SC">独立特权</tspan><tspan font-family="Times New Roman"> Critic 81D</tspan></text>
 <rect x="55" y="168" width="1690" height="755" fill="#FBFAFD" stroke="#8254B7" stroke-width="1.8" stroke-dasharray="12 8" rx="22"/>
 <text x="1705" y="207" font-size="29" fill="#8254B7" text-anchor="end" font-weight="400"><tspan font-family="Times New Roman">Actor / </tspan><tspan font-family="Noto Sans CJK SC">部署</tspan></text>
-<text x="85" y="246" font-size="31" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">华南虎式</tspan></text>
-<text x="85" y="280" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">单帧</tspan><tspan font-family="Times New Roman"> MLP</tspan></text>
+<text x="85" y="246" font-size="31" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">单帧</tspan><tspan font-family="Times New Roman"> MLP</tspan></text>
+<text x="85" y="280" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前帧映射</tspan></text>
 <rect x="275" y="229" width="215" height="90" fill="white" stroke="#2D6198" stroke-width="1.8"/>
 <text x="382.5" y="267.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">当前观测</tspan></text>
 <text x="382.5" y="299.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Times New Roman">35D</tspan></text>
@@ -19,7 +19,7 @@
 <polyline points="490,274 590,274" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
 <polyline points="1155,274 1365,274" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
 <text x="1240" y="260" font-family="Times New Roman" font-size="32" text-anchor="middle"><tspan font-style="italic">μ</tspan><tspan baseline-shift="sub" font-size="70%"><tspan font-style="italic">t</tspan></tspan></text>
-<text x="85" y="435" font-size="31" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">复旦式</tspan></text>
+<text x="85" y="435" font-size="31" fill="black" text-anchor="start" font-weight="700"><tspan font-family="Noto Sans CJK SC">历史</tspan><tspan font-family="Times New Roman"> MLP</tspan></text>
 <text x="85" y="471" font-size="25" fill="black" text-anchor="start" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史编码</tspan></text>
 <rect x="275" y="418" width="215" height="90" fill="white" stroke="#2D6198" stroke-width="1.8"/>
 <text x="382.5" y="456.0" font-size="26" fill="black" text-anchor="middle" font-weight="400"><tspan font-family="Noto Sans CJK SC">历史观测</tspan></text>

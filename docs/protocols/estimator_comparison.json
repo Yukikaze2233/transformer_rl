@@ -6,16 +6,12 @@
   "launchable": false,
   "reference_cli_spec": "../../configs/estimator_reference.json",
   "full_cli_spec": "../../configs/estimator_comparison.json",
-  "scope": "Controlled architecture adaptations on one frozen research robot; not upstream hardware reproduction.",
+  "scope": "Controlled architecture comparisons on one frozen research robot.",
   "questions": [
     "Does explicit state estimation improve direct history control?",
     "Does replacing an MLP estimator with a Transformer improve control under matched supervision?",
-    "Does an HIM-style predictive context provide value beyond explicit velocity estimation?"
+    "Does predictive context provide value beyond explicit velocity estimation?"
   ],
-  "upstream_references": {
-    "fudan_commit": "8204e853dfd2ed06d85a322e1a998c3d20a3be2c",
-    "scut_commit": "b8ff79f3df855faf9dc92f4a282bd80c42649466"
-  },
   "common": {
     "num_envs": 512,
     "rollout_steps": 32,
@@ -133,7 +129,7 @@
     "minibatches": 4,
     "max_grad_norm": 1.0,
     "state_loss": "mean_squared_error_over_normalized_state_dimensions",
-    "context_loss": "state_loss + 1.0 * HIM_style_swapped_assignment_loss",
+    "context_loss": "state_loss + 1.0 * swapped_assignment_loss",
     "context_target": "next same-episode proprio16 only, separately projected; exclude commands, issued actions and clock fields",
     "context_target_hidden": [128, 64],
     "context_embedding_dim": 16,
@@ -244,7 +240,7 @@
     "matched five-frame versus sixteen-frame estimator pairs",
     "matched joint-gradient versus detached estimator pairs",
     "matched velocity-only versus velocity-plus-height supervision",
-    "DreamWaQ-style variational context only with explicit latent replay likelihood contract",
+    "variational context only with explicit latent replay likelihood contract",
     "equal-budget architecture-specific hyperparameter tuning, reported separately from common-recipe comparison"
   ]
 }

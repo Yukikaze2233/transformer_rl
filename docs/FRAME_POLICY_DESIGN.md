@@ -22,13 +22,11 @@ P_{actor}=(35+1)256+(256+1)128+(128+1)64+(64+1)6=50,758.
 
 加探索参数后为50,764，critic为62,209，总训练参数112,973。Actor和critic没有共享特征网络。
 
-这与华南虎**普通 WheelbipeV14FlatPPORunnerCfg**的单帧、`[256,128,64]`、ELU、初始σ1.0同型；不能泛指其DreamWaQ/HIM等所有变体。[SCUT固定版本网络配置](https://github.com/scutrobotlab/wheeled-legged_RL/blob/b8ff79f3df855faf9dc92f4a282bd80c42649466/source/agent_tasks/agent_tasks/direct/wheelbipe/agents/rsl_rl_ppo_cfg.py)
-
-我方81D critic、人工请求语义、1kHz物理/PD、奖励、采样和课程均有独立合同。SCUT普通V14的特权观测与物理频率不同，网络同型不等于整个任务相同。[SCUT V14环境配置](https://github.com/scutrobotlab/wheeled-legged_RL/blob/b8ff79f3df855faf9dc92f4a282bd80c42649466/source/agent_tasks/agent_tasks/direct/wheelbipe/wheelbipe_V14/env_cfg.py)
+81D critic、人工请求语义、1kHz物理/PD、奖励、采样和课程均由独立合同定义。比较网络结构时需要同时固定这些条件。
 
 ### 35D已经包含哪些信息
 
-来自当前 `scut_observation.py::build_manual35`，索引从0开始：
+35D 观测由命令、本体状态、上一动作与请求上下文按以下顺序构造，索引从0开始：
 
 |槽位|含义|
 |---|---|
@@ -261,7 +259,7 @@ C(L)=35\cdot96L+2(4L\cdot96^2+2L^2\cdot96+2L\cdot96\cdot192)
 
 网络、优化、环境和执行合同分别管理。`FramePolicy` 统一输出原始动作均值；训练层增加 Gaussian 探索与独立 Critic，采集层保留完整历史快照和 reset 前终态，PPO 使用原始采样动作的行为概率。部署只执行历史编码、动作头、限幅和目标映射。
 
-网络对照包括华南虎式单帧 MLP、复旦式历史 MLP 编码器与当前帧直连，以及末帧读出、Query读出、门控残差和容量扩展 Transformer。尺寸、瓶颈维度与历史长度通过配置控制。门控 Transformer 在深度方向融合特征，无递归时间状态。[GTrXL 原论文](https://proceedings.mlr.press/v119/parisotto20a.html)
+网络对照包括单帧 MLP、历史 MLP 编码器与当前帧直连，以及末帧读出、Query读出、门控残差和容量扩展 Transformer。尺寸、瓶颈维度与历史长度通过配置控制。门控 Transformer 在深度方向融合特征，无递归时间状态。[GTrXL 原论文](https://proceedings.mlr.press/v119/parisotto20a.html)
 
 各候选在独立研究场景中使用同一 PPO 配方；比较时共同固定奖励、频率、Critic、探索初始化、课程和样本预算。旧主线训练器的结果另作外部参考，避免把优化器或任务差异算作网络收益。
 
