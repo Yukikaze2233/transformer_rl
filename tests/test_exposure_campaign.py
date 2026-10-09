@@ -768,6 +768,43 @@ def test_actual_checkpoint_cap_overflow_preserves_unsealed_file_without_endpoint
     assert summary["verified_successful_updates"] == 0
 
 
+def test_initial_parent_monitor_storage_rejection_starts_no_child_and_preserves_terminal_record(tmp_path, monkeypatch):
+    directory = tmp_path / "rejected_worker"
+    directory.mkdir()
+    (directory / "existing_burst.bin").write_bytes(b"x" * 262144)
+    contract = {"caps": {"checkpoint_bytes": 128, "metric_bytes_per_update": 64,
+        "trace_bytes_per_policy_sample": 256, "inflight_bytes": 65536,
+        "runtime_cache_bytes": 32, "free_margin_bytes": 16}}
+    original_api = campaign.predecessors._pidfd_api
+    launches, signals = [], []
+
+    def observed_api():
+        opening, sending = original_api()
+
+        def send_pid(descriptor, number):
+            signals.append(number)
+            return sending(descriptor, number)
+
+        return opening, send_pid
+
+    def forbidden_popen(*args, **kwargs):
+        launches.append(True)
+        raise AssertionError("initial storage rejection must precede child creation")
+
+    monkeypatch.setattr(campaign.predecessors, "_pidfd_api", observed_api)
+    monkeypatch.setattr(campaign.subprocess, "Popen", forbidden_popen)
+    command = [sys.executable, "-B", "-c", "pass"]
+    with pytest.raises(campaign.CampaignIntegrityError, match="other storage cap exceeded"):
+        REAL_LAUNCH(command, directory, [], 10., lambda *a, **k: None,
+            monitor=lambda: campaign.worker_storage_guard({}, contract, directory, 10_000))
+    assert launches == [] and not (directory / "worker.process.json").exists()
+    terminal = json.loads((directory / "worker.completion.json").read_bytes())
+    assert terminal["command"] == command and terminal["process"] is None
+    assert terminal["returncode"] is None and terminal["timed_out"] is False
+    assert signals == [0]
+    assert (directory / "existing_burst.bin").stat().st_size == 262144
+
+
 def test_actual_parent_monitor_output_burst_signals_only_owned_pidfd_and_preserves_terminal_record(tmp_path, monkeypatch):
     directory = tmp_path / "monitored_worker"
     directory.mkdir()
@@ -775,7 +812,7 @@ def test_actual_parent_monitor_output_burst_signals_only_owned_pidfd_and_preserv
         "trace_bytes_per_policy_sample": 256, "inflight_bytes": 65536,
         "runtime_cache_bytes": 32, "free_margin_bytes": 16}}
     original_api, original_popen = campaign.predecessors._pidfd_api, campaign.subprocess.Popen
-    launches, signals = [], []
+    launches, signals, monitor_launch_counts = [], [], []
 
     def observed_api():
         opening, sending = original_api()
@@ -797,14 +834,19 @@ def test_actual_parent_monitor_output_burst_signals_only_owned_pidfd_and_preserv
         launches.append(child.pid)
         return child
 
+    def monitor():
+        monitor_launch_counts.append(len(launches))
+        return campaign.worker_storage_guard({}, contract, directory, 10_000)
+
     monkeypatch.setattr(campaign.predecessors, "_pidfd_api", observed_api)
     monkeypatch.setattr(campaign.subprocess, "Popen", popen)
     program = "import pathlib,sys,time;pathlib.Path(sys.argv[1]).write_bytes(b'x'*262144);time.sleep(20)"
     command = [sys.executable, "-B", "-c", program, str(directory / "sdk_burst.bin")]
     with pytest.raises(campaign.CampaignIntegrityError, match="other storage cap exceeded"):
         REAL_LAUNCH(command, directory, [], 10., lambda *a, **k: None,
-            monitor=lambda: campaign.worker_storage_guard({}, contract, directory, 10_000))
+            monitor=monitor)
     assert len(launches) == 1
+    assert monitor_launch_counts[0] == 0 and 1 in monitor_launch_counts
     actual = json.loads((directory / "worker.process.json").read_bytes())
     terminal = json.loads((directory / "worker.completion.json").read_bytes())
     assert actual["command"] == terminal["command"] == actual["process"]["argv"] == command

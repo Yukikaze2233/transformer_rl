@@ -30,6 +30,8 @@ python -B -m transformer_rl.calibration run \
 
 每个候选先运行独立训练 worker，正常关闭并核验真实 checkpoint、初始化、私有 seed、更新、完整 rollout、Adam 配置及步数、RNG、日志和不可退款的整项预算，再运行独立评估 worker。worker 使用新的字节码目录、私有 runtime profile，以及原适配器的实际 SDK 路径读回。原始请求、父子 PID/start/argv、继承描述符、运行 profile、关闭结果和文件 SHA 都需一致。
 
+子进程实际启动前，控制器再次核验 runtime profile，并通过既有 monitor 复核源码、输入收据及自有存储限额；此检查失败时不创建子进程。
+
 控制器在启动、采样、优化、原子文件发布和关闭期间采样整个自有目录。它分别记录 runtime、checkpoint、trace、metric 和其他文件的逻辑及 allocated 字节；目录、采样日志和终态元数据也计入限额。超限或后台观察错误会停止这次执行；没有重试、退款或目录复用。
 
 实际观察到的 helper 以 PID/start/UID 持续跟踪。调用者及观察者祖先被排除，已登记 helper 即使释放目录引用，仍继续核验其自身及后续子进程。控制器在原锁内等待这些已观察进程终态，不按 PID 猜测发送信号。不可读 `/proc` 字段保留为观测盲区。

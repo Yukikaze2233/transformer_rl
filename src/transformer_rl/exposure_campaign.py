@@ -475,6 +475,7 @@ def launch_owned_worker(command, directory, leases, timeout, publish, *, worker_
     started = time.monotonic()
     with (directory / "stdout.txt").open("xb") as stdout, (directory / "stderr.txt").open("xb") as stderr:
         try:
+            guard_runtime()
             process = subprocess.Popen(command, stdout=stdout, stderr=stderr,
                 start_new_session=True, env=environment,
                 pass_fds=tuple(item["descriptor"] for item in leases))
