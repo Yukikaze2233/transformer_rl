@@ -7,6 +7,7 @@ Measurements are facts, not permission to spend the production disk budget.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from copy import deepcopy
 from datetime import datetime, timezone
 import fcntl
@@ -58,8 +59,16 @@ def _limits(value):
 
 def _cells(protocol, job):
     seed = protocol["evaluation"]["validation_seeds"][0]
+    # Continuous checkpoint schedules provide several complete batches. Use
+    # the earliest declared first-stage batch only as a scenario template;
+    # private training updates and evaluation seeds remain independent.
+    checkpoint = None
+    if protocol["schema_version"] == 2:
+        checkpoint = min(record["checkpoint_update"] for record in
+                         campaign.learning_checkpoint_records(protocol, job, job["stages"][0]))
     cells = [c for c in protocol["evaluation_cells"] if c["job_id"] == job["id"]
-             and c["stage_index"] == 0 and c["role"] == "validation" and c["seed"] == seed]
+             and c["stage_index"] == 0 and c["role"] == "validation" and c["seed"] == seed
+             and (checkpoint is None or c["checkpoint_update"] == checkpoint)]
     _require([c["scenario"] for c in cells] == [s["name"] for s in protocol["scenarios"]],
              "calibration must retain every original scenario in order")
     return deepcopy(cells)
@@ -336,14 +345,38 @@ def _closed_outcome(directory, receipt, result, protocol):
 
 def _verify_private_evaluation(plan, protocol, job, checkpoint, outcome):
     """Replay the complete trace and bind every private calibration row."""
-    from .exposure_evaluation import METRIC_NAMES, SIGNAL_NAMES, _same_metrics
+    from .chassis_adapter import merge_evaluation_contracts
+    from .episode_outcomes import TRACE_METADATA_KEY, trace_metadata
+    from .exposure_evaluation import METRIC_NAMES, SIGNAL_NAMES, _episode_outcome_rows, _same_metrics
     from .exposure_trace import verify_trace_archive
     report = campaign._read(campaign._checked(outcome["report"]))
     trace_path = campaign._checked(outcome["trace"])
     cells = _cells(protocol, job)
     environment = _merge_environment(protocol, job, cells)
     config = FrameTrainConfig.from_dict(job["stages"][0]["config"])
-    labels = [c["scenario"] for c in cells for _ in range(c["num_envs"])]
+    provenance = report.get("environment_provenance")
+    labels = provenance.get("evaluation_groups") if type(provenance) is dict else None
+    _require(type(labels) is list and all(type(label) is str for label in labels)
+             and len(labels) == environment["num_envs"]
+             and Counter(labels) == Counter({c["scenario"]: c["num_envs"] for c in cells}),
+             "private calibration report changes declared physical rows")
+    merged = merge_evaluation_contracts(definition._path(environment["snapshot"]), environment["contracts"])
+    _require(provenance.get("identity") == environment["snapshot_sha256"]
+             and provenance.get("control_sha256") == digest(config.control)
+             and provenance.get("contract_sha256") == digest(merged),
+             "private calibration physical snapshot, effective contract or timing provenance differs")
+    _require(merged.get("policy_dt") == config.control["policy_dt_s"],
+             "private calibration case horizon clock differs from the trained policy interval")
+    outcome_cases = {}
+    for case in merged["evaluation"]["cases"]:
+        seconds = case.get("episode_seconds", merged.get("episode_seconds"))
+        _require(type(seconds) in (int, float) and math.isfinite(seconds) and seconds > 0
+                 and type(case.get("task")) is str and case["task"],
+                 "private calibration requires explicit positive case horizons and tasks")
+        ticks = round(seconds / config.control["policy_dt_s"])
+        _require(0 < ticks < 2**63, "private calibration case horizon exceeds int64 or one policy tick")
+        outcome_cases[case["name"]] = {"episode_horizon_ticks": ticks,
+                                       "survival_applicable": case["task"] == "survive"}
     expected = {"format": "transformer_rl.packed_evaluation", "schema_version": 1,
         "checkpoint_sha256": checkpoint["sha256"], "checkpoint_update": plan["updates"],
         "model": config.to_dict()["model"], "control_sha256": digest(config.control),
@@ -351,7 +384,6 @@ def _verify_private_evaluation(plan, protocol, job, checkpoint, outcome):
         "num_envs": len(labels), "transitions": protocol["evaluation"]["steps"] * len(labels),
         "policy": "deterministic_raw_mean_then_declared_action_limits"}
     _require(all(_same_metrics(report.get(k), v) for k, v in expected.items())
-             and report.get("environment_provenance", {}).get("evaluation_groups") == labels
              and set(report.get("groups", {})) == set(labels)
              and sorted(report["metrics"]) == METRIC_NAMES
              and sorted(report["stability"]["signals"]) == SIGNAL_NAMES,
@@ -363,19 +395,24 @@ def _verify_private_evaluation(plan, protocol, job, checkpoint, outcome):
         "history_length": config.model.history_length,
         "pre_inference_age_semantics": "policy steps since reset, captured before actor inference",
         "evaluation_metric_names": METRIC_NAMES, "evaluation_signal_names": SIGNAL_NAMES}
+    trace_expected[TRACE_METADATA_KEY] = trace_metadata(True)
+    trace_expected["episode_outcome_contract"] = _episode_outcome_rows(outcome_cases, labels)
     replay = verify_trace_archive(trace_path, report["trace"], trace_expected,
         steps=protocol["evaluation"]["steps"], rows=len(labels), history_length=config.model.history_length,
         action_bounds=config.control["action_bounds"], settle_steps=protocol["evaluation"]["settle_steps"],
         min_steady_samples=protocol["evaluation"]["min_steady_samples"])
     fields = ("control", "history_control", "metrics", "reward_mean", "stability", "completed_episodes",
-              "failed_episodes", "success_metric_available", "success_rate")
-    _require(all(_same_metrics(report.get(k), replay[k]) for k in fields),
+              "failed_episodes", "success_metric_available", "success_rate", "episode_outcomes")
+    _require(all(k in replay and _same_metrics(report.get(k), replay[k]) for k in fields),
              "private calibration aggregate report differs from trace replay")
     for cell in cells:
         grouped = report["groups"][cell["scenario"]]
-        _require(grouped["num_envs"] == cell["num_envs"]
-                 and grouped["transitions"] == cell["expected_policy_samples"]
-                 and all(_same_metrics(grouped.get(k), replay["groups"][cell["scenario"]][k]) for k in fields),
+        group_identity = {**expected, "num_envs": cell["num_envs"],
+                          "transitions": cell["expected_policy_samples"], "environment_provenance": provenance}
+        _require(all(_same_metrics(grouped.get(k), v) for k, v in group_identity.items()),
+                 "private calibration scenario checkpoint, seed, clock or row identity differs")
+        _require(all(k in replay["groups"][cell["scenario"]]
+                     and _same_metrics(grouped.get(k), replay["groups"][cell["scenario"]][k]) for k in fields),
                  "private calibration scenario metrics or replicas differ")
     campaign._checked(outcome["report"])
     campaign._checked(outcome["trace"])

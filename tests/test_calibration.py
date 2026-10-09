@@ -11,13 +11,16 @@ from pathlib import Path
 import subprocess
 import sys
 
+import numpy as np
 import pytest
 
 from transformer_rl import calibration, exposure_campaign as campaign
 from transformer_rl import exposure_protocol as protocol, queue_validation
+from transformer_rl.episode_outcomes import TRACE_FIELDS, TRACE_METADATA_KEY, trace_metadata
 from transformer_rl.frame_config import digest, json_bytes
-from test_exposure_protocol import prepared
+from test_exposure_protocol import freeze, prepared
 from test_exposure_evaluation import physical_protocol
+from test_exposure_trace import array, rewrite
 
 
 REAL_LAUNCH = campaign.launch_owned_worker
@@ -67,6 +70,24 @@ def fixture_launch(monkeypatch):
     monkeypatch.setattr(campaign, "launch_owned_worker", launch)
 
 
+def scheduled_protocol(p):
+    value = freeze(p, checkpoint_interval=1, _allow_existing_output=True)
+    publish(p["protocol_path"], value)
+    p["protocol"] = value
+    return value
+
+
+def completed_private_evaluation(p, monkeypatch):
+    path, plan = plan_file(p, candidates=["gated_h4"])
+    fixture_launch(monkeypatch)
+    result = calibration.run(path, expected_plan_sha256=protocol._receipt(path)["sha256"])
+    assert result["status"] == "completed", result["error"]
+    evaluation = next(w for w in result["workers"] if w["kind"] == "evaluate")
+    outcome = json.loads(Path(evaluation["outcome"]["path"]).read_bytes())
+    job = next(j for j in p["protocol"]["jobs"] if j["id"] == evaluation["job_id"])
+    return plan, job, outcome
+
+
 def test_plan_preserves_all_candidates_recipe_and_private_complete_scenarios(physical_protocol):
     p = physical_protocol
     path, plan = plan_file(p)
@@ -80,6 +101,32 @@ def test_plan_preserves_all_candidates_recipe_and_private_complete_scenarios(phy
     assert plan["coverage"]["evaluation_policy_samples"] == sum(13 * 2 * 2 for _ in jobs)
     assert not Path(plan["output_root"]).exists()
     assert not plan["formal_architecture_selection"] and not plan["production_storage_authorized"]
+
+
+@pytest.mark.parametrize("updates,evaluation_seed", [(1, 92002), (2, 92001)])
+def test_continuous_checkpoints_supply_one_complete_private_template(physical_protocol, updates, evaluation_seed):
+    p = physical_protocol
+    legacy = p["protocol"]
+    job = next(j for j in legacy["jobs"] if j["training_seed"] == 71)
+    assert legacy["schema_version"] == 1
+    assert all("checkpoint_update" not in cell for cell in calibration._cells(legacy, job))
+    frozen = scheduled_protocol(p)
+    original = deepcopy(frozen)
+    path, plan = plan_file(p, updates=updates, evaluation_seed=evaluation_seed)
+    assert calibration.validate_plan(protocol._receipt(path)) == (plan, frozen)
+    assert frozen["schema_version"] == 2
+    assert len(frozen["evaluation_cells"]) == 2 * len(legacy["evaluation_cells"])
+    jobs = [j for j in frozen["jobs"] if j["training_seed"] == 71]
+    for job in jobs:
+        assert job["stages"][0]["checkpoint_updates"] == [1, 2]
+        cells = calibration._cells(frozen, job)
+        assert [cell["scenario"] for cell in cells] == [s["name"] for s in frozen["scenarios"]]
+        assert {cell["checkpoint_update"] for cell in cells} == {1}
+        assert {cell["seed"] for cell in cells} == {frozen["evaluation"]["validation_seeds"][0]}
+        cells[0]["checkpoint_update"] = 999  # The template is a copy, not a protocol rewrite.
+    assert plan["updates"] == updates and plan["evaluation_seed"] == evaluation_seed
+    assert plan["coverage"]["evaluation_policy_samples"] == len(jobs) * 13 * 2 * 2
+    assert frozen == original and not Path(plan["output_root"]).exists()
 
 
 @pytest.mark.parametrize("change", [
@@ -137,8 +184,13 @@ def test_actual_original_flock_conflict_starts_no_calibration_worker(physical_pr
     assert not list(Path(plan["output_root"]).glob("job_*"))
 
 
-def test_actual_complete_cpu_calibration_all_architectures_and_private_rows(physical_protocol, monkeypatch):
+@pytest.mark.parametrize("continuous_checkpoints", [False, True])
+def test_actual_complete_cpu_calibration_all_architectures_and_private_rows(physical_protocol, monkeypatch,
+                                                                          continuous_checkpoints):
     p = physical_protocol
+    if continuous_checkpoints:
+        scheduled_protocol(p)
+    original = deepcopy(p["protocol"])
     path, plan = plan_file(p)
     fixture_launch(monkeypatch)
     result = calibration.run(path, expected_plan_sha256=protocol._receipt(path)["sha256"])
@@ -155,9 +207,25 @@ def test_actual_complete_cpu_calibration_all_architectures_and_private_rows(phys
         else:
             outcome = json.loads(Path(worker["outcome"]["path"]).read_bytes())
             report = json.loads(Path(outcome["report"]["path"]).read_bytes())
-            assert report["seed"] == 92001 and report["transitions"] == 52
+            assert report["seed"] == 92001 and report["transitions"] == 52 and report["checkpoint_update"] == 2
+            assert report["trace"]["checkpoint_update"] == 2
+            assert report["environment_provenance"]["evaluation_groups"] == ["normal", "new_skill", "normal", "new_skill"]
             assert set(report["groups"]) == {"normal", "new_skill"}
             assert all(group["num_envs"] == 2 for group in report["groups"].values())
+            outcomes = report["episode_outcomes"]
+            assert outcomes["available"] and outcomes["requested_episodes"] == outcomes["completed_episodes"] == 4
+            assert outcomes["survival"]["healthy_full_horizon_episodes"] == 2
+            assert [row["episode_horizon_ticks"] for row in outcomes["first_episode_outcomes"]] == [4, 6, 4, 6]
+            for name, horizon in (("normal", 4), ("new_skill", 6)):
+                group = report["groups"][name]["episode_outcomes"]
+                assert group["requested_episodes"] == 2 and group["available"]
+                assert [row["episode_horizon_ticks"] for row in group["first_episode_outcomes"]] == [horizon] * 2
+            measurement = next(m for m in result["measurements"] if m["kind"] == "trace"
+                               and m["receipt"] == outcome["trace"])
+            assert measurement["trace_validation"]["episode_outcome_contract_checked"] is True
+            if continuous_checkpoints:
+                job = next(j for j in p["protocol"]["jobs"] if j["id"] == worker["job_id"])
+                assert {cell["checkpoint_update"] for cell in calibration._cells(p["protocol"], job)} == {1}
             assert "grade" not in report and "selection" not in report
     root = Path(plan["output_root"])
     completion = json.loads((root / "completion.json").read_bytes())
@@ -168,6 +236,7 @@ def test_actual_complete_cpu_calibration_all_architectures_and_private_rows(phys
     assert result["sampled_storage"]["peaks"]["categories"]["checkpoint"]["logical_bytes"] > 0
     assert result["sampled_storage"]["peaks"]["categories"]["trace"]["logical_bytes"] > 0
     assert not completion["production_storage_authorized"] and not completion["hardware_verified"]
+    assert p["protocol"] == original
 
 
 @pytest.mark.parametrize("field", ["seed", "checkpoint_sha256", "num_envs"])
@@ -187,6 +256,96 @@ def test_private_report_mismatch_is_not_accepted_as_a_storage_measurement(physic
     job = next(j for j in p["protocol"]["jobs"] if j["id"] == evaluation["job_id"])
     with pytest.raises(campaign.CampaignIntegrityError, match="private calibration report changes"):
         calibration._verify_private_evaluation(plan, p["protocol"], job, outcome["checkpoint"], outcome)
+
+
+def test_resealed_private_episode_outcomes_and_row_identity_must_match_trace(physical_protocol, monkeypatch):
+    p = physical_protocol
+    scheduled_protocol(p)
+    plan, job, outcome = completed_private_evaluation(p, monkeypatch)
+    report_path = Path(outcome["report"]["path"])
+    original = json.loads(report_path.read_bytes())
+    # Each mutation is resealed, so rejection must come from semantic replay or
+    # immutable physical identity, not from the external artifact checksum.
+    for group, mutation, reason in (
+        (None, "healthy_count", "aggregate report differs"),
+        (None, "missing", "aggregate report differs"),
+        (None, "first_horizon", "aggregate report differs"),
+        ("new_skill", "healthy_count", "scenario metrics or replicas differ"),
+        ("normal", "missing", "scenario metrics or replicas differ"),
+        ("new_skill", "first_horizon", "scenario metrics or replicas differ"),
+        ("normal", "checkpoint_update", "scenario checkpoint, seed, clock or row identity differs"),
+        ("normal", "seed", "scenario checkpoint, seed, clock or row identity differs"),
+        (None, "row_count", "report changes declared physical rows"),
+        (None, "row_type", "report changes declared physical rows"),
+        (None, "contract_sha256", "effective contract or timing provenance differs"),
+    ):
+        report = deepcopy(original)
+        target = report if group is None else report["groups"][group]
+        if mutation == "healthy_count":
+            target["episode_outcomes"]["survival"]["healthy_full_horizon_episodes"] += 1
+        elif mutation == "missing":
+            del target["episode_outcomes"]
+        elif mutation == "first_horizon":
+            target["episode_outcomes"]["first_episode_outcomes"][0]["episode_horizon_ticks"] -= 1
+        elif mutation in ("checkpoint_update", "seed"):
+            target[mutation] += 1
+        elif mutation == "row_count":
+            target["environment_provenance"]["evaluation_groups"][0] = "new_skill"
+        elif mutation == "row_type":
+            target["environment_provenance"]["evaluation_groups"][0] = ["normal"]
+        else:
+            target["environment_provenance"][mutation] = "a" * 64
+        publish(report_path, report)
+        changed = {**outcome, "report": protocol._receipt(report_path)}
+        with pytest.raises(campaign.CampaignIntegrityError, match=reason):
+            calibration._verify_private_evaluation(plan, p["protocol"], job, outcome["checkpoint"], changed)
+
+
+def test_resealed_private_trace_requires_explicit_immutable_episode_evidence(physical_protocol, monkeypatch):
+    p = physical_protocol
+    scheduled_protocol(p)
+    plan, job, outcome = completed_private_evaluation(p, monkeypatch)
+    report_path, trace_path = Path(outcome["report"]["path"]), Path(outcome["trace"]["path"])
+    original = json.loads(report_path.read_bytes())
+    original_trace = trace_path.read_bytes()
+    fixture = {"path": trace_path, "trace": original["trace"]}
+    for mutation, reason in (
+        ("short_horizon", "episode_horizon_ticks differs from authorized case contract"),
+        ("false_task", "survival_applicable differs from authorized case contract"),
+        ("missing_horizon", "complete trace field coverage differs"),
+        ("missing_height", "complete trace field coverage differs"),
+        ("missing_protocol", "missing declared episode outcome trace protocol"),
+        ("unavailable", "explicit available episode outcome contract required"),
+    ):
+        trace_path.write_bytes(original_trace)
+        report = deepcopy(original)
+        if mutation in ("short_horizon", "false_task"):
+            name = "outcome_episode_horizon_ticks" if mutation == "short_horizon" else "outcome_survival_applicable"
+            values = array(fixture, name).copy()
+            if mutation == "short_horizon":
+                values[:, 1] -= 1
+            else:
+                values[:, 1] = ~values[:, 1]
+            changes = {name + ".npy": values}
+        elif mutation.startswith("missing_") and mutation != "missing_protocol":
+            name = "outcome_episode_horizon_ticks" if mutation == "missing_horizon" else "outcome_height"
+            changes = {name + ".npy": None}
+        else:
+            metadata = json.loads(array(fixture, "metadata_json").item())
+            if mutation == "missing_protocol":
+                del metadata[TRACE_METADATA_KEY]
+                del report["trace"][TRACE_METADATA_KEY]
+            else:
+                metadata[TRACE_METADATA_KEY] = trace_metadata(False)
+                report["trace"][TRACE_METADATA_KEY] = trace_metadata(False)
+            changes = {name + ".npy": None for name in TRACE_FIELDS}
+            changes["metadata_json.npy"] = np.array(json.dumps(metadata))
+        fixture["trace"] = report["trace"]
+        report["trace"] = rewrite(fixture, changes)
+        publish(report_path, report)
+        changed = {**outcome, "report": protocol._receipt(report_path), "trace": protocol._receipt(trace_path)}
+        with pytest.raises(ValueError, match=reason):
+            calibration._verify_private_evaluation(plan, p["protocol"], job, outcome["checkpoint"], changed)
 
 
 def test_lease_exit_error_after_complete_workers_cannot_claim_completion(physical_protocol, monkeypatch):
