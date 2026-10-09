@@ -24,6 +24,16 @@ Q_a=\bar q_a+\lambda\,\mathrm{SD}_{\mathrm{sample}}(q_{a,s}).
 
 单 cell 的 score/gates 使用原 `protocol.selection` 与 `frame_study.grade_report`。标准差使用 \(n-1\) 分母，表示跨训练 seed 波动，不是置信区间。只要一个原始 seed 的最终目标缺失，候选 mean/std/rank_score 保留为空，不能用其余 seed 均值替代；`min_training_seeds` 是下限，不能用来丢掉坏 seed。
 
+### 按场景使用物理控制指标
+
+objective 可以用可选的 `scenarios` 声明适用的完整场景名称；省略时仍用于全部场景。名称必须来自原 spec，列表不能为空或重复，并且每个场景至少有一个适用 objective。比如零指令站立的世界 XY 速度范数可以参与该类场景评分，不应把前进指令下的实际运动当成静止漂移。单 cell 只累加其适用项，场景间仍保持原等权；没有适用项或适用项缺失时 score 为空，不能填零或把该 cell 从分母中删除。
+
+`path` 的点号片段支持字典字段和列表的十进制下标，如 `control.actuation.effort_rate.channels.2.rms`、`control.actuation.actual_bound_fraction.2`。列表下标从零开始，不接受负数、前导零或超出实际通道的索引；缺失、布尔值和非有限数值均不能评分。gates 使用同一取值规则，因此实际力矩及其变化率可以同时作为评分项和约束。通道顺序、物理单位与控制配置一起冻结。
+
+固定指令的跟踪偏差应与回合内去均值波动分开：`control.steady.axes.height.rmse` 描述高度是否正确，`within_group_std` 描述保持段内部的波动。动态指令场景可以另行声明 `control.full_interval` 项；不能用不存在的稳态窗口、零值或静止漂移目标替代。`control.planar_motion.stationary_steady.rms_speed_m_s` 是世界 XY 的 base-link 原点速度范数，和 body vx 误差不是同一个指标。`control.actuation` 的目标变化率、轮目标加速度及力矩变化率采用采样间隔统计，不能解释为去均值稳态量或下位机电流环。
+
+上述接口只增加可表达的指标与适用范围；原来的 objectives、权重和 gates 不自动改变。新评价规则须先写入独立 spec，并在训练与 validation 前冻结尺度、权重及适用场景；不根据结果改规则或强求 Transformer 胜出。修改源码后重新 prepare/freeze，旧封存计划继续保留原身份。
+
 所有原训练 seed 必须正常完成、全部 validation cells 必须有合法数据、最后阶段所有场景必须通过任务 gates。实际 `history_control` 的 H、`minimum_full_age=H-1`、policy_dt、settle_steps 和 min_steady_samples 必须与原 config 一致。full-history 样本至少达到 `min_steady_samples × cell.num_envs`；要求稳态的场景，其 full-history steady_tracking 样本也必须达到该门槛。不足时保留实际分数并判为不合格，不能用 reset-filled 样本填充。
 
 遗忘只在技能已获得后判断：同一场景、同一 validation seed 首次通过 gates 后获得技能，后续阶段必须继续通过 gates，score 不能比此前已获得阶段的最佳 score 恶化超过原 retention_score_tolerance。早期尚未学会的新技能不被视为遗忘，也不混入最后阶段排名；获得后退步则影响 eligibility。完整早期曲线仍保留在选择证据中。

@@ -152,12 +152,24 @@ def _validate_spec(spec):
     objectives = spec["selection"]["objectives"]
     if not isinstance(objectives, list) or not objectives:
         raise ValueError("selection needs explicit scaled objectives")
+    covered_scenarios = set()
     for item in objectives:
-        if (not isinstance(item, dict) or set(item) != {"path", "direction", "scale", "weight"}
+        fields = {"path", "direction", "scale", "weight"}
+        if (not isinstance(item, dict) or not fields <= set(item) or set(item) - fields - {"scenarios"}
                 or item["direction"] not in ("minimize", "maximize") or not isinstance(item["path"], str)):
             raise ValueError("invalid selection objective")
         _positive(item["scale"], "objective scale")
         _positive(item["weight"], "objective weight")
+        if "scenarios" in item:
+            routes = item["scenarios"]
+            if (not isinstance(routes, list) or not routes or any(not isinstance(name, str) for name in routes)
+                    or len(set(routes)) != len(routes) or set(routes) - scenario_names):
+                raise ValueError("objective scenarios require a nonempty unique list of declared scenario names")
+            covered_scenarios.update(routes)
+        else:
+            covered_scenarios.update(scenario_names)
+    if covered_scenarios != scenario_names:
+        raise ValueError("every scenario needs at least one applicable objective")
 
 
 def _configs(base, spec):
@@ -226,10 +238,17 @@ def validate_study(root, *, source=False):
 
 
 def _value(report, path):
+    if not isinstance(path, str) or not path or any(not part for part in path.split(".")):
+        return None
     try:
         for part in path.split("."):
-            report = report[part]
-    except (TypeError, KeyError):
+            if isinstance(report, dict):
+                report = report[part]
+            elif isinstance(report, list) and re.fullmatch(r"0|[1-9][0-9]*", part):
+                report = report[int(part)]
+            else:
+                return None
+    except (TypeError, KeyError, IndexError, ValueError):
         return None
     return float(report) if type(report) in (int, float) and math.isfinite(report) else None
 
@@ -245,12 +264,18 @@ def grade_report(report, scenario, evaluation, objectives):
         if value is None or (value < gate["value"] if gate["operator"] == "min" else value > gate["value"]):
             errors.append(gate["path"])
     score = 0.
+    applicable = 0
     for objective in objectives:
+        if "scenarios" in objective and scenario.get("name") not in objective["scenarios"]:
+            continue
+        applicable += 1
         value = _value(report, objective["path"])
         if value is None:
             errors.append("missing objective: " + objective["path"])
         else:
             score += objective["weight"] * value / objective["scale"] * (1 if objective["direction"] == "minimize" else -1)
+    if not applicable:
+        errors.append("missing applicable objectives")
     return {"passed": not errors, "reasons": errors, "score": score if not any(e.startswith("missing") for e in errors) else None}
 
 
