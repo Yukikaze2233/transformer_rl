@@ -10,13 +10,21 @@
 
 所有 job 从 fresh 开始，λ 为零。私有 retention seed 必须显式指定，并与训练、验证、独立确认及原 anchor/capture seed 分离。原来的模型、PPO、控制、环境、课程与 reward 沿用冻结配置，不强行匹配参数量，不引入 RNN。
 
-每个真实阶段端点都评价**全部声明场景**，包括该阶段尚未训练过的场景。完整单元身份为：
+协议 v1 未显式传入 `checkpoint_interval`，仅在真实阶段端点保存并评价模型；它不会自动使用 history 输入中的训练日志间隔。每个端点都评价**全部声明场景**，包括该阶段尚未训练过的场景。完整单元身份为：
 
 `candidate × training seed × stage endpoint × scenario × evaluation seed`。
 
+显式调用 `freeze(..., checkpoint_interval=400)` 则产生协议 v2：`execution.checkpoint_interval` 固定间隔，每阶段的 `checkpoint_updates` 固定递增的本阶段成功更新数，并始终包含最终更新。例如单阶段 1,200 次更新声明 `[400,800,1200]`，不拆成三个训练阶段。v2 的完整评价单元身份为：
+
+`candidate × training seed × stage × cumulative checkpoint update × scenario × evaluation seed`。
+
+中间模型在完整 rollout、成功优化及日志发布后封存，继续使用同一环境、collector、历史、Adam 与全局及私有 RNG；保存本身不 close/open 或 reset。阶段训练关闭后，独立评价 worker 按每份真实封存模型、role 与评价 seed 运行全部场景。中途保存与跨阶段恢复的生命周期不同，见 [执行器的连续模型保存](exposure_campaign.md#连续训练的中间模型)。
+
 validation 与 held-out 单独标记。两类矩阵都预声明，但选择器只读取 validation；封存候选和 exact checkpoint 后才读取 held-out 确认。预声明 held-out 单元不授予选择器使用其成绩的权限。原 scenario gate 保留，合法完整但成绩差的评价仍应保存指标；未完成、无有效窗口和不存在端点的单元保留 missing，不能当作零或缩小分母。
 
-目前 H1/H11/H31/H61、34 候选、三训练 seed 的单阶段输入对应 102 jobs、122,400 次请求更新、6,016,204,800 条完整新 rollout 样本上限。50 个场景、两 validation seed 与两 held-out seed，分别产生 10,200 个单元，共 20,400 个。它们是计划上限与完整身份，不是已完成样本或结果；replica 与训练 seed 不混用。
+H1/H11/H31/H61、34 候选、三训练 seed、每 job 单阶段 1,200 次更新的输入，对应 102 jobs、122,400 次请求更新；每更新完整采集 48 步 × 1,024 个训练环境时，fresh rollout 样本上限为 6,016,204,800。50 个场景、两 validation seed 与两 held-out seed，在 v1 下分别产生 10,200 个单元，共 20,400 个。若 v2 显式固定间隔 400，则保存 306 份模型，两类评价各 30,600 个单元，共 61,200 个；每单元 8 个 replica、4,001 个策略步时，评价采样上限为 1,958,889,600。中途保存不增加训练更新或 fresh rollout 预算。以上是声明分母和请求上限，不是完成样本或结果；replica 与训练 seed 不混用。
+
+学习曲线按固定场景及 validation seed 的 checkpoint 时间顺序分析。只有先满足预声明 gate 且具有有效 score 的能力，后续不再通过 gate、score 不可用或比此前已取得的最佳 score 恶化超过冻结的 `retention_score_tolerance`，才计入取得后的遗忘；从未取得的能力仍标为未学会，缺失评价保留为未观测。最终排名和代表模型固定使用最后阶段的最终 checkpoint，较好的中间模型不能代替最终模型。保存间隔、历史窗口 H 与教师 anchor 池 K/正则系数 λ 是不同变量；本协议的 λ 仍为零。新增观测点不取消学习率、记忆容量、Sim2Real 或部署研究的完整范围。
 
 ## 真实输入与运行环境
 
@@ -38,7 +46,9 @@ protocol 保存排序后的 `runtime_mutable_paths`，每份 SDK tree 保存精�
 
 这种阶段隔离是实际环境生命周期所需：当前 chassis factory 每次都会新建 Isaac AppLauncher，adapter `close()` 只停 sim，奖励时间缩放包装也未恢复。同进程反复调用该工厂不能凭合成 CPU 检查宣称安全；阶段独立进程避免沿用旧 application/context 与套叠奖励包装，但实际模拟器运行仍需单独验证。
 
-后续 controller 还须实现完整预算总账、固定授权请求、精确 child/kernel handle、两锁 FD 继承、剩余未压缩 trace/在途文件/checkpoint 的磁盘预留，以及全部端点的独立物理证明。数值失败保持该 job 的缺失并继续其他候选；输入/源/协议/锁漂移、磁盘不足及人工中断应停止 campaign。未知错误不能凭异常文本当作可继续的数值失败。当前模块只声明这些执行义务，不代替其运行证据。
+独立 [controller](exposure_campaign.md) 负责完整预算总账、固定授权请求、精确 child/kernel handle、两锁 FD 继承、剩余未压缩 trace/在途文件/checkpoint 的磁盘预留，以及全部声明模型的独立物理证明。数值失败保持该 job 的缺失并继续其他候选；输入/源/协议/锁漂移、磁盘不足及人工中断应停止 campaign。未知错误不能凭异常文本当作可继续的数值失败。当前模块只冻结这些执行义务，代码接口存在不代替真实运行证据。
+
+v2 的磁盘预留按全部声明 checkpoint 及所有尚未闭合评价单元重建：同一连续阶段只占一个训练 worker namespace，每个 checkpoint × role × seed 的评价 batch 各占独立 namespace。模型、未压缩 trace、日志、runtime/cache、在途发布副本与可用空间余量都保留；失败或模型缺失不能缩小原矩阵。源变更后必须在实际目标主机重新 prepare history；保存间隔变更必须重新 freeze 协议。生产空间依据需由 [实际运行时校准](RUNTIME_CALIBRATION.md) 核验，并重建绑定新协议原始字节的 storage 合同。不能沿用 v1 的总空间预算、假定压缩比例，或将 CPU fixture 当作真实 SDK 峰值测量；静态冻结也不授予 SDK/GPU 或实机验证资格。
 
 ## 调用
 
@@ -54,12 +64,13 @@ python -B -m transformer_rl.exposure_protocol freeze \
   --learning-summary /absolute/original/learning/summary.json \
   --resource-lock /absolute/original/shared/.run.lock \
   --runtime-roots /absolute/actual/external_sdk \
-  --retention-seed 91001 --device cuda:0
+  --retention-seed 91001 --device cuda:0 \
+  --checkpoint-interval 400
 
 python -B -m transformer_rl.exposure_protocol validate \
   --protocol /absolute/path/exposure_protocol.json
 ```
 
-路径和私有 seed 均须换成真实输入。协议文件不得写入任何原输入、SDK、learner 或未来 campaign 输出树。直接从源码 checkout 调用时设置 `PYTHONPATH` 为当前 `src`；使用实际目标 Python 环境，不能把另一个解释器的静态定义当成相同 runtime。
+该例显式选择 v2 的连续保存间隔；省略 `--checkpoint-interval` 则保留 v1 的阶段末行为。路径和私有 seed 均须换成真实输入。协议文件不得写入任何原输入、SDK、learner 或未来 campaign 输出树。直接从源码 checkout 调用时设置 `PYTHONPATH` 为当前 `src`；使用实际目标 Python 环境，不能把另一个解释器的静态定义当成相同 runtime。
 
 如实际识别的 SDK 存在需拆分的可写目录，可在 freeze 命令逐项追加 `--runtime-mutable-path /absolute/actual/isaacsim/kit/cache`、`--runtime-mutable-path /absolute/actual/isaacsim/kit/data` 或 `--runtime-mutable-path /absolute/actual/isaacsim/kit/logs`。未声明时完全冻结；不存在、布局不符、任意 cache 目录或 `extscache` 均拒绝。CPU 布局 fixture 只验证识别和排除机制，不证明真实 Isaac 路径或硬件行为。
