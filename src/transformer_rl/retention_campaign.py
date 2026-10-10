@@ -516,16 +516,28 @@ def _pidfd_api():
         return os.pidfd_open, lambda fd, sig: signal.pidfd_send_signal(fd, sig)
     import ctypes
     library = ctypes.CDLL(None, use_errno=True)
-    opening = library.pidfd_open
-    opening.argtypes, opening.restype = [ctypes.c_int, ctypes.c_uint], ctypes.c_int
-    sending = library.pidfd_send_signal
-    sending.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint]
-    sending.restype = ctypes.c_int
     def checked(result):
         if result < 0:
             number = ctypes.get_errno()
             raise OSError(number, os.strerror(number))
         return result
+    if not (hasattr(library, "pidfd_open") and hasattr(library, "pidfd_send_signal")):
+        import platform
+        # Older Python and libc builds can omit wrappers for an available
+        # kernel ABI. Never fall back to signaling a reusable numeric PID.
+        if (sys.platform != "linux" or ctypes.sizeof(ctypes.c_void_p) != 8
+                or platform.machine() not in ("x86_64", "aarch64")):
+            raise OSError("pidfd syscall fallback requires Linux x86_64/aarch64 LP64")
+        syscall = library.syscall
+        syscall.argtypes, syscall.restype = [ctypes.c_long], ctypes.c_long
+        return (lambda pid: checked(syscall(434, ctypes.c_int(pid), ctypes.c_uint(0))),
+                lambda fd, sig: checked(syscall(424, ctypes.c_int(fd), ctypes.c_int(sig),
+                                               ctypes.c_void_p(), ctypes.c_uint(0))))
+    opening = library.pidfd_open
+    opening.argtypes, opening.restype = [ctypes.c_int, ctypes.c_uint], ctypes.c_int
+    sending = library.pidfd_send_signal
+    sending.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint]
+    sending.restype = ctypes.c_int
     return (lambda pid: checked(opening(pid, 0)),
             lambda fd, sig: checked(sending(fd, sig, None, 0)))
 

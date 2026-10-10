@@ -76,6 +76,8 @@ child 只从未花费预算中扣减本 worker 明确声明的 checkpoint、metr
 
 controller 还在等待 child 期间按最长一秒的等待间隔检查该 worker 的实际用量，并在 child 退出后再检查。物理调用或优化器尚未返回时，本 worker 输出目录内的 SDK/日志增长也受上述限制；停止只通过该 child 的真实 pidfd，保留已写输出与进程终态，不重试。
 
+进程句柄优先使用 Python 的 `os.pidfd_open` 与 `signal.pidfd_send_signal`，随后使用 libc 的对应封装。两层均缺少封装时，Linux x86_64/aarch64 的 LP64 运行时可通过 `libc.syscall` 调用同一个内核 pidfd ABI；不改用可复用的数值 PID 发送信号。调用号由 [Linux x86_64 syscall 表](https://github.com/torvalds/linux/blob/master/arch/x86/entry/syscalls/syscall_64.tbl)及 [asm-generic ABI](https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/unistd.h)确认。未知 ABI 或内核/权限拒绝仍在 Popen 前失败，不创建 worker。这只解决用户空间封装兼容性，实际 kernel handle、信号零探测、运行时与空间 guard 保持原规则。
+
 ## 失败分类
 
 只有 disposable worker 在真实 `env.step()` 或 `PPOTrainer.update()` 中捕获到 **built-in `FloatingPointError` 对象**，且失败记录位于 collect/optimize、关闭正常、实际计数不超过原预算，才作为可继续其它 job 的数值失败。worker 内拦截仅记录类型和发生位置，随后重新抛出原异常；不改变优化算法。错误文字包含 `nan` 或 completion 自称数值错误，均不足以授权继续。
