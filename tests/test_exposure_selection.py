@@ -163,6 +163,51 @@ def test_full_history_minimum_is_a_quality_gate_not_a_replacement_or_score_edit(
         metrics["history_control"][name] = original
 
 
+def test_dynamic_history_window_is_explicit_and_preserves_original_score_and_gates(tmp_path):
+    config = configuration("transformer", 4)
+    path = tmp_path / "config.json"
+    canonical(path, config.to_dict())
+    cell = {"config_receipt": protocol._receipt(path), "scenario": "scan", "num_envs": 2}
+    scenario = {"name": "scan", "gates": [{"path": "error", "operator": "max", "value": 1.}],
+                "require_steady": True}
+    value = {"evaluation": {"min_completed_episodes": 1, "min_steady_samples": 2, "settle_steps": 1},
+             "scenarios": [scenario],
+             "selection": {"objectives": [{"path": "error", "direction": "minimize", "scale": 1., "weight": 1.}]}}
+    metrics = {"completed_episodes": 2, "stability": {"available": True}, "error": .5,
+        "history_control": {"schema_version": 2, "history_length": 4, "minimum_full_age": 3,
+            "policy_dt_s": .01, "settle_steps": 1, "min_steady_samples": 2,
+            "windows": {"full_history": {"samples": 8, "steady_tracking": {"samples": 0},
+                                        "post_settle_tracking": {"samples": 6}}}}}
+
+    def measured():
+        return {"metrics": metrics, "grade": grade_report(metrics, scenario, value["evaluation"],
+                                                           value["selection"]["objectives"])}
+
+    # Omission keeps the original constant-reference requirement.
+    grade, gate = selection._physical_grade(value, cell, measured())
+    assert not grade["passed"] and grade["score"] == .5
+    assert gate["required_sample_window"] == "constant_reference"
+    assert gate["reasons"] == ["insufficient_full_history_steady_samples"]
+    scenario["history_sample_window"] = "post_settle"
+    grade, gate = selection._physical_grade(value, cell, measured())
+    assert grade["passed"] and grade["score"] == .5
+    assert gate["actual_required_samples"] == 6 and gate["minimum_samples"] == 4
+    assert gate["actual_steady_samples"] == 0
+    metrics["error"] = 2.
+    assert selection._physical_grade(value, cell, measured())[0]["reasons"] == ["error"]
+    metrics["error"] = .5
+    metrics["history_control"]["windows"]["full_history"]["post_settle_tracking"]["samples"] = 3
+    assert selection._physical_grade(value, cell, measured())[0]["reasons"] == ["insufficient_full_history_post_settle_samples"]
+    for bad in (True, -1, 9):
+        metrics["history_control"]["windows"]["full_history"]["post_settle_tracking"]["samples"] = bad
+        with pytest.raises(ValueError, match="post-settle sample counters"):
+            selection._physical_grade(value, cell, measured())
+    metrics["history_control"]["windows"]["full_history"]["post_settle_tracking"]["samples"] = 6
+    metrics["history_control"]["schema_version"] = 1
+    with pytest.raises(ValueError, match="schema version 2"):
+        selection._physical_grade(value, cell, measured())
+
+
 @pytest.fixture
 def physical_grid(prepared, monkeypatch):
     """Minimum complete legal protocol, with every ordinary dependency actual.

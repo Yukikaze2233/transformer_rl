@@ -36,7 +36,7 @@ class HistoryControlStatistics:
 
     @staticmethod
     def _row():
-        return {"window": None, "errors": _Errors(), "steady": _Errors(),
+        return {"window": None, "errors": _Errors(), "post_settle": _Errors(), "steady": _Errors(),
                 "previous": None, "reference_age": 0}
 
     @staticmethod
@@ -44,13 +44,13 @@ class HistoryControlStatistics:
         widths = {"leg_target_rate": 4, "wheel_target_acceleration": 2,
                   "physical_effort_rate": 6, "raw_policy_mean_rate": 6,
                   "issued_action_rate": 6, "physical_effort": 6}
-        return {"full": _ErrorPool(), "steady": _ErrorPool(),
+        return {"full": _ErrorPool(), "post_settle": _ErrorPool(), "steady": _ErrorPool(),
                 "rates": {key: [_Scalar() for _ in range(width)] for key, width in widths.items()},
                 "planar": _PlanarMotion(), "stationary": _PlanarMotion(),
                 "tilt": _Scalar(), "mechanical_power_proxy": _Scalar(),
                 "actor_clipped": [0] * 6, "samples": 0,
                 "terminal": {"done": 0, "failure": 0, "success": 0},
-                "discarded_short_steady_samples": 0}
+                "discarded_short_steady_samples": 0, "discarded_short_post_settle_samples": 0}
 
     def _finish_steady(self, row):
         steady = row["steady"]
@@ -65,8 +65,14 @@ class HistoryControlStatistics:
     def _finish_window(self, row):
         self._finish_steady(row)
         if row["window"] is not None:
-            self._windows[row["window"]]["full"].merge(row["errors"])
+            window = self._windows[row["window"]]
+            window["full"].merge(row["errors"])
+            if row["post_settle"].count >= self.min_steady_samples:
+                window["post_settle"].merge(row["post_settle"])
+            else:
+                window["discarded_short_post_settle_samples"] += row["post_settle"].count
         row["errors"] = _Errors()
+        row["post_settle"] = _Errors()
 
     def update(self, packet, done, ages, raw_mean, issued_action):
         if self._report is not None:
@@ -123,6 +129,10 @@ class HistoryControlStatistics:
             window = self._windows[window_name]
             error = [a - b for a, b in zip(data["actual"], data["command_reference"])]
             row["errors"].add(error, (.15, .25, .03))
+            # Dynamic references remain part of post-reset tracking. Only the
+            # constant-reference statistic restarts its settling clock.
+            if int(age[index]) >= self.settle_steps:
+                row["post_settle"].add(error, (.15, .25, .03))
             steady = int(age[index]) >= self.settle_steps and row["reference_age"] >= self.settle_steps
             if steady:
                 row["steady"].add(error, (.15, .25, .03))
@@ -168,8 +178,10 @@ class HistoryControlStatistics:
                 count = window["samples"]
                 windows[name] = {"samples": count,
                     "tracking": window["full"].report("within each environment/episode/history-window"),
+                    "post_settle_tracking": window["post_settle"].report("within each environment/episode/history-window after reset settling; changing references included"),
                     "steady_tracking": window["steady"].report("within each environment/episode/constant-reference segment"),
                     "discarded_short_steady_samples": window["discarded_short_steady_samples"],
+                    "discarded_short_post_settle_samples": window["discarded_short_post_settle_samples"],
                     "physical_planar_motion": window["planar"].report(),
                     "stationary_physical_planar_motion": window["stationary"].report(),
                     "rates": {key: [s.report() for s in signals] for key, signals in window["rates"].items()},
@@ -177,11 +189,12 @@ class HistoryControlStatistics:
                     "mechanical_power_proxy": window["mechanical_power_proxy"].report(),
                     "actor_clipping_fraction": [v / count if count else None for v in window["actor_clipped"]],
                     "terminal_events": window["terminal"]}
-            self._report = {"format": "transformer_rl.history_control_statistics", "schema_version": 1,
+            self._report = {"format": "transformer_rl.history_control_statistics", "schema_version": 2,
                 "history_length": self.history_length, "minimum_full_age": self.history_length - 1,
                 "age_semantics": "policy steps since reset, captured before actor inference",
                 "full_history_rule": "pre_inference_episode_age >= history_length - 1",
                 "policy_dt_s": self.dt, "settle_steps": self.settle_steps,
+                "post_settle_rule": "pre_inference_episode_age >= settle_steps; minimum samples per environment/episode/history-window; command changes do not restart settling",
                 "min_steady_samples": self.min_steady_samples, "windows": windows,
                 "interval_rule": "both endpoints in the same episode, history window and unchanged-reference segment",
                 "actuation_scope": "physical packet targets and effort are distinct from actor raw mean and issued action",

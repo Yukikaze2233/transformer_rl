@@ -33,7 +33,8 @@ def _npy(value):
 
 
 def make_trace(tmp_path, *, history_length=3, steps=7, command_change=None,
-               terminal_pattern=None, bias_after_reset=False, include_evaluation=False):
+               terminal_pattern=None, bias_after_reset=False, include_evaluation=False,
+               changing_reference=False, settle_steps=0, min_steady_samples=1):
     rows, labels, dt = 2, ["alpha", "beta"], .01
     metadata = {"checkpoint_sha256": "a" * 64, "checkpoint_update": 7, "seed": 71,
                 "policy_dt_s": dt, "sampling_hz": 100., "control_sha256": "b" * 64,
@@ -45,12 +46,14 @@ def make_trace(tmp_path, *, history_length=3, steps=7, command_change=None,
     path = tmp_path / "trace.npz"
     writer = ControlTrace(path, steps=steps, num_envs=rows, replicas=rows,
                           groups=labels, metadata=metadata)
-    control = ControlMetrics(rows, dt, settle_steps=0, min_steady_samples=1)
-    history = HistoryControlStatistics(rows, history_length, dt, settle_steps=0, min_steady_samples=1)
+    control = ControlMetrics(rows, dt, settle_steps=settle_steps, min_steady_samples=min_steady_samples)
+    history = HistoryControlStatistics(rows, history_length, dt, settle_steps=settle_steps,
+                                       min_steady_samples=min_steady_samples)
     outcomes = EpisodeOutcomeStatistics(rows, dt)
-    group_metrics = {label: {"control": ControlMetrics(1, dt, settle_steps=0, min_steady_samples=1),
+    group_metrics = {label: {"control": ControlMetrics(1, dt, settle_steps=settle_steps,
+                                                    min_steady_samples=min_steady_samples),
                             "history_control": HistoryControlStatistics(1, history_length, dt,
-                                settle_steps=0, min_steady_samples=1),
+                                settle_steps=settle_steps, min_steady_samples=min_steady_samples),
                             "episode_outcomes": EpisodeOutcomeStatistics(1, dt)} for label in labels}
     def evaluation_state(count):
         return {"reward": _MetricAccumulator(),
@@ -84,6 +87,8 @@ def make_trace(tmp_path, *, history_length=3, steps=7, command_change=None,
             done = torch.tensor(terminal_pattern[tick] if terminal_pattern is not None else
                                 [tick in (2, 5), tick == 4], dtype=torch.bool)
             reference = torch.tensor([[0., 0., .3]] * rows)
+            if changing_reference:
+                reference[:, 0] = tick * .03
             if command_change is not None and tick >= command_change:
                 reference[:, 0] = .2
             actual = reference.clone()
@@ -149,13 +154,15 @@ def make_trace(tmp_path, *, history_length=3, steps=7, command_change=None,
         for label in labels:
             online["groups"][label].update(evaluation_report(evaluations[label]))
     return {"path": path, "trace": trace, "expected": expected, "steps": steps, "rows": rows,
+            "settle_steps": settle_steps, "min_steady_samples": min_steady_samples,
             "history_length": history_length, "online": online, "packets": packets}
 
 
 def verify(fixture, *, trace=None, expected=None, **kwargs):
     arguments = {"steps": fixture["steps"], "rows": fixture["rows"],
                  "history_length": fixture["history_length"], "action_bounds": BOUNDS,
-                 "settle_steps": 0, "min_steady_samples": 1, **kwargs}
+                 "settle_steps": fixture.get("settle_steps", 0),
+                 "min_steady_samples": fixture.get("min_steady_samples", 1), **kwargs}
     return verify_trace_archive(fixture["path"], trace or fixture["trace"],
                                 expected or fixture["expected"], **arguments)
 
@@ -471,6 +478,21 @@ def test_command_boundary_excludes_actor_and_target_rate_interval(tmp_path):
     assert full["samples"] == 8
     assert full["rates"]["issued_action_rate"][0]["count"] == 4
     assert full["physical_planar_motion"]["intervals"] == 4
+
+
+def test_disk_replay_preserves_dynamic_post_settle_window_without_fixed_command_samples(tmp_path):
+    fixture = make_trace(tmp_path, history_length=3, steps=10, changing_reference=True,
+                         terminal_pattern=[[False, False]] * 10, settle_steps=2, min_steady_samples=2)
+    result = verify(fixture)
+    assert result["history_control"] == fixture["online"]["history_control"]
+    for name in ("alpha", "beta"):
+        assert result["groups"][name]["history_control"] == fixture["online"]["groups"][name]["history_control"]
+    full = result["history_control"]["windows"]["full_history"]
+    assert full["post_settle_tracking"]["samples"] == 16
+    assert full["post_settle_tracking"]["groups"] == 2
+    assert full["steady_tracking"]["samples"] == 0
+    assert full["post_settle_tracking"]["axes"]["vx"]["rmse"] == 0.
+    assert result["history_control"]["windows"]["reset_filled"]["post_settle_tracking"]["samples"] == 0
 
 
 @pytest.mark.parametrize("field", ["actual", "motor_effort", "raw_policy_mean", "issued_action",

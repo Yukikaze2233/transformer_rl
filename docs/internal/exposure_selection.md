@@ -34,7 +34,11 @@ objective 可以用可选的 `scenarios` 声明适用的完整场景名称；省
 
 上述接口只增加可表达的指标与适用范围；原来的 objectives、权重和 gates 不自动改变。新评价规则须先写入独立 spec，并在训练与 validation 前冻结尺度、权重及适用场景；不根据结果改规则或强求 Transformer 胜出。修改源码后重新 prepare/freeze，旧封存计划继续保留原身份。
 
-所有原训练 seed 必须正常完成、全部 validation cells 必须有合法数据、最后阶段所有场景必须通过任务 gates。实际 `history_control` 的 H、`minimum_full_age=H-1`、policy_dt、settle_steps 和 min_steady_samples 必须与原 config 一致。full-history 样本至少达到 `min_steady_samples × cell.num_envs`；要求稳态的场景，其 full-history steady_tracking 样本也必须达到该门槛。不足时保留实际分数并判为不合格，不能用 reset-filled 样本填充。
+所有原训练 seed 必须正常完成、全部 validation cells 必须有合法数据、最后阶段所有场景必须通过任务 gates。实际 `history_control` 的 H、`minimum_full_age=H-1`、policy_dt、settle_steps 和 min_steady_samples 必须与原 config 一致。full-history 样本至少达到 `min_steady_samples × cell.num_envs`，不能用 reset-filled 样本填充。
+
+当 `require_steady=True` 时，场景可显式声明 `history_sample_window`。省略或选择 `constant_reference` 保留原规则：full-history `steady_tracking` 必须达到同一门槛，每次指令改变重新剔除 settling 步数，保持段剩余样本不足 minimum 时不并入统计。选择 `post_settle` 则要求 schema version 2 的 `post_settle_tracking` 达到门槛：每个环境在每个回合、每个 history-window 内剔除 reset 后前 `settle_steps`，保留实际变化中的指令与对应误差，不在指令变化时重新计时，也不跨 reset 或 history 边界凑足 minimum。两种窗口不足时均保留实际分数并判为不合格，原 score、任务 gates 和完整分母不改变。
+
+动态窗口适用于高度扫描、启停等任务。例如指令端点只停留 2 秒，而 settling 和最短保持段各为 2 秒，就不会产生有效的 constant-reference 样本；这不能单独说明动态跟踪失败。`post_settle_tracking` 的回合内去均值变化仍包含动态响应，不能称为固定指令稳态抖动。原 `require_steady` 在 `grade_report` 中检查回合层面的 post-settle availability，额外 history 窗口在独立 selector 中检查。选哪一种必须在新 spec 中冻结；原 spec 省略字段时语义不变，旧数据不追补此字段，也不重新命名其窗口。
 
 遗忘只在技能已获得后判断：同一场景、同一 validation seed 首次通过 gates 后获得技能，后续阶段必须继续通过 gates，score 不能比此前已获得阶段的最佳 score 恶化超过原 retention_score_tolerance。早期尚未学会的新技能不被视为遗忘，也不混入最后阶段排名；获得后退步则影响 eligibility。完整早期曲线仍保留在选择证据中。
 

@@ -404,11 +404,22 @@ def _physical_grade(protocol, cell, measured):
     reasons = []
     if samples < minimum:
         reasons.append("insufficient_full_history_samples")
-    if scenario.get("require_steady", False) and steady < minimum:
-        reasons.append("insufficient_full_history_steady_samples")
+    sample_window = scenario.get("history_sample_window", "constant_reference")
+    _require(sample_window in ("constant_reference", "post_settle"), "unknown history sample window")
+    required_samples = steady
+    if sample_window == "post_settle":
+        _require(type(history.get("schema_version")) is int and history["schema_version"] == 2,
+                 "post-settle history measurements require schema version 2")
+        required_samples = window["post_settle_tracking"]["samples"]
+        _require(type(required_samples) is int and 0 <= required_samples <= samples,
+                 "full-history post-settle sample counters differ")
+    if scenario.get("require_steady", False) and required_samples < minimum:
+        reasons.append("insufficient_full_history_post_settle_samples" if sample_window == "post_settle"
+                       else "insufficient_full_history_steady_samples")
     grade = {**grade, "passed": grade["passed"] and not reasons, "reasons": [*grade["reasons"], *reasons]}
     return grade, {"passed": not reasons, "reasons": reasons, "minimum_samples": minimum,
-                   "actual_samples": samples, "actual_steady_samples": steady}
+                   "actual_samples": samples, "actual_steady_samples": steady,
+                   "required_sample_window": sample_window, "actual_required_samples": required_samples}
 
 
 def _rank(protocol, training_records, cells):

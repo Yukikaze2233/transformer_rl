@@ -123,7 +123,7 @@ def _validate_spec(spec):
             raise ValueError("variants, scenarios and stages must be nonempty")
         names = set()
         for entry in entries:
-            allowed = shape | {"require_steady"} if "gates" in shape else shape
+            allowed = shape | {"require_steady", "history_sample_window"} if "gates" in shape else shape
             if not isinstance(entry, dict) or not shape <= set(entry) or set(entry) - allowed:
                 raise ValueError("invalid variant/scenario/stage fields")
             _name(entry["name"])
@@ -142,6 +142,10 @@ def _validate_spec(spec):
     for scenario in spec["scenarios"]:
         if type(scenario.get("require_steady", False)) is not bool:
             raise ValueError("require_steady must be boolean")
+        if "history_sample_window" in scenario and (
+                not scenario.get("require_steady", False)
+                or scenario["history_sample_window"] not in ("constant_reference", "post_settle")):
+            raise ValueError("history_sample_window requires require_steady and an explicit constant_reference/post_settle choice")
         if not isinstance(scenario["environment"], dict) or not isinstance(scenario["gates"], list) or not scenario["gates"]:
             raise ValueError("scenarios require environment overrides and explicit gates")
         for gate in scenario["gates"]:

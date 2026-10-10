@@ -39,6 +39,25 @@ def test_explicit_scope_must_cover_every_declared_scenario(tmp_path):
     frame_study._validate_spec(spec)
 
 
+@pytest.mark.parametrize("sample_window", (None, True, "full", [], {"window": "post_settle"}))
+def test_history_sample_window_rejects_implicit_or_unknown_choices(tmp_path, sample_window):
+    spec = json.loads(specification(tmp_path).read_bytes())
+    spec["scenarios"][0].update(require_steady=True, history_sample_window=sample_window)
+    with pytest.raises(ValueError, match="history_sample_window"):
+        frame_study._validate_spec(spec)
+
+
+@pytest.mark.parametrize("sample_window", ("constant_reference", "post_settle"))
+def test_history_sample_window_requires_the_declared_sample_gate(tmp_path, sample_window):
+    spec = json.loads(specification(tmp_path).read_bytes())
+    scenario = spec["scenarios"][0]
+    scenario.update(require_steady=True, history_sample_window=sample_window)
+    frame_study._validate_spec(spec)
+    scenario["require_steady"] = False
+    with pytest.raises(ValueError, match="history_sample_window"):
+        frame_study._validate_spec(spec)
+
+
 def test_unscoped_objectives_keep_the_original_grade():
     report = {"completed_episodes": 8, "success_rate": 1., "metrics": {"height": .03}}
     scenario = {"gates": [{"path": "success_rate", "operator": "min", "value": .95}]}
