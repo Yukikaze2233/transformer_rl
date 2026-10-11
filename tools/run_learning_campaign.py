@@ -790,6 +790,13 @@ def training_evidence(manifest, request, directory, parent_evidence=None):
     probe = checkpoint_probe(manifest, checkpoint)
     metadata = probe["metadata"]
     environment = read(directory / "train/environment.json")
+    configured_environment = request["config"]["environment"]
+    contract_path = inside(configured_environment["snapshot"], configured_environment["contract"])
+    contract_bytes = contract_path.read_bytes()
+    if hashlib.sha256(contract_bytes).hexdigest() != diagnostic.sha(configured_environment["contract_sha256"]):
+        raise ValueError("frozen training contract file SHA differs")
+    # The adapter reports canonical JSON identity after authenticating file bytes.
+    effective_contract_sha256 = control.digest(json.loads(contract_bytes))
     population = read(Path(manifest["inputs"]["root"]) / "parent/transfer_design.json")["scene_allocation"]["requested_counts"]
     expected_metadata = {"environment_factory": FACTORY, "environment_provenance": environment,
         "seed": request["seed"], "source": request["source"], "anchors": [], "retention_coef": 0.,
@@ -800,7 +807,7 @@ def training_evidence(manifest, request, directory, parent_evidence=None):
             or metadata.get("initialization_guard") != run.get("initialization_guard")
             or environment.get("identity") != request["config"]["environment"]["snapshot_sha256"]
             or environment.get("control_sha256") != control.digest(request["config"]["control"])
-            or environment.get("contract_sha256") != request["config"]["environment"]["contract_sha256"]
+            or environment.get("contract_sha256") != effective_contract_sha256
             or environment.get("startup", {}).get("scene_group_counts") != population
             or environment.get("policy_hz") != 100. or environment.get("physics_hz") != 200.
             or probe["update"] != completion["final_update"] or probe["config"] != request["config"]

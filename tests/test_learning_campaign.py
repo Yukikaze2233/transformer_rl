@@ -59,6 +59,9 @@ def prepared(tmp_path, monkeypatch):
         "children": [], "cells": []}
     population = {"stand": 1024}
     campaign.write(inputs / "parent/transfer_design.json", {"scene_allocation": {"requested_counts": population}})
+    training_contract = inputs / "snapshot/contracts/transfer.train.json"
+    campaign.write(training_contract, {"target_num_envs": 1024, "policy_dt": .01, "physics_dt": .005})
+    contract_file_sha256 = control.file_sha(training_contract)
     for index, rate in enumerate(rates):
         name = f"rate_{index:03d}"
         packed = inputs / name / "study"
@@ -71,7 +74,7 @@ def prepared(tmp_path, monkeypatch):
             config = {"model": {"variant": variant}, "ppo": {"learning_rate": rate, "epochs": 5, "num_minibatches": 32},
                 "control": {"policy_dt_s": .01}, "environment": {"num_envs": 1024,
                     "snapshot_sha256": "1" * 64, "snapshot": str(inputs / "snapshot"),
-                    "contract_sha256": "2" * 64}}
+                    "contract": "contracts/transfer.train.json", "contract_sha256": contract_file_sha256}}
             routes = [f"{variant}.train.transfer.json", *(f"{variant}.eval.{case}.json" for case in cases)]
             for suffix in routes:
                 configured = deepcopy(config)
@@ -168,7 +171,9 @@ def endpoint(prepared, monkeypatch, *, updates=2, start=0, parent=None, prior=No
     campaign.write(directory / "worker.process.json", {"status": "finished", "command": request["command"],
         "pid": 987654321, "start": "123456", "returncode": 0 if updates == request["updates"] else 2, "timed_out": False})
     environment = {"identity": "1" * 64, "control_sha256": control.digest(request["config"]["control"]),
-        "contract_sha256": "2" * 64, "policy_hz": 100., "physics_hz": 200., "startup": {"scene_group_counts": {"stand": 1024}}}
+        "contract_sha256": control.digest(campaign.read(Path(request["config"]["environment"]["snapshot"])
+            / request["config"]["environment"]["contract"])),
+        "policy_hz": 100., "physics_hz": 200., "startup": {"scene_group_counts": {"stand": 1024}}}
     campaign.write(directory / "train/environment.json", environment)
     rows = [metric(start + index + 1, total=(index + 1) * campaign.SAMPLES) for index in range(updates)]
     (directory / "train/metrics.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
@@ -342,6 +347,63 @@ def test_matching_full_batch_endpoint_and_exact_resume_preserve_budget(prepared,
     assert resumed["evidence"]["final_update"] == 1200
     assert resumed["evidence"]["cumulative_optimizer_steps"] == 1200 * 32
     assert campaign.inventory(args.prepared_root) == frozen["inputs"]["files"]
+
+
+def test_training_contract_file_and_canonical_hashes_are_distinct(prepared, monkeypatch):
+    _, frozen, _, _ = prepared
+    directory, request, _, _, probe = endpoint(prepared, monkeypatch)
+    byte_sha = request["config"]["environment"]["contract_sha256"]
+    canonical_sha = probe["metadata"]["environment_provenance"]["contract_sha256"]
+    assert byte_sha != canonical_sha
+    receipt = campaign.seal_training(frozen, request, directory)
+    assert receipt["status"] == "resumable"
+    assert receipt["verified_actual"]["updates"] == 2
+
+
+def test_reported_contract_file_hash_cannot_replace_canonical_identity(prepared, monkeypatch):
+    _, frozen, _, _ = prepared
+    directory, request, _, _, probe = endpoint(prepared, monkeypatch)
+    environment = probe["metadata"]["environment_provenance"]
+    environment["contract_sha256"] = request["config"]["environment"]["contract_sha256"]
+    replace_json(directory / "train/environment.json", environment)
+    sidecar_path = directory / "train/checkpoints/final.pt.json"
+    sidecar = campaign.read(sidecar_path)
+    sidecar["metadata"] = probe["metadata"]
+    replace_json(sidecar_path, sidecar)
+    monkeypatch.setattr(campaign, "checkpoint_probe", lambda *args: deepcopy(probe))
+    receipt = campaign.seal_training(frozen, request, directory)
+    assert receipt["status"] == "incomplete"
+    assert "provenance validation differs" in receipt["error"]
+    assert receipt["charged_updates"] == 1200
+
+
+@pytest.mark.parametrize("mutation", ["formatting", "content", "symlink", "escape"])
+def test_training_contract_file_binding_rejects_changes(prepared, monkeypatch, mutation):
+    _, frozen, _, _ = prepared
+    directory, request, _, _, _ = endpoint(prepared, monkeypatch)
+    env = request["config"]["environment"]
+    path = Path(env["snapshot"]) / env["contract"]
+    if mutation == "formatting":
+        value = campaign.read(path)
+        assert control.digest(value) != control.file_sha(path)
+        path.write_text(json.dumps(value, separators=(",", ":")))
+    elif mutation == "content":
+        value = campaign.read(path)
+        value["physics_dt"] = .01
+        replace_json(path, value)
+    else:
+        outside = Path(env["snapshot"]).parent / "outside.json"
+        outside.write_bytes(path.read_bytes())
+        if mutation == "symlink":
+            path.unlink()
+            path.symlink_to(outside)
+        else:
+            env["contract"] = "../outside.json"
+            run = campaign.read(directory / "train/run.json")
+            run["config"] = deepcopy(request["config"])
+            replace_json(directory / "train/run.json", run)
+    with pytest.raises(ValueError, match="contract file SHA|symlink|escapes"):
+        campaign.training_evidence(frozen, request, directory)
 
 
 @pytest.mark.parametrize("field", ["initial_sha", "guard", "source", "seed", "factory", "parent", "anchors",
