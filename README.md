@@ -121,7 +121,7 @@ python -m transformer_rl.experiment_cli summarize \
 `previous_issued_action`表示上一条已经发出的指令，不意味着电机已经执行。已知的数据年龄与未知延迟也分开编码。这样的区分是为了让训练和真实控制链路有清楚的对应关系。
 
 [`examples/isaaclab_task.py`](examples/isaaclab_task.py)提供 Isaac Lab 接入示例，SDK进程生命周期由专用worker管理。
-配置与运行细节见[实验使用说明](docs/EXPERIMENTS.md)、[训练方法](docs/KAISER_ESTIMATOR_RUN.md)和[训练控制工具](docs/TRAINING_CONTROL.md)。
+配置与运行细节见[实验使用说明](docs/EXPERIMENTS.md)、[训练方法](docs/KAISER_ESTIMATOR_RUN.md)和[交互训练控制台](docs/TRAINING_CONSOLE.md)。控制台支持更新边界暂停、同进程继续与保存退出；保存退出后的恢复会重置仿真回合。
 
 ## 文档
 

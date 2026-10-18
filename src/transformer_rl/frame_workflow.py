@@ -63,12 +63,14 @@ def _model_state_sha256(model):
 def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, rollout_steps=48,
                        seed=0, device="cpu", max_seconds=3600., checkpoint_interval=40,
                        resume=None, initialize_from=None, restore_learning_from=None, anchors=(), retention_coef=0., tensorboard=True,
-                       consumed_update_offset=0, expected_initial_model_sha256=None):
+                       consumed_update_offset=0, expected_initial_model_sha256=None, control_dir=None):
     """Learning-state resume resets episodes/history; weights transfer starts new Adam.
 
     Updates are additional successful PPO updates. The external study ledger
     accounts for all consumed updates, including failed stages and rollbacks.
     SIGINT/SIGTERM stop at a collector/update boundary and save learning state.
+    An explicit control directory additionally supports cooperative live pause;
+    its stop requests finish the current update before saving and exiting.
     """
     if not isinstance(config, FrameTrainConfig) or not callable(env_factory):
         raise TypeError("training requires a parsed config and environment factory")
@@ -156,7 +158,11 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
     collector = None
     final_path = None
     attempted_updates = 0
+    control = None
     try:
+        if control_dir is not None:
+            from .training_control import TrainingControl
+            control = TrainingControl(control_dir)
         with _StopBudget(max_seconds) as stop:
             env = env_factory(model_config=config.model, environment_config=config.environment, device=torch.device(device))
             provenance = _provenance(env, config.control)
@@ -201,8 +207,17 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
             if tensorboard:
                 from torch.utils.tensorboard import SummaryWriter
                 writer = SummaryWriter(str(run_dir / "tensorboard"))
+
+            def save_pause_checkpoint(sequence):
+                metadata["collected_transitions"] = prior_transitions + collector.total_transitions
+                path = checkpoint_dir / f"pause_{sequence:06d}_update_{update:06d}.pt"
+                save_frame_checkpoint(path, model, trainer, config, update, metadata)
+                return path
+
             with (run_dir / "metrics.jsonl").open("x", buffering=1) as log:
                 while update < start_update + updates and not stop.stopped():
+                    if control is not None and not control.boundary(stop, save_pause_checkpoint):
+                        break
                     progress = getattr(env, "set_training_progress", None)
                     if progress is not None:
                         progress(consumed_update_offset + attempted_updates, prior_transitions + collector.total_transitions)
@@ -210,6 +225,8 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
                     if batch is None:
                         break
                     attempted_updates += 1
+                    if control is not None:
+                        control.publish("optimizing")
                     metrics = trainer.update(batch, diagnostics=True, regularizer=regularizer)
                     update += 1
                     record = {"update": update, "batch_samples": len(batch), "optimization": metrics,
@@ -232,7 +249,15 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
                                       "transitions": collector.total_transitions}), flush=True)
                     metadata["collected_transitions"] = prior_transitions + collector.total_transitions
                     if update % checkpoint_interval == 0:
-                        save_frame_checkpoint(checkpoint_dir / f"update_{update:06d}.pt", model, trainer, config, update, metadata)
+                        path = checkpoint_dir / f"update_{update:06d}.pt"
+                        save_frame_checkpoint(path, model, trainer, config, update, metadata)
+                        if control is not None:
+                            control.state.update(checkpoint=str(path), checkpoint_update=update)
+                    if control is not None:
+                        control.publish("running", update=update,
+                            cumulative_transitions=metadata["collected_transitions"],
+                            reward_mean=collector.last_metrics["reward_mean"],
+                            learning_rate=trainer.optimizer.param_groups[0]["lr"])
             metadata["collected_transitions"] = prior_transitions + collector.total_transitions
             final_path = checkpoint_dir / "final.pt"
             save_frame_checkpoint(final_path, model, trainer, config, update, metadata)
@@ -245,9 +270,17 @@ def train_frame_policy(config, env_factory, env_reference, run_dir, *, updates, 
                       "elapsed_s": time.monotonic() - started, "config_sha256": digest(config.to_dict())}
             if "reward_components" in collector.last_metrics:
                 report["last_collection_reward_components"] = collector.last_metrics["reward_components"]
+            if control is not None:
+                active, paused = control.elapsed()
+                report.update(active_elapsed_s=active, paused_elapsed_s=paused,
+                              resume_scope="learning_state_with_episode_reset")
             _write_json(run_dir / "completion.json", report)
+            if control is not None:
+                control.finish(report)
             return report
     except BaseException as error:
+        if control is not None:
+            control.fail(error)
         # Preserve successfully applied updates, even if the next rollout or optimizer failed.
         _write_json(run_dir / "failure.json", {"status": "failed", "completed_updates": update - start_update,
             "attempted_updates": attempted_updates,

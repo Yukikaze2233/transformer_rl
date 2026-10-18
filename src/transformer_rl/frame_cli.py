@@ -44,6 +44,7 @@ def main(argv=None):
     train.add_argument("--no-tensorboard", action="store_true")
     train.add_argument("--consumed-update-offset", type=_nonnegative_int, default=0)
     train.add_argument("--expected-initial-model-sha256", type=_initial_model_sha)
+    train.add_argument("--control-dir", type=Path, help=argparse.SUPPRESS)
     evaluate = commands.add_parser("evaluate")
     evaluate.add_argument("--checkpoint", type=Path, required=True)
     evaluate.add_argument("--config", type=Path, required=True)
@@ -131,6 +132,8 @@ def main(argv=None):
             from .frame_workflow import train_frame_policy
             config = FrameTrainConfig.load(args.config)
             guard_options = {}
+            if args.control_dir is not None:
+                guard_options["control_dir"] = args.control_dir
             if args.expected_initial_model_sha256 is None:
                 factory = _factory(args.env_factory)
             else:

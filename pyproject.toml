@@ -18,6 +18,7 @@ export = ["onnx>=1.18", "onnxruntime>=1.20", "numpy>=1.26"]
 [project.scripts]
 transformer-rl = "transformer_rl.cli:main"
 transformer-rl-frame = "transformer_rl.frame_cli:main"
+trainctl = "transformer_rl.training_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
