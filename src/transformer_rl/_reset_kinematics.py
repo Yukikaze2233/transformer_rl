@@ -54,6 +54,22 @@ class PostureClosure:
     source_manifest_sha256: str
     source_model_sha256: str
     physical_qualification: bool = False
+    solver_rounds_by_row: torch.Tensor | None = None
+
+
+@dataclass(frozen=True)
+class PostureContinuation:
+    closure: PostureClosure
+    requested_segments: torch.Tensor
+    completed_segments: torch.Tensor
+    attempted_segments: torch.Tensor
+    last_attempted_fraction: torch.Tensor
+    last_attempted_tree_position: torch.Tensor
+    last_attempted_residual_m: torch.Tensor
+    budget_exhausted: torch.Tensor
+    maximum_segment_angle_rad: float
+    maximum_segments: int
+    physical_qualification: bool = False
 
 
 class AssetResetKinematics:
@@ -246,7 +262,7 @@ class AssetResetKinematics:
     @torch.no_grad()
     def _solve_fixed(self, seed_tree_position, fixed_indices, prescribed_positions, *, closure_tolerance_m,
                      maximum_iterations=48, angular_step_rad=.25, slider_step_m=.01,
-                     slider_scale_m=.05, initial_damping_m2=1e-6):
+                     slider_scale_m=.05, initial_damping_m2=1e-6, iteration_budget_by_row=None):
         self._positions(seed_tree_position)
         count = len(seed_tree_position)
         if (not isinstance(fixed_indices, tuple) or len(set(fixed_indices)) != len(fixed_indices)
@@ -261,6 +277,12 @@ class AssetResetKinematics:
                                  slider_scale_m, initial_damping_m2))):
             raise ValueError('passive solve requires complete output targets and explicit finite convergence/scaling bounds')
         q = seed_tree_position.detach().clone()
+        if iteration_budget_by_row is None:
+            iteration_budget_by_row = torch.full((count,), maximum_iterations, dtype=torch.long, device=self.device)
+        if (not isinstance(iteration_budget_by_row, torch.Tensor) or iteration_budget_by_row.shape != (count,)
+                or iteration_budget_by_row.dtype != torch.long or iteration_budget_by_row.device != self.device
+                or ((iteration_budget_by_row < 0) | (iteration_budget_by_row > maximum_iterations)).any()):
+            raise ValueError('passive solve row budgets must stay within the explicit iteration cap')
         q[:, fixed_indices] = prescribed_positions
         passive = [i for i in range(18) if i not in fixed_indices]
         low, high = self._lower[passive], self._upper[passive]
@@ -270,11 +292,14 @@ class AssetResetKinematics:
         damping = torch.full((count,), initial_damping_m2, dtype=torch.float64, device=self.device)
         identity = torch.eye(len(passive), dtype=torch.float64, device=self.device)
         iterations = 0
+        rounds = torch.zeros(count, dtype=torch.long, device=self.device)
         for iteration in range(maximum_iterations):
             residual, jac = self.closure(q, jacobian=True)
             ready = residual.norm(dim=-1).amax(-1) <= closure_tolerance_m
-            if ready.all():
+            active = ~ready & (rounds < iteration_budget_by_row)
+            if not active.any():
                 break
+            rounds += active.long()
             jac = jac[:, :, passive] * scale[None, None]
             flat = residual.flatten(1)
             normal = jac.transpose(-1, -2) @ jac + damping[:, None, None] * identity
@@ -285,7 +310,7 @@ class AssetResetKinematics:
             candidate = q.clone()
             candidate[:, passive] = (q[:, passive] + delta).clamp(low, high)
             candidate_residual = self.closure(candidate)
-            improved = (candidate_residual.square().sum((-1, -2)) < residual.square().sum((-1, -2))) & ~ready
+            improved = (candidate_residual.square().sum((-1, -2)) < residual.square().sum((-1, -2))) & active
             q = torch.where(improved[:, None], candidate, q)
             damping = torch.where(improved, damping * .3, damping * 10).clamp(1e-14, 1e4)
             iterations = iteration + 1
@@ -294,11 +319,11 @@ class AssetResetKinematics:
         if not torch.equal(q[:, fixed_indices], prescribed_positions):
             raise RuntimeError('closed-chain solver altered its explicitly prescribed coordinates')
         maximum = residual.amax(-1)
-        return q, residual, maximum, within, within & (maximum <= closure_tolerance_m), iterations
+        return q, residual, maximum, within, within & (maximum <= closure_tolerance_m), iterations, rounds
 
     @torch.no_grad()
     def solve_passive(self, seed_tree_position, prescribed_policy_positions, **options):
-        q, residual, maximum, within, converged, iterations = self._solve_fixed(
+        q, residual, maximum, within, converged, iterations, _ = self._solve_fixed(
             seed_tree_position, self.policy_tree_indices, prescribed_policy_positions, **options)
         return PassiveClosure(q, residual, maximum, within, converged, iterations,
                                prescribed_policy_positions.detach().clone(), self.manifest_sha256, self.model_sha256)
@@ -318,7 +343,90 @@ class AssetResetKinematics:
         fixed = hip_indices + self.knee_tree_indices + wheels
         values = torch.cat((hip_positions, self.native_knee_positions(inner_knee_angle_rad),
                              seed_tree_position[:, wheels]), -1)
-        q, residual, maximum, within, converged, iterations = self._solve_fixed(seed_tree_position, fixed, values, **options)
+        q, residual, maximum, within, converged, iterations, rounds = self._solve_fixed(
+            seed_tree_position, fixed, values, **options)
         return PostureClosure(q, residual, maximum, within, converged, iterations,
                                inner_knee_angle_rad.detach().clone(), hip_positions.detach().clone(),
-                               q[:, self.policy_tree_indices].clone(), self.manifest_sha256, self.model_sha256)
+                               q[:, self.policy_tree_indices].clone(), self.manifest_sha256, self.model_sha256,
+                               solver_rounds_by_row=rounds)
+
+    @torch.no_grad()
+    def continue_posture(self, seed_tree_position, hip_positions, inner_knee_angle_rad, *,
+                         maximum_segment_angle_rad, maximum_segments, closure_tolerance_m, maximum_iterations):
+        """Trace one prescribed request from a closed seed, without retries.
+
+        Each row has its own total nonlinear-update budget across all segments.
+        A failed segment ends that row; other rows retain their own budget. The
+        returned endpoint always keeps the complete original requested hips,
+        knees and wheel coordinates, even when the attempted prefix failed.
+        """
+        self._positions(seed_tree_position)
+        n = len(seed_tree_position)
+        if (not isinstance(hip_positions, torch.Tensor) or hip_positions.shape != (n, 2)
+                or hip_positions.dtype != torch.float64 or hip_positions.device != self.device
+                or not torch.isfinite(hip_positions).all()
+                or not isinstance(inner_knee_angle_rad, torch.Tensor) or inner_knee_angle_rad.shape != (n, 2)
+                or type(maximum_segment_angle_rad) not in (int, float)
+                or not math.isfinite(maximum_segment_angle_rad) or not 0 < maximum_segment_angle_rad <= math.pi/4
+                or type(maximum_segments) is not int or not 1 <= maximum_segments <= 256
+                or type(maximum_iterations) is not int or not 1 <= maximum_iterations <= 256
+                or type(closure_tolerance_m) not in (int, float)
+                or not math.isfinite(closure_tolerance_m) or closure_tolerance_m <= 0):
+            raise ValueError('posture continuation needs explicit bounded segments,targets and total per-row budgets')
+        final_knee = self.native_knee_positions(inner_knee_angle_rad)
+        initial_residual = self.closure(seed_tree_position).norm(dim=-1).amax(-1)
+        if (((seed_tree_position < self._lower) | (seed_tree_position > self._upper)).any()
+                or (initial_residual > closure_tolerance_m).any()):
+            raise ValueError('posture continuation starts only from an already closed,source-limited seed')
+        hip_indices = (self.policy_tree_indices[0], self.policy_tree_indices[2])
+        initial_hip = seed_tree_position[:, hip_indices]
+        initial_knee = self.inner_knee_angles(seed_tree_position)
+        delta = torch.cat((hip_positions - initial_hip, inner_knee_angle_rad - initial_knee), -1).abs().amax(-1)
+        requested = (delta / maximum_segment_angle_rad).ceil().clamp_min(1)
+        if (requested > maximum_segments).any():
+            raise ValueError('requested posture path exceeds its explicit segment cap;do not shorten the target')
+        requested = requested.long()
+        completed = torch.zeros(n, dtype=torch.long, device=self.device)
+        attempted, rounds = completed.clone(), completed.clone()
+        failed = torch.zeros(n, dtype=torch.bool, device=self.device)
+        fraction = torch.zeros(n, dtype=torch.float64, device=self.device)
+        current = seed_tree_position.detach().clone()
+        last_attempt, last_residual = current.clone(), initial_residual.clone()
+        kernel_rounds = 0
+        for index in range(1, int(requested.max()) + 1):
+            active = ~failed & (completed < requested) & (rounds < maximum_iterations)
+            if not active.any():
+                break
+            ids = active.nonzero().flatten()
+            phase = index / requested[ids].double()
+            final = index == requested[ids]
+            hip = torch.where(final[:, None], hip_positions[ids],
+                              initial_hip[ids] + phase[:, None] * (hip_positions[ids] - initial_hip[ids]))
+            knee = torch.where(final[:, None], inner_knee_angle_rad[ids],
+                               initial_knee[ids] + phase[:, None] * (inner_knee_angle_rad[ids] - initial_knee[ids]))
+            result = self.solve_posture(current[ids], hip, knee, closure_tolerance_m=closure_tolerance_m,
+                                         maximum_iterations=maximum_iterations,
+                                         iteration_budget_by_row=maximum_iterations - rounds[ids])
+            rounds[ids] += result.solver_rounds_by_row
+            attempted[ids] += 1
+            fraction[ids], last_attempt[ids], last_residual[ids] = phase, result.tree_position, result.maximum_residual_m
+            kernel_rounds += result.iterations
+            good = ids[result.converged]
+            current[good] = result.tree_position[result.converged]
+            completed[good] = index
+            failed[ids[~result.converged]] = True
+        endpoint = last_attempt.clone()
+        endpoint[:, hip_indices] = hip_positions
+        endpoint[:, self.knee_tree_indices] = final_knee
+        endpoint[:, self.policy_tree_indices[4:]] = seed_tree_position[:, self.policy_tree_indices[4:]]
+        residual = self.closure(endpoint).norm(dim=-1)
+        maximum = residual.amax(-1)
+        within = ((endpoint >= self._lower - 1e-12) & (endpoint <= self._upper + 1e-12)).all(-1)
+        converged = (completed == requested) & within & (maximum <= closure_tolerance_m)
+        closure = PostureClosure(endpoint, residual, maximum, within, converged, kernel_rounds,
+                                  inner_knee_angle_rad.detach().clone(), hip_positions.detach().clone(),
+                                  endpoint[:, self.policy_tree_indices].clone(), self.manifest_sha256, self.model_sha256,
+                                  solver_rounds_by_row=rounds)
+        exhausted = (rounds >= maximum_iterations) & ~converged
+        return PostureContinuation(closure, requested, completed, attempted, fraction, last_attempt, last_residual,
+                                    exhausted, maximum_segment_angle_rad, maximum_segments)

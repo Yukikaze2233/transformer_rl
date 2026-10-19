@@ -5,13 +5,19 @@ import math
 import pytest
 import torch
 
-from test_reset_kinematics import fixture
+from test_reset_kinematics import fixture as kinematics_fixture
 from transformer_rl._output_actuation import OutputFeedbackController, PairTargetDomain
 from transformer_rl._recovery_poses import RECOVERY_NAMES, RecoveryPoseCompiler, RecoveryTuning
 
 
 def tuning():
-    return RecoveryTuning(math.radians(50), .25, math.pi, .04, .15, 1e-6, 1e-6, 80)
+    return RecoveryTuning(math.radians(50), .25, math.pi, .04, .15, 1e-6, 1e-6, 80, math.pi/24, 32)
+
+
+def fixture():
+    # This fixture's loop anchors are calibrated at zero. Continuation must
+    # start from that closed source,not accept an unclosed nominal as evidence.
+    return kinematics_fixture(closed_nominal=True)
 
 
 def test_selected_geometric_knee_mapping_handles_both_mirrored_native_coordinates():
@@ -44,6 +50,9 @@ def test_all16_requests_remain_distinct_in_orientation_joint_shape_or_release_da
     assert value.origin_velocity_body_m_s[2, 2] == -.15
     assert not value.current_output_hold_admitted[14]  # half-turn exceeds the existing action box
     assert value.required_preparation_action[14, :4].abs().max() > 3
+    assert value.posture_path.closure is value.closure
+    assert value.posture_path.requested_segments[14] == 24
+    assert (value.closure.solver_rounds_by_row <= compiler.tuning.maximum_solver_iterations).all()
     assert value.requested_root_orientation_xyzw[4, 0] < 0 and value.requested_root_orientation_xyzw[5, 0] > 0
     assert not value.physical_qualification
 

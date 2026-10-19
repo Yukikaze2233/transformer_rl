@@ -13,7 +13,7 @@ import math
 import torch
 
 from ._output_actuation import OutputFeedbackController
-from ._reset_kinematics import AssetResetKinematics, PostureClosure
+from ._reset_kinematics import AssetResetKinematics, PostureClosure, PostureContinuation
 
 
 RECOVERY_NAMES = (
@@ -37,11 +37,15 @@ class RecoveryTuning:
     output_hold_tolerance_rad: float
     loop_tolerance_m: float
     maximum_solver_iterations: int
+    posture_segment_angle_rad: float
+    maximum_posture_segments: int
 
     def __post_init__(self):
         if (any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0
-                for name, v in vars(self).items() if name != 'maximum_solver_iterations')
+                for name, v in vars(self).items() if name not in ('maximum_solver_iterations', 'maximum_posture_segments'))
                 or type(self.maximum_solver_iterations) is not int or not 1 <= self.maximum_solver_iterations <= 256
+                or type(self.maximum_posture_segments) is not int or not 1 <= self.maximum_posture_segments <= 256
+                or self.posture_segment_angle_rad > math.pi/4
                 or not self.asymmetric_leg_pitch_rad < self.legs_above_pitch_rad <= math.pi):
             raise ValueError('recovery tuning needs explicit finite angle/length/speed/tolerance/iteration inputs')
 
@@ -60,6 +64,7 @@ class RecoveryCandidates:
     current_output_hold_admitted: torch.Tensor
     decoded_hold_error_rad: torch.Tensor
     pair_projected: torch.Tensor
+    posture_path: PostureContinuation
     tuning: RecoveryTuning
     physical_qualification: bool = False
 
@@ -140,9 +145,12 @@ class RecoveryPoseCompiler:
         indices = (self.kinematics.policy_tree_indices[0], self.kinematics.policy_tree_indices[2])
         seed = self.kinematics.nominal_tree_position[None].repeat(count, 1)
         hip = seed[:, indices] + forward * self._forward_sign
-        solution = self.kinematics.solve_posture(seed, hip, knee,
+        path = self.kinematics.continue_posture(seed, hip, knee,
+                                                maximum_segment_angle_rad=self.tuning.posture_segment_angle_rad,
+                                                maximum_segments=self.tuning.maximum_posture_segments,
                                                 closure_tolerance_m=self.tuning.loop_tolerance_m,
                                                 maximum_iterations=self.tuning.maximum_solver_iterations)
+        solution = path.closure
         held = controller.reset_hold_action(solution.policy_positions.float(),
                                              position_tolerance_rad=self.tuning.output_hold_tolerance_rad)
         release = (posture_id == 2) | (posture_id == 3)
@@ -158,4 +166,5 @@ class RecoveryPoseCompiler:
         velocity = (rotation.transpose(-1, -2) @ world_velocity[..., None]).squeeze(-1)
         return RecoveryCandidates(posture_id.detach().clone(), orientation,
                                     knee, forward, clearance, velocity, torch.zeros_like(velocity), solution,
-                                    held.requested_action, held.admitted, held.target_error_rad, held.pair_projected, self.tuning)
+                                    held.requested_action, held.admitted, held.target_error_rad, held.pair_projected,
+                                    path, self.tuning)
