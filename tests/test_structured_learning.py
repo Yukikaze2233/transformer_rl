@@ -40,27 +40,28 @@ class StopBudget:
         return self.reason is not None
 
 
-def components():
+def components(promotion='exposure'):
     network = small_model()
     ppo = replace(StructuredPPOConfig(), epochs=1, minibatches=1, probe_endpoints=16,
                   evaluation_chunk=32, learning_rate=1e-6)
     terrain = TerrainTuning(.7, (.2, 1.1), .25)
     recipe = LearningRecipe('control_fixture', 2101, 2, 16, 'a' * 64, 'b' * 64, 'c' * 64,
                             StructuredCheckpointStore.model_sha256(network), network.config, ppo,
-                            StructuredCollectionConfig(), TaskDomain(), RequestProtocolConfig(), terrain)
-    state = LearningComponents(network, StructuredPPOTrainer(network, ppo), CurriculumBudget(),
+                            StructuredCollectionConfig(), TaskDomain(), RequestProtocolConfig(), terrain,
+                            curriculum_promotion=promotion)
+    state = LearningComponents(network, StructuredPPOTrainer(network, ppo), CurriculumBudget(promotion=promotion),
                                ContinuousTaskSampler(2101), ContinuousTerrainGenerator(2101, terrain), RequestProtocol(2))
     return recipe, state
 
 
-def attempt(root, name, descriptor, *, operation='resume', start=0, spent=0.):
+def attempt(root, name, descriptor, *, operation='resume', start=0, spent=0., target=20000):
     directory = root / name
     (directory / 'control').mkdir(parents=True)
     (directory / 'train' / 'checkpoints').mkdir(parents=True)
     token = uuid.uuid4().hex
     binding = {'protocol': PROTOCOL, 'token': token, 'boot_id': boot_id(), 'root': str(root),
                'attempt': str(directory), 'lease_fd': descriptor, 'start_update': start,
-               'target_update': 20000, 'prior_transitions': start * 32, 'prior_active_elapsed_s': spent}
+               'target_update': target, 'prior_transitions': start * 32, 'prior_active_elapsed_s': spent}
     write_json(directory / 'request.json', binding)
     command(directory, operation, 0)
     return directory
@@ -73,13 +74,13 @@ def command(directory, operation, sequence):
 
 
 @contextmanager
-def fixture(tmp_path):
+def fixture(tmp_path, promotion='exposure'):
     root = tmp_path / 'session'
     root.mkdir()
     descriptor = os.open(root / 'run.lock', os.O_RDWR | os.O_CREAT, 0o600)
     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    recipe, state = components()
-    directory = attempt(root, 'attempt_1', descriptor)
+    recipe, state = components(promotion)
+    directory = attempt(root, 'attempt_1', descriptor, target=recipe.journal_spec().target_rollouts)
     control = TrainingControl(directory / 'control')
     with LearningJournal.create(root / 'journal', recipe.journal_spec(), authorized_boot=boot_id()) as journal:
         store = StructuredCheckpointStore(directory / 'train' / 'checkpoints', recipe, journal)
@@ -181,13 +182,87 @@ def test_pause_snapshot_does_not_reset_in_memory_history_rng_or_learning(tmp_pat
 
 
 def test_validation_wait_is_not_a_failure_or_another_training_reservation(tmp_path):
-    with fixture(tmp_path) as (loop, _, directory):
+    with fixture(tmp_path, promotion='audited') as (loop, _, directory):
         # A guard fixture, not a forged qualifying curriculum checkpoint.
         loop.components.curriculum.status = 'stage_budget_complete_validation_pending'
         with pytest.raises(StageValidationRequired):
             loop.run_update()
         assert loop.journal.summary()['rollouts_reserved'] == 0 and not loop._faulted
         assert read_json(directory / 'control' / 'status.json')['phase'] == 'validation_pending'
+
+
+def test_periodic_complete_snapshot_does_not_change_live_history_or_rng(tmp_path, monkeypatch):
+    with fixture(tmp_path) as (loop, _, _):
+        for _ in range(24):
+            loop.run_update()
+        assert not (loop.store.directory / 'latest.json').exists()
+        original = loop.store.save
+
+        def checked_save(*args, **kwargs):
+            before, history = capture_rng(), loop.collector._history.clone()
+            current = loop.collector._current
+            result = original(*args, **kwargs)
+            assert_identical(before, capture_rng())
+            assert_identical(history, loop.collector._history)
+            assert loop.collector._current is current
+            return result
+
+        monkeypatch.setattr(loop.store, 'save', checked_save)
+        loop.run_update()
+        marker = read_json(loop.store.directory / 'latest.json')
+        assert marker['update'] == 25 and marker['purpose'] == 'periodic_learning_resume'
+        assert marker['checkpoint'] == file_pin(loop.store.directory / 'update_00025.pt')
+        assert marker['sidecar'] == file_pin(loop.store.directory / 'update_00025.pt.json')
+        loaded = loop.store.load('update_00025.pt')
+        assert loaded.components.curriculum.promotion == 'exposure'
+        assert loaded.components.trainer.update_index == 25
+        assert loop.journal.summary()['returned_transitions'] == 800
+        assert not (loop.control.directory / 'result.json').exists()
+
+
+def test_snapshot_io_failure_preserves_spent_work_and_stops_further_sampling(tmp_path, monkeypatch):
+    with fixture(tmp_path) as (loop, env, directory):
+        for _ in range(24):
+            loop.run_update()
+
+        def fail(*args, **kwargs):
+            raise OSError('synthetic snapshot storage failure')
+
+        monkeypatch.setattr(loop.store, 'save', fail)
+        with pytest.raises(OSError, match='storage'):
+            loop.run_update()
+        assert loop.journal.summary()['returned_transitions'] == 800
+        assert loop.components.trainer.update_index == 25 and loop._faulted
+        assert not (loop.store.directory / 'latest.json').exists()
+        assert not (directory / 'control' / 'result.json').exists()
+        before = env.counter
+        with pytest.raises(RuntimeError, match='faulted'):
+            loop.run_update()
+        assert env.counter == before
+
+
+def test_exposure_training_crosses_every_stage_and_finishes_without_any_evaluation(tmp_path, monkeypatch):
+    import transformer_rl._task_curriculum as curriculum_module
+
+    # Six real synthetic updates exercise the complete control state machine;
+    # the separate schedule test covers the unchanged20000 formal budget.
+    monkeypatch.setattr(curriculum_module, 'STAGE_BUDGETS', (1, 1, 1, 1, 1, 1))
+    original = LearningRecipe.journal_spec
+    monkeypatch.setattr(LearningRecipe, 'journal_spec',
+                        lambda recipe: replace(original(recipe), target_rollouts=6))
+    with fixture(tmp_path) as (loop, env, directory):
+        for stage in range(6):
+            loop.run_update()
+            assert loop.components.curriculum.consumed[stage] == 1
+        result = read_json(directory / 'control' / 'result.json')
+        assert result['summary']['phase'] == 'completed'
+        assert result['summary']['stop_reason'] == 'training_budget_complete'
+        assert result['summary']['update'] == 6 and loop._finished
+        assert loop.components.curriculum.decisions == [] and env.counter == 96
+        assert loop.journal.summary()['reserved_by_stage'] == [1] * 6
+        marker = read_json(loop.store.directory / 'latest.json')
+        assert marker['purpose'] == 'training_budget_complete'
+        assert loop.store.load('final.pt').components.trainer.update_index == 6
 
 
 def test_stop_at_zero_preserves_initialization_and_is_acknowledged_only_after_complete_snapshot(tmp_path):

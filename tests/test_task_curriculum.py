@@ -125,7 +125,7 @@ def test_sampler_uses_its_own_rng_and_rejects_corrupt_resume_atomically():
 
 
 def test_successful_curriculum_spends_exactly_20000_without_refunding_early_stage_budget():
-    budget = CurriculumBudget()
+    budget = CurriculumBudget(promotion='audited')
     for stage in range(5):
         assert budget.stage == stage
         charge_to(budget, budget.total_updates + (STAGE_BUDGETS[stage] + 3) // 4)
@@ -143,7 +143,7 @@ def test_successful_curriculum_spends_exactly_20000_without_refunding_early_stag
 
 
 def test_full_stage_validation_before_minimum_exposure_cannot_promote():
-    budget = CurriculumBudget()
+    budget = CurriculumBudget(promotion='audited')
     charge_to(budget, 749)
     original = budget.state_dict()
     with pytest.raises(ValueError, match='25 percent'):
@@ -152,7 +152,7 @@ def test_full_stage_validation_before_minimum_exposure_cannot_promote():
 
 
 def test_duplicate_checkpoint_and_heldout_selection_are_rejected():
-    budget = CurriculumBudget()
+    budget = CurriculumBudget(promotion='audited')
     charge_to(budget, 750)
     with pytest.raises(ValueError):
         budget.submit_stage_validation(decision(budget, heldout_used=True))
@@ -168,14 +168,14 @@ def test_duplicate_checkpoint_and_heldout_selection_are_rejected():
 
 
 def test_validation_failures_reset_pass_streak_and_four_candidates_are_bounded():
-    budget = CurriculumBudget()
+    budget = CurriculumBudget(promotion='audited')
     charge_to(budget, 750)
     for index, passed in enumerate((True, False, True, True)):
         if index:
             budget.charge_rollout()
         budget.submit_stage_validation(decision(budget, passed=passed))
     assert budget.stage == 1
-    failed = CurriculumBudget()
+    failed = CurriculumBudget(promotion='audited')
     charge_to(failed, 750)
     for index in range(4):
         if index:
@@ -188,7 +188,7 @@ def test_validation_failures_reset_pass_streak_and_four_candidates_are_bounded()
 
 
 def test_stage_cap_requires_qualification_and_does_not_silently_skip_forward():
-    budget = CurriculumBudget()
+    budget = CurriculumBudget(promotion='audited')
     charge_to(budget, 3000)
     assert budget.stage == 0 and budget.status == 'stage_budget_complete_validation_pending'
     with pytest.raises(RuntimeError):
@@ -199,14 +199,14 @@ def test_stage_cap_requires_qualification_and_does_not_silently_skip_forward():
 
 
 def test_budget_checkpoint_is_replayed_and_tampering_rejected_without_mutation():
-    budget = CurriculumBudget()
+    budget = CurriculumBudget(promotion='audited')
     charge_to(budget, 750)
     budget.submit_stage_validation(decision(budget))
     budget.charge_rollout()
     budget.submit_stage_validation(decision(budget))
     budget.charge_rollout()
     saved = budget.state_dict()
-    restored = CurriculumBudget()
+    restored = CurriculumBudget(promotion='audited')
     restored.load_state_dict(saved)
     assert restored.state_dict() == saved
     bad = deepcopy(saved)
@@ -214,6 +214,40 @@ def test_budget_checkpoint_is_replayed_and_tampering_rejected_without_mutation()
     with pytest.raises(ValueError):
         restored.load_state_dict(bad)
     assert restored.state_dict() == saved
+
+
+def test_default_exposure_schedule_covers_all_six_stages_without_evaluation_or_refund():
+    budget = CurriculumBudget()
+    stages = []
+    for _ in range(20000):
+        stages.append(budget.prepare_rollout())
+        budget.charge_rollout()
+    assert [stages.count(stage) for stage in range(6)] == list(STAGE_BUDGETS)
+    assert budget.consumed == list(STAGE_BUDGETS) and budget.total_updates == 20000
+    assert budget.status == 'training_budget_complete'
+    assert budget.decisions == [] and budget.transferred_to_consolidation == 0
+    assert budget.total_updates * 1024 * 48 * 3 == 2949120000
+    with pytest.raises(RuntimeError):
+        budget.charge_rollout()
+
+
+def test_exposure_schedule_resumes_on_both_sides_of_the_boundary_without_promoting_mid_rollout():
+    budget = CurriculumBudget()
+    charge_to(budget, 3000)
+    assert budget.stage == 0 and budget.status == 'running'
+    for stage in (0, 1):
+        if stage == 1:
+            budget.prepare_rollout()
+        saved = budget.state_dict()
+        restored = CurriculumBudget()
+        restored.load_state_dict(saved)
+        assert restored.state_dict() == saved
+        restored.charge_rollout()
+        assert restored.stage == 1 and restored.consumed[:2] == [3000, 1]
+    with pytest.raises(RuntimeError, match='manual evaluation'):
+        budget.submit_stage_validation(decision(budget))
+    with pytest.raises(ValueError):
+        CurriculumBudget(promotion='audited').load_state_dict(budget.state_dict())
 
 
 @pytest.mark.parametrize('changes', [

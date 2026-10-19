@@ -235,11 +235,15 @@ class AuditedStageDecision:
 class CurriculumBudget:
     """Continuous 20000-update budget, preserving consumption after failed PPO.
 
-    Only already-audited decisions may be supplied. Evaluating case metrics,
-    source identities and feasible-domain coverage is a separate acceptance job.
+    Exposure scheduling is the training default; manual evaluation never
+    blocks it or grants qualification. Audited promotion remains an explicit
+    separate mode for callers retaining the earlier research contract.
     """
 
-    def __init__(self):
+    def __init__(self, *, promotion='exposure'):
+        if promotion not in ('exposure', 'audited'):
+            raise ValueError('curriculum promotion must be exposure or explicitly audited')
+        self.promotion = promotion
         self.stage = 0
         self.consumed = [0] * len(STAGE_NAMES)
         self.transferred_to_consolidation = 0
@@ -256,15 +260,26 @@ class CurriculumBudget:
         return STAGE_BUDGETS[self.stage] + (self.transferred_to_consolidation if self.stage == 5 else 0)
 
     def charge_rollout(self):
+        self.prepare_rollout()
         if self.status != 'running' or self.consumed[self.stage] >= self.stage_limit:
             raise RuntimeError('curriculum cannot spend beyond a stopped or exhausted stage')
         self.consumed[self.stage] += 1
         if self.stage == 5 and self.total_updates == sum(STAGE_BUDGETS):
-            self.status = 'training_budget_complete_evaluation_pending'
-        elif self.consumed[self.stage] == self.stage_limit:
+            self.status = ('training_budget_complete' if self.promotion == 'exposure'
+                           else 'training_budget_complete_evaluation_pending')
+        elif self.promotion == 'audited' and self.consumed[self.stage] == self.stage_limit:
             self.status = 'stage_budget_complete_validation_pending'
 
+    def prepare_rollout(self):
+        """Advance only between rollouts,never during the last old-stage sample."""
+        if (self.promotion == 'exposure' and self.status == 'running' and self.stage < 5
+                and self.consumed[self.stage] == self.stage_limit):
+            self.stage += 1
+        return self.stage
+
     def submit_stage_validation(self, decision: AuditedStageDecision):
+        if self.promotion != 'audited':
+            raise RuntimeError('manual evaluation does not change the exposure training schedule')
         if self.stage == 5 or self.status not in ('running', 'stage_budget_complete_validation_pending'):
             raise RuntimeError('stage promotion is unavailable in the current curriculum state')
         if not isinstance(decision, AuditedStageDecision):
@@ -295,7 +310,7 @@ class CurriculumBudget:
             self.status = 'failed_qualification'
 
     def state_dict(self):
-        return {'stage': self.stage, 'consumed': list(self.consumed),
+        return {'promotion': self.promotion, 'stage': self.stage, 'consumed': list(self.consumed),
                 'transferred_to_consolidation': self.transferred_to_consolidation,
                 'decisions': [asdict(item) for item in self.decisions],
                 'consecutive_passes': self.consecutive_passes, 'status': self.status}
@@ -303,12 +318,13 @@ class CurriculumBudget:
     def load_state_dict(self, state):
         """Reconstruct the budget by replaying consumption and accepted decisions."""
         if (not isinstance(state, dict) or state.keys() != self.state_dict().keys()
+                or state['promotion'] != self.promotion
                 or not isinstance(state['consumed'], list) or len(state['consumed']) != len(STAGE_NAMES)
                 or any(type(value) is not int or value < 0 for value in state['consumed'])
                 or sum(state['consumed']) > sum(STAGE_BUDGETS)
                 or not isinstance(state['decisions'], list) or len(state['decisions']) > 20):
             raise ValueError('invalid curriculum checkpoint fields or consumption')
-        restored = CurriculumBudget()
+        restored = CurriculumBudget(promotion=self.promotion)
         try:
             for item in state['decisions']:
                 decision = AuditedStageDecision(**item)
@@ -319,6 +335,10 @@ class CurriculumBudget:
                 restored.submit_stage_validation(decision)
             while restored.total_updates < sum(state['consumed']):
                 restored.charge_rollout()
+            # An entry checkpoint can be published after the stage boundary
+            # advances and before that stage spends its first rollout.
+            if state['stage'] != restored.stage:
+                restored.prepare_rollout()
         except (TypeError, RuntimeError) as error:
             raise ValueError('curriculum checkpoint cannot be replayed') from error
         if restored.state_dict() != state:

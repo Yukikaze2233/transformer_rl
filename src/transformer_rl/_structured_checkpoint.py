@@ -53,6 +53,7 @@ class LearningRecipe:
     protocol: RequestProtocolConfig
     terrain: TerrainTuning
     device: str = 'cpu'
+    curriculum_promotion: str = 'exposure'
 
     def __post_init__(self):
         for name in ('asset_manifest_sha256', 'learner_source_sha256', 'task_contract_sha256', 'initial_model_sha256'):
@@ -64,6 +65,7 @@ class LearningRecipe:
                 or type(self.num_envs) is not int or self.num_envs < 1
                 or type(self.rollout_steps) is not int or self.rollout_steps < 1
                 or self.device not in ('cpu', 'cuda:0')
+                or self.curriculum_promotion not in ('exposure', 'audited')
                 or any(not isinstance(getattr(self, name), cls) for name, cls in self._config_types().items())):
             raise ValueError('learning recipe requires parsed configurations and an explicit seed/device/rollout')
 
@@ -122,6 +124,7 @@ class LearningComponents:
                 or self.trainer.config != recipe.ppo or self.sampler.domain != recipe.domain
                 or self.terrain.tuning != recipe.terrain or self.protocol.config != recipe.protocol
                 or self.protocol.num_envs != recipe.num_envs or self.protocol.device != torch.device(recipe.device)
+                or self.curriculum.promotion != recipe.curriculum_promotion
                 or self.sampler.device != torch.device(recipe.device)
                 or any(type(v) is not int or v < 0 for v in
                        (self.attempted_vector_steps, self.returned_vector_steps, self.trainer.update_index))
@@ -272,7 +275,7 @@ class StructuredCheckpointStore:
         trainer.actor_optimizer.load_state_dict(payload['actor_adam'])
         trainer.critic_optimizer.load_state_dict(payload['critic_adam'])
         trainer.update_index, trainer.consumed = stats['update_index'], dict(stats['consumed'])
-        budget = CurriculumBudget()
+        budget = CurriculumBudget(promotion=self.recipe.curriculum_promotion)
         budget.load_state_dict(payload['curriculum'])
         sampler = ContinuousTaskSampler(self.recipe.training_seed, device=self.recipe.device, domain=self.recipe.domain)
         sampler.load_state_dict(payload['sampler'])

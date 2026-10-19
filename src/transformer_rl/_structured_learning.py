@@ -14,7 +14,7 @@ from pathlib import Path
 import stat
 
 from ._structured_checkpoint import LearningComponents, LearningRecipe, StructuredCheckpointStore
-from .training_control import JSON_LIMIT, TrainingControl, boot_id, read_json
+from .training_control import JSON_LIMIT, TrainingControl, boot_id, file_pin, read_json, write_json
 
 
 class StageValidationRequired(RuntimeError):
@@ -35,6 +35,7 @@ class StructuredLearningLoop:
         self.journal, self.store, self.control, self.stop = journal, store, control, stop
         self._faulted, self._finished = False, False
         self._report = None
+        self._last_checkpoint = None
         binding = control.binding
         boundary = journal.checkpoint_boundary()
         if (not isinstance(control, TrainingControl) or store.recipe != recipe or store.journal is not journal
@@ -67,29 +68,51 @@ class StructuredLearningLoop:
                              critic_optimizer_steps=state['critic_optimizer_steps'],
                              curriculum_stage=self.components.curriculum.stage,
                              curriculum_status=self.components.curriculum.status,
+                             latest_checkpoint=self._last_checkpoint,
                              recipe_sha256=self.recipe.sha256, **extra)
 
     def _save(self, name, *, purpose, sequence):
         self.journal.record_boundary(active_elapsed_s=self._active_elapsed())
-        self.store.save(name, self.components, metadata={
+        receipt = self.store.save(name, self.components, metadata={
             'purpose': purpose, 'token': self.control.binding['token'], 'sequence': sequence,
             'boot': self.control.binding['boot_id'], 'physical_state_restored': False})
-        return self.store.directory / name
+        path = self.store.directory / name
+        marker = {'format': 'private_learning_latest', 'recipe_sha256': self.recipe.sha256,
+                  'checkpoint': {'path': str(path), 'bytes': receipt['bytes'], 'sha256': receipt['sha256']},
+                  'sidecar': file_pin(Path(str(path) + '.json')), 'update': self.components.trainer.update_index,
+                  'purpose': purpose, 'sequence': sequence, 'physical_state_restored': False}
+        # The marker is the final publication. A failed snapshot leaves the
+        # previous marker untouched; old consumption still cannot be replayed.
+        write_json(self.store.directory / 'latest.json', marker, replace=True)
+        self._last_checkpoint = str(path)
+        return path
+
+    def _automatic_checkpoint(self):
+        update = self.components.trainer.update_index
+        if update % 25 == 0:
+            sequence = self.control._request()['sequence']
+            self._save(f'update_{update:05d}.pt', purpose='periodic_learning_resume', sequence=sequence)
 
     def _pause_checkpoint(self, sequence):
         return self._save(f'pause_{self.components.trainer.update_index:05d}_{sequence:08d}.pt',
                           purpose='same_process_pause', sequence=sequence)
 
     def _finish_stop(self):
+        return self._finish('stopped', self.stop.reason)
+
+    def _finish(self, status, reason):
         if self._report is not None:
             return self._report
+        if status == 'completed' and self.components.trainer.update_index != self.journal.spec.target_rollouts:
+            raise ValueError('training completion requires the entire original update budget')
         sequence = self.control._request()['sequence']
-        path = self._save('final.pt', purpose='cold_learning_resume', sequence=sequence)
-        self._report = {'status': 'stopped', 'checkpoint': str(path),
+        purpose = 'cold_learning_resume' if status == 'stopped' else 'training_budget_complete'
+        path = self._save('final.pt', purpose=purpose, sequence=sequence)
+        self._report = {'status': status, 'checkpoint': str(path),
                         'final_update': self.components.trainer.update_index,
                         'cumulative_transitions': self.journal.summary()['returned_transitions'],
-                        'stop_reason': self.stop.reason}
-        self._publish('stopping')
+                        'stop_reason': reason}
+        self._publish('stopping' if status == 'stopped' else 'checkpointing')
         self.control.finish(self._report)
         self._finished = True
         return self._report
@@ -112,8 +135,8 @@ class StructuredLearningLoop:
     def run_update(self):
         """Return metrics, or None after a committed cooperative stop.
 
-        Stage validation belongs to a separate scheduler: a closed curriculum
-        stage cannot silently consume the next stage's exposure here.
+        Exposure scheduling never invokes evaluation. The explicit older
+        audited mode still leaves its validation boundary to the caller.
         """
         if self._faulted or self._finished:
             raise RuntimeError('private learner is faulted or already finished')
@@ -123,9 +146,13 @@ class StructuredLearningLoop:
             if not self.control.boundary(self.stop, self._pause_checkpoint):
                 self._finish_stop()
                 return None
+            if self.components.curriculum.status == 'training_budget_complete':
+                self._finish('completed', 'training_budget_complete')
+                return None
             if self.components.curriculum.status != 'running':
                 self._publish('validation_pending')
                 raise StageValidationRequired('curriculum requires its independent validation before more learning')
+            self.components.curriculum.prepare_rollout()
             self.journal.reserve(self.components.curriculum.stage, active_elapsed_s=self._active_elapsed())
             self.components.curriculum.charge_rollout()
             batch = self.collector.collect(self.recipe.rollout_steps)
@@ -137,6 +164,10 @@ class StructuredLearningLoop:
             self.components.returned_vector_steps = self.collector.returned_vector_steps
             self.journal.finish(self.components.observed_consumption(self.recipe.num_envs),
                                 active_elapsed_s=self._active_elapsed())
+            if self.components.curriculum.status == 'training_budget_complete':
+                self._finish('completed', 'training_budget_complete')
+                return metrics
+            self._automatic_checkpoint()
             self._publish('between_updates')
             return metrics
         except StageValidationRequired:
