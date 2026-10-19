@@ -6,7 +6,7 @@
 
 采用一套轻量而完整的结构化时序策略，统一完成站立、连续高度、前后运动、转向、自旋与平移组合、坡面与粗糙地面、上下台阶和楼梯、人工请求的跳跃与落地、扰动恢复及请求协议。网络结构从训练开始到结束保持相同；课程调整任务的轨迹难度、组合复杂度和分布，不增删网络支路。设计参数预算为actor含训练辅助头约34.7万、critic约6.2万；全模型约40.9万，硬上限45万。网络结构方案已明确，但梯度、时序、任务及资源合同完成实现和验收前不启动新正式PPO。
 
-策略100Hz，正式候选物理与新反馈PC控制200Hz，硬件控制目标1kHz；200Hz是需要对照验证的数值近似。actor每帧35D、连续动作6D，critic保留本研究81D语义，不迁入参考项目的78D critic。机器人无前向地形传感器；地形、接触真值和任务相位只能用于训练监督、奖励与评价，不能偷放入actor。人工技能请求属于可部署输入。
+策略100Hz，正式候选物理与新反馈PC控制200Hz，硬件控制目标1kHz；200Hz是需要对照验证的数值近似。actor每帧35D、连续动作6D，critic保留81D分块结构，并按下文明确物理参考点和轴序，不迁入参考项目的78D critic。机器人无前向地形传感器；地形、接触真值和任务相位只能用于训练监督、奖励与评价，不能偷放入actor。人工技能请求属于可部署输入。
 
 旧90格、完整历史矩阵及其原预算继续保持独立。旧模型的有效结果保留，incomplete和没有checkpoint的中断不退款、不重跑。新结构不能无损装载旧MLP或不同Transformer的Adam状态；新正式模型是独立训练任务，不能包装成旧任务恢复。
 
@@ -26,7 +26,7 @@
 
 ### 35维输入的完整分组
 
-以下索引对应本研究`manual_scaled35`，正式冻结时逐维核验名称、单位、零位和缩放，不能仅凭维度相同认定兼容。
+以下是正式候选的35D具名布局，沿用本研究的索引位置和物理缩放，但明确五个命令模式槽为one-hot。旧来源的同位置曾包含保留槽或landing高度；新候选不声明旧checkpoint或`manual_context35` ABI兼容。新正式网络独立初始化；原研究的权重、结果和预算保留在原任务中。
 
 | token | 索引 | 内容 | 维数 |
 |---|---|---|---:|
@@ -67,7 +67,22 @@
 
 辅助目标为标准化速度Gaussian NLL、两轮接触BCE、速度变化Smooth L1，系数分别0.1、0.02、0.05。速度标准化尺度为每轴1m/s，速度变化尺度腿5rad/s、轮20rad/s；速度估计log标准差限制在负4至2，分别按有效样本和通道数求均值。动作均值末层初始化权重与偏置乘0.01，控制初始动作幅度，不作为运行时输出增益。报告NLL、真实误差和不确定性校准，防止通过扩大方差掩盖偏差。标为有效但缺失的标签拒绝配置；无效边界标签不参与算术，不用补零真值制造监督。
 
-critic独立使用81D输入和256、128、64的ELU MLP，不与actor共享编码参数。81D中每个特权字段的物理参考点必须明确；辅助标签使用具名附件，不通过猜测索引解释78D或81D。
+critic独立使用81D输入和256、128、64的ELU MLP，不与actor共享编码参数。辅助标签使用具名附件，不通过猜测索引解释78D或81D。当前私有实现明确以下布局：
+
+| critic索引 | 内容与物理口径 | 维数 |
+|---|---|---:|
+| 0至34 | 从当前物理传感器和同一可部署命令重建的干净actor帧，不接受延迟或加噪actor帧作为前缀 | 35 |
+| 35至37 | base_link原点的线速度，表达在base_link坐标系 | 3 |
+| 38 | base_link世界z减其XY位置处支撑地面世界z，单位m | 1 |
+| 39至40 | 本环境地形配对的两轮当前力向量模长除以125N | 2 |
+| 41至58 | 全部18个树关节位置，按资产manifest的tree_joint_names排列；两个轮位置槽固定0 | 18 |
+| 59至76 | 同顺序的全部18个树关节速度乘0.1 | 18 |
+| 77至78 | 左右轮当前地面摩擦系数 | 2 |
+| 79至80 | 两轮下方地面世界高度减环境原点世界z，单位m | 2 |
+
+质心速度先按`v_link_world=v_com_world-omega_world×(p_com_world-p_link_world)`转换，再旋转到机身坐标系；不能把根刚体的COM速度直接改名为link原点速度。新增物理层使用明确的xyzw四元数，按实际native关节和body名称绑定；质量、惯性或COM写入前使读数失效，最后一个机械写入后重新读取native COM，再经新的物理刷新建立状态。reset状态写入也使旧帧失效，物理时钟不清零。SDK缓冲读取的刷新计数只是接口计数，实际物理步与调用顺序仍须独立SDK验收。
+
+用于辅助监督的接触标签取过去15ms本地形配对力的峰值是否超过2N，200Hz下为3个样本、1kHz数值参考下为15个样本。reset清空该历史，在完整新窗口建立前标签无效，不用全零填充冒充可靠的无接触。当前瞬时critic力字段与该历史标签分别保留，不混作同一口径；奖励和健康验收需要独立的接触部件、法向力、完整物理时限及阈值定义。
 
 ### 历史与PPO的一致性
 
@@ -372,9 +387,13 @@ Kaiser上[141项合成检查](/home/yukikaze/Documents/workspace/transformer_rl/
 
 采样器以具名PRE-reset附件绑定base_link原点/body坐标线速度、策略顺序六轴速度、接触、时刻及控制epoch；拒绝用reset后的状态代替物理终点，脚本接管不获得actor、辅助或critic学习信用。命令流保留原始请求及其分母，轮速必要边界与连续限速后的交付目标分别记录；共同插值比例保持轮速可行菱形，不把独立分量限速误当联合约束。该菱形仅为轮目标速度的必要条件，不证明力矩、牵引、全高度或硬件能力；几何和变化率均须显式绑定证据。
 
+[具名物理观测层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_physical_observation.py)和[native读数桥接层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_observation.py)已实现。Kaiser上新增49项物理参考点、字段、native缓冲生命周期和接触时钟合成检查，以及16项已有采样回归，共[65项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-physical-interface-20261019T013031Z-6ba3954f/validation-0004.json)。覆盖native轴序变化、COM到link速度变换、xyzw旋转、干净critic前缀、未来传感器拒绝、物理标签与epoch绑定、机械改写后失效/刷新、缓冲所有权和200Hz/1kHz接触窗口。首次测试有4个预期张量的int/float类型断言错误，修正测试后通过，原失败收据保留；不是训练或机器人模型失败。
+
+在Kaiser重新核对了107°完整包65文件及其名义主动轴值，并只读核对本机安装的SDK源码：`root_link_pose_w`为xyzw的7列视图，`root_com_vel_w`为世界系线速度和角速度6列视图，joint_pos/joint_vel为float32原生关节视图。[元数据与SDK源码记录](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-physical-interface-20261019T013031Z-6ba3954f/metadata-0001.json)没有导入或启动SDK。这证明拟接线API与安装源码相符，不证明已经创建真实articulation、验收native接触视图或通过物理资格。当前桥接层测试使用合成native缓冲，实际107°物理场景仍待接入。
+
 [CPU成本记录](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/structured-policy-implementation-20261019T002043Z-4a9e4aa3/performance-0001.json)使用Kaiser单线程和随机初始化模型，单batch推理各测1000次：PyTorch中位0.541ms、P95为0.604ms，ONNX中位0.144ms、P95为0.157ms，ONNX样本最大0.392ms。仅包括网络推理，不含观测打包、控制环、传输和物理响应。完整宽度的单3072端点actor/critic事务含KL与回滚准备，CPU三次为2.179、1.941、1.918秒，进程峰值RSS约1.96GB；不是64minibatch正式整轮耗时，不能外推GPU训练速度。原型ONNX仅为随机权重性能产物，不是可上机策略。
 
-正式PPO仍未启动。下一步必须将具名采样器、请求协议和课程接入真实107°场景，完成出生和闭链物理验收、完整可达域及奖励相位、辨识参数及通信整链回放、新候选完整学习状态启停、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。此前旧CLI的启停测试不能替代新候选的两个优化器、课程、采样器RNG和请求去重状态的联合恢复验收。
+正式PPO仍未启动。下一步必须创建真实107°场景和自身地形配对的native接触视图，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域及奖励相位、辨识参数及通信整链回放、新候选完整学习状态启停、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。此前旧CLI的启停测试不能替代新候选的两个优化器、课程、采样器RNG和请求去重状态的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 
