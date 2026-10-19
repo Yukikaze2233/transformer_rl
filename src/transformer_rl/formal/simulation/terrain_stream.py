@@ -40,20 +40,23 @@ class NativeTerrainStream:
         if scene is self._scene:
             return
         courses = self.installer.lifecycle.ground.courses
-        limits = torch.tensor(((-float('inf'), float('inf')),)*2,
-                              dtype=torch.float64, device=self._radius.device).repeat(len(courses), 1, 1)
-        tiled = torch.tensor([c.tile_source is not None for c in courses], device=self._radius.device)
-        for row in tiled.nonzero().flatten().tolist():
+        limits = [((-float('inf'), float('inf')),)*2] * len(courses)
+        tiled = [c.tile_source is not None for c in courses]
+        for row, is_tiled in enumerate(tiled):
+            if not is_tiled:
+                continue
             c = courses[row]
             bounds = ((min(p.x_m[0] for p in c.surface.patches), max(p.x_m[-1] for p in c.surface.patches)),
                       (min(p.y_m[0] for p in c.surface.patches), max(p.y_m[-1] for p in c.surface.patches)))
             full = (c.request.extent.x_m, c.request.extent.y_m)
             # 比驻留边界提前1m补块；完整域边缘保留原边界，不延伸虚构地面。
-            for axis in range(2):
-                lo, hi = bounds[axis]
-                limits[row, axis, 0] = lo + (1. if lo > full[axis][0] + 1e-5 else 0.)
-                limits[row, axis, 1] = hi - (1. if hi < full[axis][1] - 1e-5 else 0.)
-        self._scene, self._limits, self._tiled = scene, limits, tiled
+            limits[row] = tuple((lo + (1. if lo > full[axis][0] + 1e-5 else 0.),
+                                 hi - (1. if hi < full[axis][1] - 1e-5 else 0.))
+                                for axis, (lo, hi) in enumerate(bounds))
+        # 几何元数据在CPU上，不为8192行逐个发出GPU标量写入。
+        self._limits = torch.tensor(limits, dtype=torch.float64, device=self._radius.device)
+        self._tiled = torch.tensor(tiled, device=self._radius.device)
+        self._scene = scene
 
     @torch.no_grad()
     def __call__(self):

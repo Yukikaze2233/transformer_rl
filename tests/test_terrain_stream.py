@@ -171,6 +171,31 @@ def test_flat_boundary_stream_does_no_native_edit_or_physics_step():
     assert stream.last_result is None and sim.steps == 0 and not writes
 
 
+def test_stream_binding_keeps_mixed_rows_full_edges_and_cached_tensor_identity():
+    whole = flat(2.)
+    partial = flat(20.)
+    untiled = replace(partial, tile_source=None, resident_tiles=())
+    courses = (untiled, whole, partial)
+    scene = object()
+    life = SimpleNamespace(plant=SimpleNamespace(scene=scene), ground=SimpleNamespace(courses=courses))
+    stream = object.__new__(NativeTerrainStream)
+    stream.installer = SimpleNamespace(lifecycle=life)
+    stream._radius, stream._scene = torch.zeros(19), None
+    stream._bind()
+    expected = torch.tensor([
+        [[-float('inf'), float('inf')], [-float('inf'), float('inf')]],
+        [[-2., 2.], [-2., 2.]],
+        # 完整源从-20m起铺4m块，出生区跨过0m，驻留[-4,4]再内缩1m。
+        [[-3., 3.], [-3., 3.]],
+    ], dtype=torch.float64)
+    torch.testing.assert_close(stream._limits, expected, rtol=0, atol=0)
+    assert torch.equal(stream._tiled, torch.tensor([False, True, True]))
+    assert stream._limits.device == stream._radius.device and stream._tiled.dtype == torch.bool
+    limits, tiled = stream._limits, stream._tiled
+    stream._bind()
+    assert stream._limits is limits and stream._tiled is tiled
+
+
 @pytest.mark.parametrize('kind', ['rough', 'flat'])
 def test_stream_moves_distant_tiles_without_resetting_episode_or_control_identity(kind):
     env, robot, sim, writes, editor, _, installer = admitted_rough(flat() if kind == 'flat' else None)
