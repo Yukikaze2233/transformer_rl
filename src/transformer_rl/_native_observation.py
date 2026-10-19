@@ -68,6 +68,11 @@ class NativeObservationBridge:
     def invalidate_state(self):
         self._state_ready = False
 
+    def before_physics_step(self):
+        self._identity()
+        if not self._model_ready:
+            raise RuntimeError('final native model readback is required before advancing physics')
+
     @torch.no_grad()
     def refresh_model(self):
         self._identity()

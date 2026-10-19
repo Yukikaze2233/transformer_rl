@@ -162,6 +162,8 @@ Kaiser独立CPU几何检查确认URDF和model_spec的名义位姿一致，最大
 
 既有腿bag主要覆盖约100至107°膝内角及止挡邻域。留出结果支持局部姿态响应检查，不证明40至107°全活动域、气簧全行程或高速带载已辨识。气簧保留232mm安装及10MPa候选的真实几何作用点，不随USB命令一起延迟。关节零偏与止挡位置相关，不能分别独立扩大随机化而重复计算同一不确定性。
 
+气簧印刷曲线的归一化拟合域为0至0.9，对应80mm机械行程中的0至72mm；72至80mm属于工程外推。新增压力层分别保留“在曲线拟合域内”“在机械行程内”和“数值端点限幅”标记，不能把外推或止挡过行程改名为健康状态。按107°名义滑块位置计算，两侧压缩约52.09mm、压力模型各约346.94N，仅为参数计算，不是测得的整机支撑力。压力通过原生prismatic关节施加一次，单位N；四腿轴与两轮轴使用Nm，不另加外部气簧安装点推力。模型压力势能是该压力曲线的积分，不是电机电能。
+
 ### 时钟与通信
 
 数据链路明确区分传感器采样、主机收到、policy发出、PC力矩算出、USB到达、驱动应用和物理响应。actor输入维度保持35；采样年龄和应用时间作为环境与监测元数据，不能把不可部署特权时间直接塞入actor。
@@ -391,9 +393,19 @@ Kaiser上[141项合成检查](/home/yukikaze/Documents/workspace/transformer_rl/
 
 在Kaiser重新核对了107°完整包65文件及其名义主动轴值，并只读核对本机安装的SDK源码：`root_link_pose_w`为xyzw的7列视图，`root_com_vel_w`为世界系线速度和角速度6列视图，joint_pos/joint_vel为float32原生关节视图。[元数据与SDK源码记录](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-physical-interface-20261019T013031Z-6ba3954f/metadata-0001.json)没有导入或启动SDK。这证明拟接线API与安装源码相符，不证明已经创建真实articulation、验收native接触视图或通过物理资格。当前桥接层测试使用合成native缓冲，实际107°物理场景仍待接入。
 
+新增[输出轴控制与响应](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_output_actuation.py)、[气簧压力](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_passive_pressure.py)、[原生effort写入](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_actuation.py)、[自身地形接触视图](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_contacts.py)、[场景构建](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_scene.py)与[物理步执行链](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_plant.py)。控制层对同侧两根主动输出轴采用共同整圈分支，轮支路仅生成速度目标；原始目标、成对投影、PC原始/限幅力矩、驱动端点力矩与区间平均力矩分别记录。200Hz候选每个100Hz策略步只有两次新反馈，1kHz参考有十次；解析积分不创造额外反馈或仿真子步。
+
+场景构建入口接收已经完成准入的独占SDK上下文，不自行启动AppLauncher或宣称获得GPU资源。它按完整manifest校验依赖，使用显式三角网格、各环境独立碰撞组、实际clone顺序和具名body/关节绑定，检查六个排除在树外的点闭链、12/6求解器设置及完整质量。出生高度显式取所选manifest的0.32m，不把它静默改为零，也不改变资产文件。构建代码已实现，不等于它已在真实SDK中执行；完整课程的地形生成与重置、实际碰撞和出生稳定仍须验收。
+
+只读[安装SDK执行器源码](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/sdk-actuation-inventory.json)确认，IdealPD显式执行器在软件中计算其配置的阻尼，solver PD增益另设为零。因此场景分别回读额外armature、三种摩擦字段、solver零增益与显式执行器增益/限幅；被动铰链和滑块的0.002阻尼仅在显式执行器施加一次，压力层不再减一次阻尼。实际native solver限幅、质量/惯性及实时缓冲验收仍需原生场景证据；CPU回读fixture不能作为这些证据。
+
+接触层按真实传感器及各环境地形过滤器数量分组，使用全局共享patch缓冲的starts/counts；未占用的NaN填充不参与算术。接触标签采用正向法向patch载荷，合力向量保留给critic与诊断，二者不能混用；相向接触力抵消后仍可能接触。容量耗尽作为测量不完整错误，不当机器人任务失败。物理步链固定为新反馈→PC/驱动积分→压力→effort写入→实际sim.step→刷新→接触→具名观测，reset不伪造物理步或推进标签，部分执行失败后禁止自动重放该区间。
+
+Kaiser上分组通过[96项执行链与场景接口检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/validation-0003.json)及[20项耦合物理步/读数桥接检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/validation-0004.json)，场景出生参数修订后又通过[27项定向回归](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/validation-0005.json)。这些均为GPU关闭的CPU合成检查，机器人仿真步0，不能相加冒充一次原生仿真验收。另在Kaiser对真实107°完整65文件及左右完整腿/新轮拟合包作[参数接线核验](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/profile-0003.json)：保留输出端15.62已换算结果，不继承旧50Hz时序。当前执行链只允许明确声明的有效响应probe，没有额外USB/CAN延迟；通信与有效响应的整链闭合尚未完成，不据此开放正式PPO。
+
 [CPU成本记录](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/structured-policy-implementation-20261019T002043Z-4a9e4aa3/performance-0001.json)使用Kaiser单线程和随机初始化模型，单batch推理各测1000次：PyTorch中位0.541ms、P95为0.604ms，ONNX中位0.144ms、P95为0.157ms，ONNX样本最大0.392ms。仅包括网络推理，不含观测打包、控制环、传输和物理响应。完整宽度的单3072端点actor/critic事务含KL与回滚准备，CPU三次为2.179、1.941、1.918秒，进程峰值RSS约1.96GB；不是64minibatch正式整轮耗时，不能外推GPU训练速度。原型ONNX仅为随机权重性能产物，不是可上机策略。
 
-正式PPO仍未启动。下一步必须创建真实107°场景和自身地形配对的native接触视图，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域及奖励相位、辨识参数及通信整链回放、新候选完整学习状态启停、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。此前旧CLI的启停测试不能替代新候选的两个优化器、课程、采样器RNG和请求去重状态的联合恢复验收。
+正式PPO仍未启动。下一步须在资源准入后实际执行107°场景构建与native接触/执行器回读，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域及奖励相位、辨识参数及通信整链回放、新候选完整学习状态启停、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。此前旧CLI的启停测试不能替代新候选的两个优化器、课程、采样器RNG和请求去重状态的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 
