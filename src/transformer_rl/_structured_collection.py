@@ -208,6 +208,19 @@ class StructuredCollector:
         if self._version() != expected or any(module.training for module in self.model.modules()):
             raise RuntimeError('policy or critic changed during collection')
 
+    def completed_estimate(self, current, raw_state):
+        """Shared causal projection for collection and deterministic evaluation."""
+        self._tensor('policy estimated state', raw_state, 8)
+        gravity = current.frame[:, 7:10]
+        norm = gravity.norm(dim=-1)
+        return CompletedEstimate(
+            (-(raw_state[:, :3] * gravity).sum(-1) / norm.clamp_min(1e-8)).clone(),
+            raw_state[:, 6:8].sigmoid().clone(),
+            (-gravity[:, 2] / norm.clamp_min(1e-8)).clamp(-1, 1).acos(),
+            (current.frame[:, 4:7] * 2).norm(dim=-1), current.timestamp_s.clone(),
+            torch.isfinite(raw_state).all(-1) & (norm > 1e-6),
+        )
+
     @torch.no_grad()
     def reset(self, seed=None):
         self._current, self._history = None, None
@@ -248,15 +261,7 @@ class StructuredCollector:
                 if (not torch.isfinite(raw_action).all() or not torch.isfinite(raw_state).all()
                         or not torch.isfinite(evaluation.log_prob).all() or not torch.isfinite(old_value).all()):
                     raise FloatingPointError('nonfinite behavior output before submitting an action')
-                gravity = current.frame[:, 7:10]
-                norm = gravity.norm(dim=-1)
-                estimate = CompletedEstimate(
-                    (-(raw_state[:, :3] * gravity).sum(-1) / norm.clamp_min(1e-8)).clone(),
-                    raw_state[:, 6:8].sigmoid().clone(),
-                    (-gravity[:, 2] / norm.clamp_min(1e-8)).clamp(-1, 1).acos(),
-                    (current.frame[:, 4:7] * 2).norm(dim=-1), current.timestamp_s.clone(),
-                    torch.isfinite(raw_state).all(-1) & (norm > 1e-6),
-                )
+                estimate = self.completed_estimate(current, raw_state)
                 # Current inputs/labels are already owned before step can reuse
                 # native buffers, apply a script override or auto-reset a row.
                 self._current = None

@@ -293,7 +293,7 @@ class NativeTaskEnvironment:
             accepted = result.response == int(RequestResponse.ACCEPTED)
             self._reward_ground_anchor[accepted] = ground[accepted]
             self._reward_anchor_valid[accepted] = True
-            self.skills.accept_protocol_condition(result, self.commands._latched_height)
+            skill_receipt = self.skills.accept_protocol_condition(result, self.commands._latched_height)
             next_commands = self.commands.commands(final_time, life.previous_issued)
             sensors = self.sensor_source(tick.measured)
             if not isinstance(sensors, SensorSample):
@@ -321,7 +321,8 @@ class NativeTaskEnvironment:
             final_reasons = self.conditions.failure_reasons.clone()
             horizon_elapsed = torch.where(torch.isfinite(self._policy_at), final_time - self._policy_at, 0)
             reset = self._reset_rows(done) if done.any() else None
-            self.last_outcome = {'reward': reward, 'physical_evidence': evidence, 'request_condition': result,
+            self.last_outcome = {'reward': reward, 'physical_evidence': evidence, 'skill_receipt': skill_receipt,
+                                 'request_condition': result, 'request_input': request.owned(),
                                  'terminated': terminated.clone(), 'truncated': truncated.clone(),
                                  'failure_reasons': final_reasons,
                                  'horizon_elapsed_s': horizon_elapsed.clone(),

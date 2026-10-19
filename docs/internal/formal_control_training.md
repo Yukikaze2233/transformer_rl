@@ -352,7 +352,21 @@ TensorBoard统一记录奖励每秒、每步贡献、事件数、mask启用率�
 
 终止与时限首先保留PRE-reset的真实critic、标签及身份，再同一timestamp重置选中行。时限bootstrap使用旧回合完整末帧；脚本投影、新回合占位和旧episode标签不混用。可选trace sink同步获得每个真实物理子步的tick、奖励输入、条件和参考，默认关闭，不在默认路径额外生成逐步JSON。sink或传感器失败使已消耗区间fault，不补步、不重放；控制接管前的真实末帧与接管后的脚本投影分别保留。
 
-该闭环仍绑定一个实际已作者化的场景。reset来源若要求不同course SHA，必须在native写入前抛出`TerrainRebuildRequired`，不能用新的任务标签覆盖旧碰撞几何，也不以有限atlas替代完整连续课程。动态地形重建、完整reset/扰动来源、逐行越界结局、144案例及连续挑战评价器、原生参数和碰撞验收、正式前端与全部资源准入仍须完成。新增模块没有改变网络参数量、100Hz/35D/81D边界、公开checkpoint格式或旧冻结研究release。
+该闭环仍绑定一个实际已作者化的场景。reset来源若要求不同course SHA，必须在native写入前抛出`TerrainRebuildRequired`，不能用新的任务标签覆盖旧碰撞几何，也不以有限atlas替代完整连续课程。动态地形重建、完整reset/扰动来源、逐行越界结局、144案例的原生场景与请求序列解析、连续挑战生成及完整技能判据、原生参数和碰撞验收、正式前端与全部资源准入仍须完成。新增模块没有改变网络参数量、100Hz/35D/81D边界、公开checkpoint格式或旧冻结研究release。
+
+### 固定案例与首回合评价
+
+私有[评价计划](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_evaluation_plan.py)逐项保留原144案例的名称、参数、完整时长和首回合分母。探针每功能两个预封存代表案例，阶段验证包括全部已引入案例并从foundation保留恢复保护，最终validation与held-out分别使用各自seed。held-out必须绑定已选择模型的训练seed、checkpoint和选择记录；连续挑战另外要求封存的完整命令/地形/请求manifest。计划计算仍为每训练seed最多140160000个任务策略转移，准备、已经结束首回合但仍随batch推进的行、场景、物理子步、I/O与失败尝试另记实际成本。计划本身不是执行授权或已完成的持久扣费；正式前端仍须在执行前持久预留全部任务与额外评价预算，不因失败退款或偷偷重试。
+
+私有[原生评价器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_evaluation.py)在一个已经绑定的NativeTaskEnvironment中执行确定性均值动作，复用collector的时序/标签/控制权校验及同一估计投影，不调用optimizer或读取旧checkpoint。每次初始化、reset和控制权变化都采用相同的五帧历史语义；模型参数或buffer在评价中改变即拒绝报告。物理trace只接受该环境实际当前tick和奖励包，逐200Hz/1kHz子步累计；首回合结束即封存该行统计，后续auto-reset只计物理成本，不能替换首次失败。
+
+误差分别相对于原始请求与实际准入命令，body速度跟踪与base_link世界XY速度/位移分开。报告完整任务、policy实际控制和健康支撑稳态三种支持集；稳态先丢弃2s，另记最长连续健康支撑段，不用零碎片段的总时长伪装连续hold。10s净漂移需完整连续站立窗口，少于10s时保留null。力矩、物理步力矩变化率、轮接触切向RMS、整轮垂向gap、膝几何余量/销残差、非轮body法向载荷均保留向量和物理单位。力矩饱和字段指输出反馈请求的cap比例；绝对机械功率`abs(tau*dq)`不解释为电能。动作原始均值、issued值、100Hz变化率和逐轴上下界比例另按policy完整控制区间统计，不能把六轴fraction向量压成float。
+
+评价事件同时保留原请求/取消、拒绝响应、接受收据、独立物理技能结果、估计协议结束及reset取消。接受或估计完成都不等于真实跳跃成功。首版请求测试错误地让初始角速度为`[1,2,3]rad/s`的合成夹具期待接受；协议正确返回NOT_READY。后续仅将“应接受”夹具显式置静止，并保留旋转拒绝对照，没有放宽0.5rad/s准备门槛；原失败收据保留。
+
+私有[结果汇总](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_evaluation_results.py)按独立训练seed、案例、评估seed和可达类别分组；未知、不可达、未观测及未完成保留分母，不伪造零误差或失败原因。物理时间加权合并均值/方差/平方量，包含失败首回合的真实前缀，不平均各卡的RMS。精确二项区间按[NIST的二项尾方程](https://www.itl.nist.gov/div898/software/dataplot/refman2/auxillar/exacbici.htm)数值反解；某案例/评估seed尚未收齐全部首次结局时不发布区间。区间依赖该组独立同分布Bernoulli假设，既不是训练seed置信区间，也不是“观测95%即真实成功率至少95%”的保证。
+
+这三层均为私有候选实现，不自动输出课程晋级决定或native资格。144个请求定义已可生成和校验，具体107°出生、域证据、压力/时延profile、各地形的全车通过判据、恢复判据、重复/取消请求执行序列及完整连续挑战manifest仍需原生解析和物理验收。不能把通过目录或合成统计测试写成已执行144案例，更不能由健康率推断台阶/跳跃已完成。当前不增加生产job、不改原停止队列或正式部署入口。
 
 ## 正式优化与预算
 
@@ -523,7 +537,9 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 这些分组有重叠，不相加为独立实验。新的collector→native task→reset→PPO检查实际执行了PyTorch更新，但环境是合成SDK buffers、小尺寸同结构测试网络及显式合成碰撞证明；不是机器人训练，也不证明正式网络的整轮GPU成本。另覆盖世界垂向估计投影、六个课程阶段的连续draw、HOLD抽中目标、当前/下一命令隔离、请求高度锁存、200Hz/1kHz计步、末子步恢复仍保留失败、即时接管动作不记PPO收益、辅助控制不延长时限、旧critic/标签bootstrap、变更地形拒绝、日志错误和准备超时不重放。SDK上下文、真实机器人仿真与新正式PPO仍为零。
 
-正式PPO仍未启动。下一步须完成任意连续课程的native碰撞重建、完整reset/扰动来源、实际107°准入/速率/物理条件配方及144案例/连续挑战评价器；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
+完整案例计划、首回合物理评价与结果汇总先在Kaiser执行[58通过、1失败的首轮检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-evaluation-20261019T073209Z-2ff2b5b0/validation-0001.json)。[原失败分析](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-evaluation-20261019T073209Z-2ff2b5b0/request_test_failure_analysis.json)保留旋转夹具不满足请求准备条件的原因与修正，没有覆盖原收据。补充拒绝请求留痕及精确区间/结果汇总后，[69项检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-evaluation-20261019T073209Z-2ff2b5b0/validation-0002.json)；最后保留六轴动作上下界fraction并分开100Hz动作统计与物理子步后，[70项最终回归通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-evaluation-20261019T073209Z-2ff2b5b0/validation-0003.json)。分组有重叠，不相加。覆盖完整144目录逐项相等、完整成本、held-out身份、独立Beta分位数对照、不同dt的物理矩、世界漂移、10s窗口、真实子步失败与auto-reset隔离、脚本不退款、确定性均值、参数不变、预算耗尽保留incomplete、请求接受与物理成功分离、向量bound fraction以及失败前缀的物理时间加权汇总。全部是Kaiser CPU合成/日志算术检查，未启动SDK、机器人仿真或新正式PPO。
+
+正式PPO仍未启动。下一步须完成任意连续课程的native碰撞重建、完整reset/扰动来源、实际107°准入/速率/物理条件配方，144案例的原生场景/profile/请求序列与独立技能判据、连续挑战manifest、评价预算的持久预留及正式调度；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 

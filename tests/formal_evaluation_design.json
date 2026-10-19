@@ -1,0 +1,2109 @@
+{
+  "purpose": "private_formal_evaluation_design",
+  "runtime_executable": false,
+  "asset_selection_complete": false,
+  "mechanical_resolution_complete": false,
+  "cases": [
+    {
+      "name": "stand_height_00_nominal",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.17,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "nominal",
+        "stress_probability_is_not_measured": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_00_payload_com_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.17,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "payload_com_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_00_effective_delay_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.17,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "effective_delay_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_01_nominal",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.2,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "nominal",
+        "stress_probability_is_not_measured": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_01_payload_com_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.2,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "payload_com_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_01_effective_delay_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.2,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "effective_delay_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_02_nominal",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.23,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "nominal",
+        "stress_probability_is_not_measured": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_02_payload_com_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.23,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "payload_com_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_02_effective_delay_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.23,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "effective_delay_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_03_nominal",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.26,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "nominal",
+        "stress_probability_is_not_measured": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_03_payload_com_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.26,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "payload_com_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_03_effective_delay_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.26,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "effective_delay_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_04_nominal",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.29,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "nominal",
+        "stress_probability_is_not_measured": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_04_payload_com_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.29,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "payload_com_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_04_effective_delay_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.29,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "effective_delay_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_05_nominal",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.32,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "nominal",
+        "stress_probability_is_not_measured": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_05_payload_com_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.32,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "payload_com_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_05_effective_delay_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.32,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "effective_delay_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_06_nominal",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.36,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "nominal",
+        "stress_probability_is_not_measured": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_06_payload_com_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.36,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "payload_com_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_06_effective_delay_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.36,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "effective_delay_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_07_nominal",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.4,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "nominal",
+        "stress_probability_is_not_measured": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_07_payload_com_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.4,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "payload_com_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "stand_height_07_effective_delay_stress",
+      "family": "stand_height",
+      "duration_s": 30,
+      "parameters": {
+        "height_m": 0.4,
+        "vx_m_s": 0.0,
+        "wz_rad_s": 0.0,
+        "profile": "effective_delay_stress",
+        "stress_probability_is_not_measured": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_00_height_00",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -5.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.2
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_00_height_01",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -5.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.26
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_00_height_02",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -5.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.32
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_00_height_03",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -5.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.38
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_01_height_00",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -3.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.2
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_01_height_01",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -3.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.26
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_01_height_02",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -3.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.32
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_01_height_03",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -3.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.38
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_02_height_00",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -1.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.2
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_02_height_01",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -1.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.26
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_02_height_02",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -1.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.32
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_02_height_03",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -1.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.38
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_03_height_00",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.3,
+        "wz_rad_s": 0.0,
+        "height_m": 0.2
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_03_height_01",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.3,
+        "wz_rad_s": 0.0,
+        "height_m": 0.26
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_03_height_02",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.3,
+        "wz_rad_s": 0.0,
+        "height_m": 0.32
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_03_height_03",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.3,
+        "wz_rad_s": 0.0,
+        "height_m": 0.38
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_04_height_00",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.3,
+        "wz_rad_s": 0.0,
+        "height_m": 0.2
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_04_height_01",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.3,
+        "wz_rad_s": 0.0,
+        "height_m": 0.26
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_04_height_02",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.3,
+        "wz_rad_s": 0.0,
+        "height_m": 0.32
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_04_height_03",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.3,
+        "wz_rad_s": 0.0,
+        "height_m": 0.38
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_05_height_00",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.2
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_05_height_01",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.26
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_05_height_02",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.32
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_05_height_03",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.38
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_06_height_00",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 3.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.2
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_06_height_01",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 3.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.26
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_06_height_02",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 3.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.32
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_06_height_03",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 3.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.38
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_07_height_00",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 5.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.2
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_07_height_01",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 5.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.26
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_07_height_02",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 5.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.32
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "motion_07_height_03",
+      "family": "motion",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 5.0,
+        "wz_rad_s": 0.0,
+        "height_m": 0.38
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_00_motion_00",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.0,
+        "wz_rad_s": -18.84955592153876,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_00_motion_01",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.5,
+        "wz_rad_s": -18.84955592153876,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_00_motion_02",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.5,
+        "wz_rad_s": -18.84955592153876,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_00_motion_03",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": -18.84955592153876,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_01_motion_00",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.0,
+        "wz_rad_s": -12.566370614359172,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_01_motion_01",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.5,
+        "wz_rad_s": -12.566370614359172,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_01_motion_02",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.5,
+        "wz_rad_s": -12.566370614359172,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_01_motion_03",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": -12.566370614359172,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_02_motion_00",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.0,
+        "wz_rad_s": -6.283185307179586,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_02_motion_01",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.5,
+        "wz_rad_s": -6.283185307179586,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_02_motion_02",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.5,
+        "wz_rad_s": -6.283185307179586,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_02_motion_03",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": -6.283185307179586,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_03_motion_00",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.0,
+        "wz_rad_s": -1.0,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_03_motion_01",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.5,
+        "wz_rad_s": -1.0,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_03_motion_02",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.5,
+        "wz_rad_s": -1.0,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_03_motion_03",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": -1.0,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_04_motion_00",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.0,
+        "wz_rad_s": 1.0,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_04_motion_01",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.5,
+        "wz_rad_s": 1.0,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_04_motion_02",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.5,
+        "wz_rad_s": 1.0,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_04_motion_03",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": 1.0,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_05_motion_00",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.0,
+        "wz_rad_s": 6.283185307179586,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_05_motion_01",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.5,
+        "wz_rad_s": 6.283185307179586,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_05_motion_02",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.5,
+        "wz_rad_s": 6.283185307179586,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_05_motion_03",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": 6.283185307179586,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_06_motion_00",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.0,
+        "wz_rad_s": 12.566370614359172,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_06_motion_01",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.5,
+        "wz_rad_s": 12.566370614359172,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_06_motion_02",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.5,
+        "wz_rad_s": 12.566370614359172,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_06_motion_03",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": 12.566370614359172,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_07_motion_00",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.0,
+        "wz_rad_s": 18.84955592153876,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_07_motion_01",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 0.5,
+        "wz_rad_s": 18.84955592153876,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_07_motion_02",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": -0.5,
+        "wz_rad_s": 18.84955592153876,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "rotation_07_motion_03",
+      "family": "rotation_combinations",
+      "duration_s": 30,
+      "parameters": {
+        "vx_m_s": 1.0,
+        "wz_rad_s": 18.84955592153876,
+        "height_m": 0.3,
+        "command_frame": "explicit_task_contract_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_slope_up_speed_00",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "slope_up",
+        "angle_deg": 15.0,
+        "vx_m_s": 0.5,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_slope_up_speed_01",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "slope_up",
+        "angle_deg": 15.0,
+        "vx_m_s": 1.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_slope_up_speed_02",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "slope_up",
+        "angle_deg": 15.0,
+        "vx_m_s": 2.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_slope_down_speed_00",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "slope_down",
+        "angle_deg": -15.0,
+        "vx_m_s": 0.5,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_slope_down_speed_01",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "slope_down",
+        "angle_deg": -15.0,
+        "vx_m_s": 1.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_slope_down_speed_02",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "slope_down",
+        "angle_deg": -15.0,
+        "vx_m_s": 2.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_cross_slope_speed_00",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "cross_slope",
+        "angle_deg": 15.0,
+        "vx_m_s": 0.5,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_cross_slope_speed_01",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "cross_slope",
+        "angle_deg": 15.0,
+        "vx_m_s": 1.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_cross_slope_speed_02",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "cross_slope",
+        "angle_deg": 15.0,
+        "vx_m_s": 2.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_rough_speed_00",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "rough",
+        "amplitude_m": 0.02,
+        "vx_m_s": 0.5,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_rough_speed_01",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "rough",
+        "amplitude_m": 0.02,
+        "vx_m_s": 1.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_rough_speed_02",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "rough",
+        "amplitude_m": 0.02,
+        "vx_m_s": 2.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_step_up_speed_00",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "step_up",
+        "rise_m": 0.25,
+        "vx_m_s": 0.5,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_step_up_speed_01",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "step_up",
+        "rise_m": 0.25,
+        "vx_m_s": 1.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_step_up_speed_02",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "step_up",
+        "rise_m": 0.25,
+        "vx_m_s": 2.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_step_down_speed_00",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "step_down",
+        "drop_m": 0.15,
+        "vx_m_s": 0.5,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_step_down_speed_01",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "step_down",
+        "drop_m": 0.15,
+        "vx_m_s": 1.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_step_down_speed_02",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "step_down",
+        "drop_m": 0.15,
+        "vx_m_s": 2.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_stairs_speed_00",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "stairs",
+        "rise_m": 0.04,
+        "tread_m": 0.3,
+        "vx_m_s": 0.5,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_stairs_speed_01",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "stairs",
+        "rise_m": 0.04,
+        "tread_m": 0.3,
+        "vx_m_s": 1.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_stairs_speed_02",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "stairs",
+        "rise_m": 0.04,
+        "tread_m": 0.3,
+        "vx_m_s": 2.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_two_platforms_speed_00",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "two_platforms",
+        "absolute_top_heights_m": [
+          0.2,
+          0.25
+        ],
+        "second_rise_m": 0.05,
+        "tread_m": 0.6,
+        "vx_m_s": 0.5,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_two_platforms_speed_01",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "two_platforms",
+        "absolute_top_heights_m": [
+          0.2,
+          0.25
+        ],
+        "second_rise_m": 0.05,
+        "tread_m": 0.6,
+        "vx_m_s": 1.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "terrain_two_platforms_speed_02",
+      "family": "terrain",
+      "duration_s": 30,
+      "parameters": {
+        "terrain": "two_platforms",
+        "absolute_top_heights_m": [
+          0.2,
+          0.25
+        ],
+        "second_rise_m": 0.05,
+        "tread_m": 0.6,
+        "vx_m_s": 2.0,
+        "height_m": 0.3,
+        "entry_request": "manual_skill_request_when_required"
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_upright",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "upright",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_crouched",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "crouched",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_upright_release",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "upright_release",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_crouched_release",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "crouched_release",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_left_side_90",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "left_side_90",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_right_side_90",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "right_side_90",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_pitch_forward_45",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "pitch_forward_45",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_pitch_backward_45",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "pitch_backward_45",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_front_down_90",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "front_down_90",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_back_down_90",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "back_down_90",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_front_down_left_forward_right_back_90",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "front_down_left_forward_right_back_90",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_front_down_left_back_right_forward_90",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "front_down_left_back_right_forward_90",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_back_down_left_forward_right_back_90",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "back_down_left_forward_right_back_90",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_back_down_left_back_right_forward_90",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "back_down_left_back_right_forward_90",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_prone_belly_legs_above",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "prone_belly_legs_above",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "recovery_prone_back_legs_above",
+      "family": "recovery",
+      "duration_s": 60,
+      "parameters": {
+        "pose": "prone_back_legs_above",
+        "pose_table_requires_selected_asset": true,
+        "policy_and_scripted_outcomes_separate": true,
+        "script_intervals_excluded_from_ppo": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_stand_jump_direction_00",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "stand_jump",
+        "vx_m_s": 0.0,
+        "initial_heading_rad": 3.141592653589793,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_stand_jump_direction_01",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "stand_jump",
+        "vx_m_s": 0.0,
+        "initial_heading_rad": 0.0,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_walking_jump_direction_00",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "walking_jump",
+        "vx_m_s": -0.5,
+        "initial_heading_rad": 3.141592653589793,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_walking_jump_direction_01",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "walking_jump",
+        "vx_m_s": 0.5,
+        "initial_heading_rad": 0.0,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_brake_jump_resume_direction_00",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "brake_jump_resume",
+        "vx_m_s": -0.5,
+        "initial_heading_rad": 3.141592653589793,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_brake_jump_resume_direction_01",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "brake_jump_resume",
+        "vx_m_s": 0.5,
+        "initial_heading_rad": 0.0,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_repeat_before_takeoff_direction_00",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "repeat_before_takeoff",
+        "vx_m_s": -0.5,
+        "initial_heading_rad": 3.141592653589793,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_repeat_before_takeoff_direction_01",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "repeat_before_takeoff",
+        "vx_m_s": 0.5,
+        "initial_heading_rad": 0.0,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_repeat_airborne_direction_00",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "repeat_airborne",
+        "vx_m_s": -0.5,
+        "initial_heading_rad": 3.141592653589793,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_repeat_airborne_direction_01",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "repeat_airborne",
+        "vx_m_s": 0.5,
+        "initial_heading_rad": 0.0,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_cancel_before_takeoff_direction_00",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "cancel_before_takeoff",
+        "vx_m_s": -0.5,
+        "initial_heading_rad": 3.141592653589793,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": true,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_cancel_before_takeoff_direction_01",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "cancel_before_takeoff",
+        "vx_m_s": 0.5,
+        "initial_heading_rad": 0.0,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": true,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_cancel_airborne_direction_00",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "cancel_airborne",
+        "vx_m_s": -0.5,
+        "initial_heading_rad": 3.141592653589793,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_cancel_airborne_direction_01",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "cancel_airborne",
+        "vx_m_s": 0.5,
+        "initial_heading_rad": 0.0,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": true
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_repeat_after_landing_direction_00",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "repeat_after_landing",
+        "vx_m_s": -0.5,
+        "initial_heading_rad": 3.141592653589793,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    },
+    {
+      "name": "request_repeat_after_landing_direction_01",
+      "family": "requests",
+      "duration_s": 60,
+      "parameters": {
+        "protocol": "repeat_after_landing",
+        "vx_m_s": 0.5,
+        "initial_heading_rad": 0.0,
+        "requested_jump_m": 0.15,
+        "cancel_before_takeoff_requires_no_jump": false,
+        "airborne_cancel_requires_safe_landing": false
+      },
+      "first_episode_only": true,
+      "automatic_reset_does_not_replace_first_outcome": true,
+      "geometry_and_runtime_resolution_required": true
+    }
+  ],
+  "counts": {
+    "motion": 32,
+    "recovery": 16,
+    "requests": 16,
+    "rotation_combinations": 32,
+    "stand_height": 24,
+    "terrain": 24
+  },
+  "total_cases": 144,
+  "validation_seeds": [
+    44101,
+    44102
+  ],
+  "heldout_seeds": [
+    44901,
+    44902
+  ],
+  "episodes_per_case_per_seed": 20,
+  "hardware_capability_claim": false
+}
