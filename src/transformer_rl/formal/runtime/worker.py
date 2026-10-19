@@ -68,6 +68,16 @@ def _physics_configuration(config_type):
                        gpu_total_aggregate_pairs_capacity=2**22)
 
 
+def _read_pair_buffers(prim, configuration):
+    fields = {'gpuFoundLostPairsCapacity': 'gpu_found_lost_pairs_capacity',
+              'gpuFoundLostAggregatePairsCapacity': 'gpu_found_lost_aggregate_pairs_capacity',
+              'gpuTotalAggregatePairsCapacity': 'gpu_total_aggregate_pairs_capacity'}
+    actual = {name: prim.GetAttribute('physxScene:' + name).Get() for name in fields}
+    if actual != {name: getattr(configuration, field) for name, field in fields.items()}:
+        raise RuntimeError('native GPU pair-buffer capacity differs from the full-scale configuration')
+    return actual
+
+
 @contextmanager
 def runtime(recipe, components, configuration, *, control):
     """Return a single native task after explicit cold physics setup.
@@ -124,8 +134,9 @@ def runtime(recipe, components, configuration, *, control):
         carb.log_warn('native physics error monitor attached')
         if physics_health.messages_seen == 0:
             raise RuntimeError('native physics logging callback was not invoked by the installed SDK')
+        physics_configuration = _physics_configuration(PhysxCfg)
         sim = SimulationContext(SimulationCfg(dt=.005, device=recipe.device, enable_scene_query_support=True,
-                                physics=_physics_configuration(PhysxCfg)))
+                                physics=physics_configuration))
         maximum_horizon = max(tuning.reset.ordinary_horizon_s, tuning.reset.extended_horizon_s)
         extent = TerrainExtent.for_horizon(maximum_horizon, max(abs(v) for v in recipe.domain.forward_m_s),
                                            tuning.reset.terrain_margin_m)
@@ -139,12 +150,7 @@ def runtime(recipe, components, configuration, *, control):
                                          response, origins, tuple(c.surface.meshes for c in courses))
         scene = scene_recipe.build_on_admitted_context(sim, physics_health=physics_health)
         physics_prim = sim.stage.GetPrimAtPath(sim.cfg.physics_prim_path)
-        pair_buffers = {name: physics_prim.GetAttribute('physxScene:' + name).Get()
-                        for name in ('gpuFoundLostPairsCapacity', 'gpuFoundLostAggregatePairsCapacity',
-                                     'gpuTotalAggregatePairsCapacity')}
-        if tuple(pair_buffers.values()) != (2**27, 2**27, 2**23):
-            raise RuntimeError('native GPU pair-buffer capacity differs from the full-scale configuration')
-        scene.readback['GPU_pair_buffers'] = pair_buffers
+        scene.readback['GPU_pair_buffers'] = _read_pair_buffers(physics_prim, physics_configuration)
         dynamics_receipt = apply_startup_dynamics(
             scene, tuning.dynamics, recipe.training_seed + 15485863, native_to_tensor=wp.to_torch,
             tensor_to_native=lambda value: wp.from_torch(value, dtype=wp.uint32 if value.dtype == torch.int32

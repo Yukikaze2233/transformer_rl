@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 import pytest
 
 from transformer_rl.formal.simulation.health import NativePhysicsHealth
-from transformer_rl.formal.runtime.worker import _physics_configuration
+from transformer_rl.formal.runtime.worker import _physics_configuration, _read_pair_buffers
 
 
 class Logging:
@@ -79,3 +79,18 @@ def test_native_overflow_does_not_publish_a_transition_or_replay_the_step():
         plant.step_physics()
     assert sim.steps == 1
     health.close()
+
+
+def test_pair_readback_uses_the_submitted_configuration_and_rejects_sdk_mismatch():
+    from types import SimpleNamespace
+
+    fields = {'gpuFoundLostPairsCapacity': 17, 'gpuFoundLostAggregatePairsCapacity': 23,
+              'gpuTotalAggregatePairsCapacity': 31}
+    configuration = SimpleNamespace(gpu_found_lost_pairs_capacity=17,
+                                    gpu_found_lost_aggregate_pairs_capacity=23,
+                                    gpu_total_aggregate_pairs_capacity=31)
+    prim = SimpleNamespace(GetAttribute=lambda name: SimpleNamespace(Get=lambda: fields[name.split(':')[1]]))
+    assert _read_pair_buffers(prim, configuration) == fields
+    fields['gpuTotalAggregatePairsCapacity'] = 32
+    with pytest.raises(RuntimeError, match='capacity differs'):
+        _read_pair_buffers(prim, configuration)
