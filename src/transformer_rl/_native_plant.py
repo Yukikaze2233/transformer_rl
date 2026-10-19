@@ -61,6 +61,7 @@ class NativePhysicsPlant:
         if (scene.robot is not bridge.robot or scene.efforts.robot is not scene.robot
                 or any(value.num_envs != bridge.num_envs or value.device != bridge.device
                        for value in (controller, drive, pressure, scene.contacts))
+                or scene.contacts.terrain_motion_reference != 'authored_static_own_terrain'
                 or float(sim.cfg.dt) != bridge.physics_dt_s):
             raise ValueError('plant components must share the actual native owner, environment count, device and clock')
         self.sim, self.scene, self.controller, self.drive, self.pressure = sim, scene, controller, drive, pressure
@@ -77,10 +78,11 @@ class NativePhysicsPlant:
             raise RuntimeError('partially advanced physical plant is faulted; do not replay its interval')
         bridge = self.scene.observation
         if (self.scene.robot.root_view is not self._view or bridge.robot is not self.scene.robot
+                or self.scene.contacts.terrain_motion_reference != 'authored_static_own_terrain'
                 or tuple(self.scene.robot.joint_names) != bridge.binding.native_joint_names
                 or tuple(self.scene.robot.body_names) != bridge.binding.native_body_names):
             self._faulted = True
-            raise RuntimeError('physical plant native owner or named topology changed')
+            raise RuntimeError('physical plant native owner, terrain-motion binding or named topology changed')
 
     def _matrix(self, name, value, width):
         if (not isinstance(value, torch.Tensor) or value.shape != (self.num_envs, width)
@@ -122,7 +124,12 @@ class NativePhysicsPlant:
             explicit = self.scene.efforts.explicit_actuator_buffer()
             self.sim.step(render=False)
             bridge.after_physics_step(bridge.physical_tick + 1)
-            contacts = self.scene.contacts.read(self.dt, bridge.timestamp_s())
+            motion = bridge.body_motion()
+            contacts = self.scene.contacts.read(self.dt, bridge.timestamp_s(), body_motion=motion)
+            bridge.before_state_read()
+            if (motion.physical_tick != bridge.physical_tick or motion.model_epoch != bridge.model_epoch
+                    or not torch.equal(motion.timestamp_s, bridge.timestamp_s())):
+                raise RuntimeError('contact motion crossed a native physical or model epoch')
             ground = self._ground(robot, self.scene)
             if not isinstance(ground, GroundReference):
                 raise ValueError('ground query must return named values from this scene geometry')

@@ -55,21 +55,25 @@ def fixture(period=.005):
         counts[:, 0] = 1
         starts = torch.full_like(counts, -1)
         starts[:, 0] = torch.arange(n)
+        points = torch.full((max_contact_data_count, 3), float('nan'))
+        normals = torch.full_like(points, float('nan'))
+        points[:n], normals[:n] = 0., torch.tensor([0., 0., 1.])
         view = SimpleNamespace(sensor_paths=sensors, filter_paths=filter_patterns, sensor_count=n,
                                filter_count=2, max_contact_data_count=max_contact_data_count,
                                get_contact_force_matrix=lambda *, dt: matrix,
-                               get_contact_data=lambda *, dt: (force, None, None, None, counts, starts))
+                               get_contact_data=lambda *, dt: (force, points, normals, None, counts, starts))
         return view
 
     envs = ('/World/envs/env_0', '/World/envs/env_1')
     contacts = NativeTerrainContacts(SimpleNamespace(create_rigid_contact_view=create), bridge.binding, envs,
                                      tuple((p + '/Terrain/a', p + '/Terrain/b') for p in envs),
-                                     native_to_tensor=lambda value: value)
+                                     native_to_tensor=lambda value: value,
+                                     terrain_motion_reference='authored_static_own_terrain')
     read = contacts.read
 
-    def traced_read(*args):
+    def traced_read(*args, **kwargs):
         trace.append('contacts')
-        return read(*args)
+        return read(*args, **kwargs)
 
     contacts.read = traced_read
     scene = NativeSceneState(robot, bridge, writer, contacts, envs, sample.environment_origin_world_m.clone(),
@@ -86,6 +90,10 @@ def fixture(period=.005):
         assert render is False
         sim.steps += 1
         robot.data.root_link_pose_w.torch[:, 2] += .001
+        poses = robot.data.body_link_pose_w.torch
+        poses[:, :, :3] += (robot.data.root_link_pose_w.torch[:, :3] - poses[:, 0, :3])[:, None]
+        poses[:, :, 3:7] = robot.data.root_link_pose_w.torch[:, None, 3:7]
+        robot.data.body_com_vel_w.torch[:, 0] = robot.data.root_com_vel_w.torch
 
     sim.step = step
 
@@ -130,6 +138,44 @@ def test_contact_labels_use_positive_patch_load_even_when_critic_force_vector_ca
     plant.contact_history.contacts()
     torch.testing.assert_close(plant.contact_history.history, before)
     assert sim.steps == 3
+
+
+def test_actual_step_publishes_owned_contact_motion_with_the_same_physical_and_model_identity():
+    plant, robot, sim, _ = fixture()
+    plant.accept_issued_action(torch.zeros(2, 6))
+    result = plant.step_physics()
+    motion = result.contacts.wheel_motion
+    assert motion is not None and motion.loaded.all()
+    assert motion.physical_tick == result.physical_tick == sim.steps == 1
+    assert motion.model_epoch == plant.scene.observation.model_epoch
+    assert torch.equal(motion.timestamp_s, result.measured.timestamp_s)
+    assert motion.tangent_speed_rms_m_s.gt(0).all()
+    before = motion.tangent_speed_rms_m_s.clone()
+    robot.data.body_com_vel_w.torch.zero_()
+    torch.testing.assert_close(motion.tangent_speed_rms_m_s, before)
+
+
+def test_missing_loaded_contact_points_faults_the_advanced_step_and_cannot_be_replayed():
+    plant, _, sim, _ = fixture()
+    plant.accept_issued_action(torch.zeros(2, 6))
+    view = plant.scene.contacts.groups[0].view
+    force, _, _, separation, counts, starts = view.get_contact_data(dt=.005)
+    view.get_contact_data = lambda *, dt: (force, None, None, separation, counts, starts)
+    with pytest.raises(ValueError, match='patch points'):
+        plant.step_physics()
+    assert sim.steps == plant.scene.observation.physical_tick == 1
+    with pytest.raises(RuntimeError, match='faulted'):
+        plant.step_physics()
+    assert sim.steps == 1
+
+
+def test_changed_static_terrain_motion_binding_is_rejected_before_another_physics_step():
+    plant, _, sim, _ = fixture()
+    plant.accept_issued_action(torch.zeros(2, 6))
+    plant.scene.contacts.terrain_motion_reference = None
+    with pytest.raises(RuntimeError, match='terrain-motion binding'):
+        plant.step_physics()
+    assert sim.steps == 0
 
 
 def test_feedback_is_recomputed_from_fresh_output_positions_without_extra_physics():

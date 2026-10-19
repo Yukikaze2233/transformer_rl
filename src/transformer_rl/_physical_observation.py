@@ -76,6 +76,19 @@ class NativePhysicalSample:
 
 
 @dataclass(frozen=True)
+class RigidBodyMotion:
+    """Owned world-SI COM motion in actual native body order, not actor data."""
+
+    com_position_world_m: torch.Tensor
+    com_velocity_world_m_s: torch.Tensor
+    angular_velocity_world_rad_s: torch.Tensor
+    timestamp_s: torch.Tensor
+    body_names: tuple[str, ...]
+    physical_tick: int
+    model_epoch: int
+
+
+@dataclass(frozen=True)
 class MeasuredState:
     """Owned SI state at the base_link origin; all six-axis fields use P order."""
 

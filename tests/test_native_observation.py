@@ -35,6 +35,10 @@ class NativeRobot:
                                                              sample.root_link_orientation_xyzw), -1)),
             root_com_vel_w=SimpleNamespace(torch=torch.cat((sample.root_com_velocity_world_m_s,
                                                            sample.angular_velocity_world_rad_s), -1)),
+            body_link_pose_w=SimpleNamespace(torch=torch.cat((sample.root_link_position_world_m,
+                                                             sample.root_link_orientation_xyzw), -1)[:, None].repeat(1, 19, 1)),
+            body_com_vel_w=SimpleNamespace(torch=torch.cat((sample.root_com_velocity_world_m_s,
+                                                           sample.angular_velocity_world_rad_s), -1)[:, None].repeat(1, 19, 1)),
         )
         self.updates, self.fail_update = [], False
 

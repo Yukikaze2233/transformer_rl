@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import torch
 
-from ._physical_observation import MechanicalBinding, NativePhysicalSample, ObservationAssembler
+from ._physical_observation import MechanicalBinding, NativePhysicalSample, ObservationAssembler, RigidBodyMotion
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ class NativeObservationBridge:
         self.num_envs, self.device, self.physics_dt_s = num_envs, torch.device(device), physics_dt_s
         self.physical_tick, self.model_epoch, self.refresh_attempts = 0, 0, 0
         self._model_ready = self._state_ready = self._faulted = False
-        self._local_com_m = None
+        self._local_com_m = self._local_body_com_m = None
         self.refresh_model()
 
     def _identity(self):
@@ -63,7 +63,7 @@ class NativeObservationBridge:
 
     def invalidate_model(self):
         self._model_ready = self._state_ready = False
-        self._local_com_m = None
+        self._local_com_m = self._local_body_com_m = None
 
     def invalidate_state(self):
         self._state_ready = False
@@ -84,9 +84,10 @@ class NativeObservationBridge:
         self.invalidate_model()
         local = self._native_to_tensor(self._view.get_coms())
         if (not isinstance(local, torch.Tensor) or local.shape != (self.num_envs, 19, 7)
-                or local.dtype != torch.float32 or not torch.isfinite(local[:, 0]).all()):
-            raise ValueError('native COM readback requires finite root xyz+xyzw in the complete body layout')
-        self._local_com_m = local[:, 0, :3].detach().to(self.device).clone()
+                or local.dtype != torch.float32 or not torch.isfinite(local).all()):
+            raise ValueError('native COM readback requires finite xyz+xyzw for every named body')
+        self._local_body_com_m = local[:, :, :3].detach().to(self.device).clone()
+        self._local_com_m = self._local_body_com_m[:, 0].clone()
         self._model_ready = True
         self.model_epoch += 1
 
@@ -115,6 +116,47 @@ class NativeObservationBridge:
                 or value.device != self.device or value.dtype != torch.float32):
             raise ValueError(f'native {name} buffer shape/device/dtype differs')
         return value
+
+    @torch.no_grad()
+    def body_motion(self):
+        """Read fresh COM velocities and transform final native local COMs.
+
+        The SDK's lazily cached COM-pose property is deliberately not used:
+        explicit mechanical writes require our own final get_coms readback.
+        No link-origin velocity is substituted for a COM velocity.
+        """
+        self.before_state_read()
+        epoch, tick, timestamp = self.model_epoch, self.physical_tick, self.timestamp_s()
+        poses = self.robot.data.body_link_pose_w.torch
+        velocity = self.robot.data.body_com_vel_w.torch
+        for name, value, width in (('link poses', poses, 7), ('COM velocities', velocity, 6)):
+            if (not isinstance(value, torch.Tensor) or value.shape != (self.num_envs, 19, width)
+                    or value.dtype != torch.float32 or value.device != self.device or not torch.isfinite(value).all()):
+                raise ValueError('native complete body ' + name + ' layout or finite values differ')
+        root_pose, root_velocity = self._buffer('root_link_pose_w', 7), self._buffer('root_com_vel_w', 6)
+        if (not torch.isfinite(root_pose).all() or not torch.isfinite(root_velocity).all()
+                or not torch.allclose(poses[:, 0, :3], root_pose[:, :3], atol=1e-5, rtol=0)
+                or not torch.allclose(velocity[:, 0], root_velocity, atol=1e-5, rtol=0)):
+            raise ValueError('native body-zero link pose or COM velocity differs from the actual root')
+        quaternion = poses[:, :, 3:7]
+        norm = quaternion.norm(dim=-1, keepdim=True)
+        if not torch.allclose(norm, torch.ones_like(norm), atol=1e-4, rtol=0):
+            raise ValueError('native body link orientations require normalized xyzw quaternions')
+        if (((quaternion[:, 0] * root_pose[:, 3:7]).sum(-1).abs() - 1).abs().gt(1e-4).any()):
+            raise ValueError('native body-zero orientation differs from the actual root frame')
+        quaternion = quaternion / norm
+        local = self._local_body_com_m
+        cross = torch.linalg.cross(quaternion[..., :3], local)
+        rotated = local + 2 * (quaternion[..., 3:] * cross + torch.linalg.cross(quaternion[..., :3], cross))
+        position = poses[..., :3] + rotated
+        if not torch.isfinite(position).all():
+            raise ValueError('native body COM position overflowed its physical tensor range')
+        result = RigidBodyMotion(position.detach().clone(), velocity[..., :3].detach().clone(),
+                                  velocity[..., 3:].detach().clone(), timestamp, self.binding.native_body_names, tick, epoch)
+        self.before_state_read()
+        if self.model_epoch != epoch or self.physical_tick != tick:
+            raise RuntimeError('body-motion read crossed a physical or mechanical model epoch')
+        return result
 
     @torch.no_grad()
     def measure(self, surfaces: SurfaceSample):

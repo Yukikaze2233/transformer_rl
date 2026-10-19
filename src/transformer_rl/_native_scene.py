@@ -151,6 +151,27 @@ class NativeSceneRecipe:
                 'explicit_actuator_gains_and_caps_verified': True, 'native_solver_caps_readback_verified': False,
                 'hardware_calibration_verified': False}
 
+    @staticmethod
+    def _static_terrain_readback(stage, terrain_paths, rigid_body_api):
+        """Static velocity is allowed only for unanimated rigid-free ancestry.
+
+        A future terrain-replacement owner must invalidate this binding before
+        edits. This is authored-USD readback, not native collision equivalence.
+        """
+        checked = set()
+        for path in (path for row in terrain_paths for path in row):
+            prim = stage.GetPrimAtPath(path)
+            if not prim.IsValid():
+                raise RuntimeError('authored terrain collider is missing')
+            while prim.IsValid() and str(prim.GetPath()) not in checked:
+                if prim.HasAPI(rigid_body_api) or any(a.GetNumTimeSamples() for a in prim.GetAttributes()):
+                    raise RuntimeError('contact motion cannot assume static terrain with rigid or animated ancestry')
+                checked.add(str(prim.GetPath()))
+                prim = prim.GetParent()
+        return {'terrain_motion_reference': 'authored_static_own_terrain',
+                'static_terrain_ancestry_prims_checked': len(checked),
+                'native_static_collision_equivalence_verified': False}
+
     def build_on_admitted_context(self, sim):
         """Author this owned scene; the caller has already acquired admission."""
         if type(sim.cfg.dt) not in (int, float) or sim.cfg.dt not in (.001, .005):
@@ -249,9 +270,11 @@ class NativeSceneRecipe:
         readback.update(native_mass_sum_verified=True, six_excluded_point_loops_per_robot=True,
                         collision_groups_verified=len(env_paths), native_clone_order_resolved=True,
                         physics_qualified=False)
+        readback.update(self._static_terrain_readback(stage, terrain_paths, UsdPhysics.RigidBodyAPI))
         contacts = NativeTerrainContacts(PhysxManager.get_physics_sim_view(), bridge.binding, native_envs,
                                          tuple(terrain_paths[index] for index in order),
-                                         native_to_tensor=wp.to_torch, device=device)
+                                         native_to_tensor=wp.to_torch, device=device,
+                                         terrain_motion_reference=readback['terrain_motion_reference'])
         return NativeSceneState(robot, bridge, NativeEffortWriter(robot, bridge.binding, self.model_spec,
                                                                  len(env_paths), device=device),
                                 contacts, native_envs, torch.tensor([self.origins[i] for i in order], device=device),

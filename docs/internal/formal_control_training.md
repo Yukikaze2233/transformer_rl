@@ -282,6 +282,18 @@ episode固定的物理量不逐tick跳变。载荷突变、单侧衰减、接地
 
 跳跃和台阶使用可见请求所定义的任务参考与物理事件分相。起跳跟踪参考高度与垂向速度；腾空约束关节可达域、轮力矩与落地准备；触地后跟踪下降速度、姿态、冲击及恢复高度。阶段性误差的密度幅度分别以高度项2、速度项1、姿态项1为上限，不用额外外力代替策略能力。reference曲线、接触阈值与请求状态表必须随技能合同冻结；未完成该表时requests阶段不得启动。
 
+### 原生接触点滑移读数
+
+私有[接触读取层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_contacts.py)使用[SDK逐接触点接口](https://docs.omniverse.nvidia.com/kit/docs/omni_physics/107.3/extensions/runtime/source/omni.physics.tensors/docs/api/python.html#omni.physics.tensors.impl.api.RigidContactView.get_contact_data)的force、point、normal、separation、count、start六个缓冲。Kaiser实际安装源码已单独核对：`get_contact_data(dt)`将冲量换为力，count与start为uint32；读取层现接受该类型，并保留仅空pair可使用最大无符号哨兵的规则。重叠、越界、容量达到上限及活动载荷非有限仍拒绝，不能为兼容类型放宽数据完整性。接口文档中“五个数组”的总述与实际六项返回矛盾时，以已pin安装源码的六项实现为准。
+
+每次真实物理刷新后，[native观测桥](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_observation.py)按全部19个实际body顺序读取世界COM线速度与角速度，并用最终native本体COM偏移和当帧link姿态重建世界COM位置。机械写入前使全部COM缓存失效，最后一次写入后重新get_coms；不使用可能早于该写入的SDK惰性COM姿态缓存。body0的link位置、姿态和COM速度还须与root读数一致。结果独立持有数据，携带实际tick、时间、body次序和model epoch，不读actor预测或用轮joint转速替代刚体运动。
+
+对于每个有正法向载荷的轮接触点p，计算`v_point=v_COM+omega_world×(p−p_COM)`，再减地面该点速度并沿实际单位法向去掉法向分量。当前课程的地形均为作者化静态网格；仅在该collider及全部祖先无RigidBodyAPI、无动画采样的显式绑定下，地面速度才为零。没有该绑定、接触点或单位法向时拒绝读取，不能默认静止。该USD检查不等于native碰撞或世界参考系等价验收；之后修改地形必须先使场景绑定失效，不能继续沿用旧“静态”证明。
+
+每轮每物理时刻输出按正法向力加权的切向速度RMS、最大切向速度、法向速度RMS及有效片段数。先投影再按片段速度平方归约，避免相反滑移向量互相抵消；该瞬时接触片段RMS不是跨时间、跨环境或跨训练seed的pooled RMS。无正载荷时数值占位0但loaded=false，不能报成实测无滑移；奖励另按该轮法向载荷超过5N启用。全身接触净力、正载荷和片段数仍独立保留，有害接触统计不缩成只看轮子。物理步现强制在同一刷新后提供该运动数据，源缺失会使该已推进区间fault并拒绝重放；地形运动绑定被改则在下一物理步前拒绝。
+
+运动学只展开两轮实际sensor/filter片段范围，没有对最大预分配buffer再构建一份全体owner前缀，也不把每body平均容量64误当单pair上限；有效单pair70片段已作定向检查。动态索引、有限性与归约同步仍有成本，实际GPU与整轮耗时尚未测量，不据代码路径或CPU检查声称加速比。actor轮角槽、轮速度目标及网络参数量保持原样。
+
 ### 可见时钟参考与独立物理收据
 
 私有[跳跃参考](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_jump_reference.py)仅依赖接受时锁存的可见支撑高度h0、请求增高J和命令时钟，另加恒定的奖励端世界地面锚点；当前真实高度、真正起跳时刻和未来物理状态不反馈进该时钟。该曲线定义任务目标，不输出关节动作，也不替代单一actor。完整环境接线必须在jump模式保持同一份锁存高度同时供actor和参考使用，不能让actor看到另一个持续变化的高度命令。机体和腿的动作仍由同一policy生成。
@@ -455,7 +467,9 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 跳跃参考、独立物理收据及奖励桥接在Kaiser完成合成检查。完整分组共85个用例，其中[84项通过、1条消息断言失败](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-skill-evidence-20261019T043534Z-71b39b58/validation-0002.json)；该项已正确拒绝错误native tick，只是比测试预期更早返回具名错误，修正测试后[单项定向通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-skill-evidence-20261019T043534Z-71b39b58/validation-0003.json)，生产源码与84项通过时完全相同。47项新技能/参考/桥接用例与38项已有奖励回归分开保留，不把重跑相加为实验数。更早分组的33通过、14失败及修正记录也保留：13项是新测试误写既有结果字段名，另一项暴露解析时钟与起跳速度元数据精度不一致，已统一float64且未放宽容差。新检查涵盖221组连续高度与跳高、200Hz/1kHz真实2s计时语义、跨0.48s采样段、单轮或仅力卸载不能充腾空、接地抬高不能充顶点、脚本/健康/取消/失败/超时与reset、协议先完成但真值未完成、错误物理时刻不变更计分状态。这里的物理序列仍为合成输入，SDK上下文、机器人仿真步与正式PPO更新均为零。
 
-正式PPO仍未启动。下一步须在资源准入后实际执行107°场景构建与native接触/执行器回读，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域、真实碰撞间隙/接触点滑移/几何关节余量生产器、辨识参数及通信整链回放、新候选周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停闭环不能替代新候选在真实环境中的联合恢复验收。
+原生接触运动路径在Kaiser通过[55项接触与运动学合成检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-contact-kinematics-20261019T050136Z-45b63811/validation-0001.json)，另通过[83项native观测、执行、回合、地面、奖励和场景回归](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-contact-kinematics-20261019T050136Z-45b63811/validation-0002.json)。将运动计算改成仅展开实际轮片段后，再通过[51项定向检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-contact-kinematics-20261019T050136Z-45b63811/validation-0003.json)，含新增单pair70片段不截断、纯滚动/空转/反向平移、多片段抵消、斜面法向、世界平移、非根COM修改、缺失接触点和fault不重放。分组有重叠，不累加为独立物理实验。[安装源码核对](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-contact-kinematics-20261019T050136Z-45b63811/native-contact-api.json)确认uint32与六缓冲，[本体数据核对](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-contact-kinematics-20261019T050136Z-45b63811/native-contact-source.json)确认COM世界速度接口，并重新pin了所选107°URDF和model_spec；未启动SDK、创建native机器人或执行正式PPO。真实contact patch的world参考系、native cook及实物滑移仍须在准入后的真实场景验收。
+
+正式PPO仍未启动。下一步须在资源准入后实际执行107°场景构建与native接触/执行器回读，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域、真实碰撞间隙与几何关节余量生产器、当前接触点滑移路径的真实SDK验收、辨识参数及通信整链回放、新候选周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停闭环不能替代新候选在真实环境中的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 
