@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntFlag
 import math
+import time
 
 import torch
 
@@ -169,6 +170,7 @@ class NativeTaskEnvironment:
         self._reward_ground_anchor = torch.zeros(self.num_envs, device=self.device)
         self._reward_anchor_valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.last_outcome = None
+        self.last_timing = {}
 
     def validate_collection_config(self, config):
         self.rewards.validate_collection_config(config)
@@ -234,12 +236,15 @@ class NativeTaskEnvironment:
 
     @torch.no_grad()
     def step(self, issued_action, completed_estimate):
+        started = time.perf_counter()
         self._identity()
         self.lifecycle._actions(issued_action)
         if self._current is None or self._in_step:
             raise RuntimeError('native task step needs its initialized published observation')
         if self.terrain_stream is not None:
             self.terrain_stream()
+        streamed = time.perf_counter()
+        physical_timing = {}
         life, plant, composer = self.lifecycle, self.lifecycle.plant, self.rewards.composer
         bridge = plant.scene.observation
         inputs = self._pending_requests or RequestInputs.empty(self.num_envs, self.device)
@@ -264,6 +269,8 @@ class NativeTaskEnvironment:
                              command_mode=current_commands.mode, control_source=source)
 
             def physical(tick):
+                for name, elapsed in getattr(plant, 'last_timing', {}).items():
+                    physical_timing[name] = physical_timing.get(name, 0.) + elapsed
                 sample = self.rewards.sample(tick, episode_id=episode, control_epoch=control, policy_owned=owned)
                 condition = self.conditions.observe(tick, sample, current_commands)
                 truth = self.rewards.skill_measurement(tick, sample, healthy=condition.healthy,
@@ -281,7 +288,9 @@ class NativeTaskEnvironment:
                     # observes actual substeps,not reconstructed100Hz endpoints.
                     self.trace_sink(tick, sample, condition, reference)
 
+            advance_started = time.perf_counter()
             tick = life.advance(issued_action, script_issued=self.preparation_action, physical_observer=physical)
+            advanced = time.perf_counter()
             final_time = bridge.timestamp_s()
             evidence = self.skills.drain_policy_evidence()
             terminated = self.conditions.failure_reasons != 0
@@ -326,7 +335,18 @@ class NativeTaskEnvironment:
             self._current = endpoint.observation.owned()
             final_reasons = self.conditions.failure_reasons.clone()
             horizon_elapsed = torch.where(torch.isfinite(self._policy_at), final_time - self._policy_at, 0)
+            reset_started = time.perf_counter()
             reset = self._reset_rows(done) if done.any() else None
+            reset_finished = time.perf_counter()
+            # 主机墙钟不插入逐步CUDA同步；嵌套physical项不能再加到总耗时。
+            self.last_timing = {
+                'terrain_stream_s': streamed - started,
+                'policy_preparation_s': advance_started - streamed,
+                'advance_and_physical_reward_s': advanced - advance_started,
+                'endpoint_protocol_observation_s': reset_started - advanced,
+                'reset_s': reset_finished - reset_started,
+                **{'physical_' + name: value for name, value in physical_timing.items()},
+            }
             self.last_outcome = {'reward': reward, 'physical_evidence': evidence, 'skill_receipt': skill_receipt,
                                  'request_condition': result, 'request_input': request.owned(),
                                  'terminated': terminated.clone(), 'truncated': truncated.clone(),

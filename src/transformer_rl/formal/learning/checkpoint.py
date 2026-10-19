@@ -255,6 +255,11 @@ class StructuredCheckpointStore:
                    'terrain': _cpu_snapshot(components.terrain.state_dict()), 'protocol': _cpu_snapshot(components.protocol.state_dict()),
                    'global_rng': rng, 'normalization': 'fixed_manual35_81_no_running_statistics',
                    'metadata': _json_metadata({} if metadata is None else metadata)}
+        return self._publish_payload(name, payload)
+
+    def _publish_payload(self, name, payload):
+        """发布完整状态；迁移同样必须经过原有全部验收谓词。"""
+        path = self._path(name)
         # Validate against fresh canonical masks/buffers, not the potentially
         # drifted live buffers. Construction is invisible to caller CPU RNG.
         self._validate_payload(payload)
@@ -321,7 +326,8 @@ class StructuredCheckpointStore:
         return RestoredLearning(self.recipe, components, _cpu_snapshot(payload['global_rng']), aborted,
                                 _document(payload['boundary']))
 
-    def load(self, name):
+    def _read_payload(self, name):
+        """有界且只反序列化一次；调用者随后执行完整状态验收。"""
         path = self._path(name)
         receipt = read_json(Path(str(path) + '.json'))
         if (not isinstance(receipt, dict) or set(receipt) != {'format', 'bytes', 'sha256', 'recipe_sha256', 'boundary',
@@ -342,4 +348,8 @@ class StructuredCheckpointStore:
         if (not isinstance(payload, dict) or payload.get('boundary') != receipt['boundary']
                 or payload.get('metadata') != receipt['metadata']):
             raise ValueError('structured snapshot and receipt describe different completed states')
-        return self._validate_payload(payload)
+        self._read_receipt = receipt
+        return payload
+
+    def load(self, name):
+        return self._validate_payload(self._read_payload(name))

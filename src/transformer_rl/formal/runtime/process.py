@@ -69,11 +69,20 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
     try:
         with ExitStack() as stack:
             if resume_attempt is None:
-                if binding['start_update'] != 0 or binding['prior_transitions'] != 0:
-                    raise ValueError('fresh initialization cannot replace a consumed learning attempt')
-                components = fresh_components(recipe)
-                journal = stack.enter_context(LearningJournal.create(
-                    root / 'journal', recipe.journal_spec(), authorized_boot=binding['boot_id']))
+                specification = read_json(root / 'structured.json') or {}
+                if specification.get('source_transition_required'):
+                    from .transition import load_transition
+
+                    journal = stack.enter_context(LearningJournal(
+                        root / 'journal', writable=True, authorized_boot=binding['boot_id']))
+                    restored = load_transition(root, recipe, journal, binding)
+                    components = restored.components
+                else:
+                    if binding['start_update'] != 0 or binding['prior_transitions'] != 0:
+                        raise ValueError('fresh initialization cannot replace a consumed learning attempt')
+                    components = fresh_components(recipe)
+                    journal = stack.enter_context(LearningJournal.create(
+                        root / 'journal', recipe.journal_spec(), authorized_boot=binding['boot_id']))
             else:
                 journal = stack.enter_context(LearningJournal(
                     root / 'journal', writable=True, authorized_boot=binding['boot_id']))
@@ -112,6 +121,8 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
                         row = {'update': components.trainer.update_index,
                                'curriculum_stage': components.curriculum.stage,
                                'elapsed_s': time.perf_counter() - started,
+                               'collection': collector.last_metrics,
+                               'timing': loop.last_timing,
                                'consumption': components.observed_consumption(recipe.num_envs),
                                'optimization': metrics}
                         metrics_log.write(json.dumps(row, allow_nan=False, separators=(',', ':')) + '\n')

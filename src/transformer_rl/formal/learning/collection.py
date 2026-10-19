@@ -177,6 +177,7 @@ class StructuredCollector:
         collected = {name: [] for name in ('frame', 'critic', 'raw', 'issued', 'mean', 'log_std', 'logp', 'value',
                                           'reward', 'next_value', 'reset', 'velocity', 'contact', 'velocity_delta')}
         all_masks = []
+        environment_timing = {}
         reset_before = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         try:
             for step in range(steps):
@@ -200,6 +201,8 @@ class StructuredCollector:
                 self._current = None
                 self.attempted_vector_steps += 1
                 returned = self.env.step(issued.clone(), estimate)
+                for name, elapsed in getattr(self.env, 'last_timing', {}).items():
+                    environment_timing[name] = environment_timing.get(name, 0.) + elapsed
                 self.returned_vector_steps += 1
                 result = self._step(returned, current, issued)
                 self._check_version(version)
@@ -260,6 +263,8 @@ class StructuredCollector:
                                  'collection_elapsed_s': time.perf_counter() - started,
                                  'attempted_vector_steps_lifetime': self.attempted_vector_steps,
                                  'returned_vector_steps_lifetime': self.returned_vector_steps}
+            if environment_timing:
+                self.last_metrics['environment_host_wall_s'] = environment_timing
             return batch
         except BaseException:
             self._current, self._history = None, None

@@ -7,6 +7,7 @@ use still requires an independently closed timing path and physical evidence.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields, replace
+import time
 
 import torch
 
@@ -82,6 +83,7 @@ class NativePhysicsPlant:
         self.timing_path = timing_path
         self._view, self._faulted, self.targets = scene.robot.root_view, False, None
         self._last_tick_packet = None
+        self.last_timing = {}
         self.contact_history = WheelContactHistory(self.num_envs, self.device, physics_dt_s=self.dt)
         self._springs = [bridge.binding.native_joint_names.index(name) for name in pressure.parameters.joint_names]
         self._active = list(bridge.binding.policy_joint_indices)
@@ -141,6 +143,7 @@ class NativePhysicsPlant:
 
     @torch.no_grad()
     def step_physics(self, *, motor_strength=None, pressure_strength=None):
+        started = time.perf_counter()
         self._identity()
         if self.scene.readback.get('terrain_reset_required_rows', ()):
             raise RuntimeError('new native terrain requires its selected physical reset before any step')
@@ -159,9 +162,11 @@ class NativePhysicsPlant:
             submitted = self.scene.efforts.submit(drive.mean_effort, pressure)
             robot.write_data_to_sim()
             explicit = self.scene.efforts.explicit_actuator_buffer()
+            submitted_at = time.perf_counter()
             self.sim.step(render=False)
             if self.scene.physics_health is not None:
                 self.scene.physics_health.check()
+            simulated_at = time.perf_counter()
             bridge.after_physics_step(bridge.physical_tick + 1)
             motion = bridge.body_motion()
             contacts = self.scene.contacts.read(self.dt, bridge.timestamp_s(), body_motion=motion)
@@ -169,7 +174,9 @@ class NativePhysicsPlant:
             if (motion.physical_tick != bridge.physical_tick or motion.model_epoch != bridge.model_epoch
                     or not torch.equal(motion.timestamp_s, bridge.timestamp_s())):
                 raise RuntimeError('contact motion crossed a native physical or model epoch')
+            ground_started = time.perf_counter()
             ground = self._ground(robot, self.scene)
+            ground_finished = time.perf_counter()
             if not isinstance(ground, GroundReference):
                 raise ValueError('ground query must return named values from this scene geometry')
             clearance = ground.wheel_clearance
@@ -204,6 +211,13 @@ class NativePhysicsPlant:
         result = PhysicalTick(feedback, drive, pressure, submitted, explicit, contacts, measured,
                                 valid, bridge.physical_tick, motion, clearance)
         self._last_tick_packet = result
+        self.last_timing = {
+            'feedback_effort_submission_s': submitted_at - started,
+            'simulation_s': simulated_at - submitted_at,
+            'state_contact_read_s': ground_started - simulated_at,
+            'ground_query_s': ground_finished - ground_started,
+            'measurement_sensor_s': time.perf_counter() - ground_finished,
+        }
         return result
 
     @torch.no_grad()

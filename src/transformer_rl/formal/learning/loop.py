@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import stat
+import time
 
 from .checkpoint import LearningComponents, LearningRecipe, StructuredCheckpointStore
 from ...common.training_control import JSON_LIMIT, TrainingControl, boot_id, file_pin, read_json, write_json
@@ -36,6 +37,7 @@ class StructuredLearningLoop:
         self._faulted, self._finished = False, False
         self._report = None
         self._last_checkpoint = None
+        self.last_timing = {}
         binding = control.binding
         boundary = journal.checkpoint_boundary()
         if (not isinstance(control, TrainingControl) or store.recipe != recipe or store.journal is not journal
@@ -140,6 +142,7 @@ class StructuredLearningLoop:
         """
         if self._faulted or self._finished:
             raise RuntimeError('private learner is faulted or already finished')
+        started = time.perf_counter()
         self.components.validate_binding(self.recipe, self.journal)
         try:
             self._publish('between_updates')
@@ -155,11 +158,14 @@ class StructuredLearningLoop:
             self.components.curriculum.prepare_rollout()
             self.journal.reserve(self.components.curriculum.stage, active_elapsed_s=self._active_elapsed())
             self.components.curriculum.charge_rollout()
+            collection_started = time.perf_counter()
             batch = self.collector.collect(self.recipe.rollout_steps)
+            collection_finished = time.perf_counter()
             if len(batch) != self.recipe.num_envs * self.recipe.rollout_steps:
                 raise ValueError('collector returned a partial or differently sized rollout')
             self._publish('optimizing')
             metrics = self.components.trainer.update(batch)
+            optimization_finished = time.perf_counter()
             self.components.attempted_vector_steps = self.collector.attempted_vector_steps
             self.components.returned_vector_steps = self.collector.returned_vector_steps
             self.journal.finish(self.components.observed_consumption(self.recipe.num_envs),
@@ -169,6 +175,12 @@ class StructuredLearningLoop:
                 return metrics
             self._automatic_checkpoint()
             self._publish('between_updates')
+            self.last_timing = {
+                'boundary_and_reservation_s': collection_started - started,
+                'collection_s': collection_finished - collection_started,
+                'optimization_and_publication_s': optimization_finished - collection_finished,
+                'accounting_checkpoint_publication_s': time.perf_counter() - optimization_finished,
+            }
             return metrics
         except StageValidationRequired:
             raise

@@ -66,10 +66,11 @@ class StructuredTrainingSession(ManagedSession):
 
     @classmethod
     def create(cls, root, recipe, *, runtime_factory, runtime_configuration, resources,
-               python=sys.executable, learner_source=None, name=None):
+               python=sys.executable, learner_source=None, name=None, source_transition_required=False):
         from ..learning.checkpoint import LearningRecipe
 
         if (not isinstance(recipe, LearningRecipe) or recipe.curriculum_promotion != 'exposure'
+                or type(source_transition_required) is not bool
                 or not re.fullmatch(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*', runtime_factory)):
             raise ValueError('structured session requires the complete exposure recipe and runtime factory')
         executable = Path(python).expanduser().absolute()
@@ -93,7 +94,8 @@ class StructuredTrainingSession(ManagedSession):
             'architecture': 'structured_transformer', 'history_length': recipe.policy.history_length,
             'num_envs': recipe.num_envs, 'rollout_steps': recipe.rollout_steps, 'device': recipe.device,
             'recipe_sha256': recipe.sha256, 'runtime_factory': runtime_factory,
-            'resources': resources, 'pins': pins, 'automatic_evaluation': False})
+            'resources': resources, 'pins': pins, 'automatic_evaluation': False,
+            **({'source_transition_required': True} if source_transition_required else {})})
         write_json(root / 'structured.pin.json', file_pin(root.resolve() / 'structured.json'))
         return cls(root)
 
@@ -176,6 +178,12 @@ class StructuredTrainingSession(ManagedSession):
                 start, spent, transitions = (final['summary'][key] for key in
                                             ('update', 'session_active_elapsed_s', 'cumulative_transitions'))
                 resume_pin = file_pin(previous / 'exit.json')
+            elif self.spec.get('source_transition_required'):
+                from .transition import transition_metadata
+
+                inherited = transition_metadata(self.root)
+                start, spent, transitions = (inherited[key] for key in
+                                             ('update', 'active_elapsed_s', 'returned_transitions'))
             descriptor = _lease(self.root)
             leases.callback(os.close, descriptor)
             held = []

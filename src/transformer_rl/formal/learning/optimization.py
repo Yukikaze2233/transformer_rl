@@ -232,7 +232,9 @@ class StructuredPPOTrainer:
         batch = batch.owned()
         actor_endpoints = batch.masks.actor.nonzero().flatten()
         critic_endpoints = batch.masks.critic.nonzero().flatten()
+        validated_at = time.perf_counter()
         self._validate_behavior(batch, actor_endpoints)
+        behavior_at = time.perf_counter()
         advantages = batch.advantages.clone()
         if actor_endpoints.numel():
             selected = advantages[actor_endpoints]
@@ -251,6 +253,10 @@ class StructuredPPOTrainer:
         tensors = {}
         norms = []
         critic_norms = []
+        timing = {'batch_validation_copy_s': validated_at - started,
+                  'behavior_validation_s': behavior_at - validated_at,
+                  'update_setup_snapshot_s': time.perf_counter() - behavior_at,
+                  'minibatch_snapshot_s': 0., 'actor_backward_step_s': 0., 'probe_guard_s': 0.}
         try:
             if actor_endpoints.numel() and self.update_index % self.config.diagnostics_interval == 0:
                 tensors.update(self._gradient_diagnostics(batch, probe, advantages))
@@ -262,7 +268,10 @@ class StructuredPPOTrainer:
                 for endpoints in torch.tensor_split(order, self.config.minibatches):
                     if not endpoints.numel():
                         continue
+                    snapshot_at = time.perf_counter()
                     transaction = _ParameterTransaction(self.model.actor, self.actor_optimizer)
+                    backward_at = time.perf_counter()
+                    timing['minibatch_snapshot_s'] += backward_at - snapshot_at
                     self.actor_optimizer.zero_grad(set_to_none=True)
                     self._actor_backward(batch, endpoints, advantages)
                     norm = nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.config.max_gradient_norm)
@@ -271,6 +280,8 @@ class StructuredPPOTrainer:
                     metrics['actor_endpoint_uses'] += endpoints.numel()
                     self.consumed['actor_optimizer_steps'] += 1
                     self.consumed['actor_endpoint_uses'] += endpoints.numel()
+                    guard_at = time.perf_counter()
+                    timing['actor_backward_step_s'] += guard_at - backward_at
                     kl = self._kl(batch, probe)
                     norms.append(norm.detach())
                     # One admission decision is unavoidable for real early stop.
@@ -284,11 +295,13 @@ class StructuredPPOTrainer:
                         metrics['actor_stop_reason'] = 'rejected_actor_and_auxiliary_transaction'
                     else:
                         metrics['retained_actor_steps'] += 1
+                    timing['probe_guard_s'] += time.perf_counter() - guard_at
                     if status:
                         actor_finished = True
                         if status == 1:
                             metrics['actor_stop_reason'] = 'target_kl_reached'
                         break
+            full_guard_at = time.perf_counter()
             full_kl = self._kl(batch, actor_endpoints)
             if not torch.isfinite(full_kl) or full_kl > self.config.reject_kl:
                 tensors['rejected_full_rollout_kl'] = full_kl
@@ -300,6 +313,7 @@ class StructuredPPOTrainer:
                 full_kl = self._kl(batch, actor_endpoints)
             tensors['full_rollout_kl_after_guard'] = full_kl
             actor_finished_at = time.perf_counter()
+            timing['full_rollout_guard_s'] = actor_finished_at - full_guard_at
             for _ in range(self.config.epochs):
                 order = critic_endpoints[torch.randperm(critic_endpoints.numel(), device=batch.windows.device)]
                 for endpoints in torch.tensor_split(order, self.config.minibatches):
@@ -332,6 +346,7 @@ class StructuredPPOTrainer:
             metrics['critic_elapsed_s'] = time.perf_counter() - actor_finished_at
             metrics['total_optimization_elapsed_s'] = time.perf_counter() - started
             metrics['cumulative_consumed'] = dict(self.consumed)
+            metrics['host_wall_s'] = timing
             return metrics
         except BaseException:
             # A failed update cannot leave an uncheckpointable half-transaction.
