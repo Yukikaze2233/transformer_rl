@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import math
 import xml.etree.ElementTree as ET
 
@@ -12,6 +13,7 @@ from ._native_scene import NativeSceneState
 from ._physical_observation import MechanicalBinding
 from ._terrain_geometry import TerrainQuery, TerrainQueryBatch
 from ._terrain_tasks import TerrainCourse
+from ._wheel_clearance import CylinderTerrainGap, WheelClearanceSample
 
 
 @dataclass(frozen=True)
@@ -20,14 +22,28 @@ class WheelCollisionCentres:
     local_xyz_m: tuple[tuple[float, float, float], tuple[float, float, float]]
     radius_m: tuple[float, float]
     length_m: tuple[float, float]
+    local_axis_xyz: tuple[tuple[float, float, float], tuple[float, float, float]] = ((0., 0., 1.), (0., 0., 1.))
+    urdf_sha256: str | None = None
+
+    def __post_init__(self):
+        if (len(self.body_names) != 2 or len(set(self.body_names)) != 2
+                or any(len(values) != 2 for values in (self.local_xyz_m, self.radius_m, self.length_m,
+                                                       self.local_axis_xyz))
+                or any(len(v) != 3 or any(type(x) not in (float, int) or not math.isfinite(x) for x in v)
+                       for v in (*self.local_xyz_m, *self.local_axis_xyz))
+                or any(type(x) not in (float, int) or not math.isfinite(x) or x <= 0
+                       for x in (*self.radius_m, *self.length_m))
+                or any(abs(sum(x * x for x in v) - 1) > 1e-10 for v in self.local_axis_xyz)):
+            raise ValueError('wheel collision cylinders require complete finite geometry and unit local axes')
 
     @classmethod
     def from_urdf(cls, urdf, binding: MechanicalBinding):
         if not isinstance(binding, MechanicalBinding):
             raise ValueError('wheel centres require the complete mechanical binding')
-        root = ET.fromstring(urdf)
+        raw = urdf.encode('utf-8') if isinstance(urdf, str) else urdf
+        root = ET.fromstring(raw)
         bodies = tuple(binding.native_body_names[i] for i in binding.wheel_body_indices)
-        offsets, radii, lengths = [], [], []
+        offsets, radii, lengths, axes = [], [], [], []
         for name in bodies:
             links = [link for link in root.findall('link') if link.attrib.get('name') == name]
             if len(links) != 1 or len(links[0].findall('collision')) != 1:
@@ -38,13 +54,19 @@ class WheelCollisionCentres:
             if cylinder is None or origin is None or 'xyz' not in origin.attrib:
                 raise ValueError('wheel cylinder origin and dimensions must be explicit')
             xyz = tuple(float(v) for v in origin.attrib['xyz'].split())
+            rpy = tuple(float(v) for v in origin.attrib.get('rpy', '0 0 0').split())
             radius, length = float(cylinder.attrib['radius']), float(cylinder.attrib['length'])
-            if len(xyz) != 3 or not all(math.isfinite(v) for v in (*xyz, radius, length)) or min(radius, length) <= 0:
+            if (len(xyz) != 3 or len(rpy) != 3 or not all(math.isfinite(v) for v in (*xyz, *rpy, radius, length))
+                    or min(radius, length) <= 0):
                 raise ValueError('wheel collider geometry is invalid')
             offsets.append(xyz)
             radii.append(radius)
             lengths.append(length)
-        return cls(bodies, tuple(offsets), tuple(radii), tuple(lengths))
+            roll, pitch, yaw = rpy
+            # URDF cylinders use local Z, transformed by Rz(yaw) Ry(pitch) Rx(roll).
+            sr, cr, sp, cp, sy, cy = math.sin(roll), math.cos(roll), math.sin(pitch), math.cos(pitch), math.sin(yaw), math.cos(yaw)
+            axes.append((cy * sp * cr + sy * sr, sy * sp * cr - cy * sr, cp * cr))
+        return cls(bodies, tuple(offsets), tuple(radii), tuple(lengths), tuple(axes), hashlib.sha256(raw).hexdigest())
 
 
 @dataclass(frozen=True)
@@ -53,6 +75,7 @@ class GroundQuerySample:
     world_xyz_m: torch.Tensor
     timestamp_s: torch.Tensor
     model_epoch: int
+    wheel_clearance: WheelClearanceSample
 
 
 class TerrainCoverageError(RuntimeError):
@@ -93,6 +116,13 @@ class NativeGroundQuery:
         self._meshes = scene.terrain_meshes
         self._wheels = list(binding.wheel_body_indices)
         self._offsets = torch.tensor(wheels.local_xyz_m, dtype=torch.float32, device=self.device)
+        self._offsets_exact = torch.tensor(wheels.local_xyz_m, dtype=torch.float64, device=self.device)
+        self._axes = torch.tensor(wheels.local_axis_xyz, dtype=torch.float64, device=self.device)
+        self._geometry = wheels
+        self._clearance = CylinderTerrainGap(self.batch, wheels.radius_m, wheels.length_m)
+        self._source_sha = scene.readback.get('selected_urdf_sha256')
+        if self._source_sha is not None and self._source_sha != wheels.urdf_sha256:
+            raise ValueError('wheel URDF bytes differ from the actual selected scene source')
         self.last_sample = None
 
     @torch.no_grad()
@@ -101,6 +131,7 @@ class NativeGroundQuery:
         bridge.before_state_read()
         if (scene is not self.scene or robot is not self.scene.robot or robot.root_view is not self._view
                 or scene.terrain_meshes is not self._meshes
+                or scene.readback.get('selected_urdf_sha256') != self._source_sha
                 or not torch.equal(scene.environment_origins_m, self._origins)):
             raise RuntimeError('native ground owner, terrain or environment origins changed')
         poses = robot.data.body_link_pose_w.torch
@@ -122,7 +153,22 @@ class NativeGroundQuery:
         points = torch.cat((root[:, None, :3], selected[..., :3] + rotated), 1)
         local_xy = points[..., :2] - self._origins[:, None, :2]
         result = self.batch.at(local_xy)
-        sample = GroundQuerySample(result, points.clone(), bridge.timestamp_s(), bridge.model_epoch)
+        # Preserve authored offset/width precision for the collision query.
+        # It uses the whole oriented solid, not link-Z minus a nominal radius.
+        exact_q = q.double() / q.double().norm(dim=-1, keepdim=True)
+
+        def rotate(value):
+            value = value.expand(self.num_envs, -1, -1)
+            cross = torch.linalg.cross(exact_q[..., :3], value)
+            return value + 2 * (exact_q[..., 3:] * cross + torch.linalg.cross(exact_q[..., :3], cross))
+
+        exact_centres = selected[..., :3].double() + rotate(self._offsets_exact)
+        clearance = self._clearance.at(exact_centres - self._origins[:, None].double(), rotate(self._axes))
+        wheel_sample = WheelClearanceSample(clearance, self._origins.clone(), bridge.timestamp_s(),
+                                            bridge.physical_tick, bridge.model_epoch, self._geometry.body_names,
+                                            self._geometry.urdf_sha256, self._source_sha is not None,
+                                            scene.readback.get('native_wheel_collision_equivalence_verified') is True)
+        sample = GroundQuerySample(result, points.clone(), bridge.timestamp_s(), bridge.model_epoch, wheel_sample)
         self.last_sample = sample
         if not result.valid.all():
             raise TerrainCoverageError(sample)
@@ -130,4 +176,4 @@ class NativeGroundQuery:
         if bridge.model_epoch != sample.model_epoch or not torch.equal(bridge.timestamp_s(), sample.timestamp_s):
             raise RuntimeError('ground query crossed a reported physical/model epoch')
         return GroundReference(result.height_m[:, 0] + self._origins[:, 2],
-                               result.height_m[:, 1:] + self._origins[:, 2:3], result.friction[:, 1:])
+                               result.height_m[:, 1:] + self._origins[:, 2:3], result.friction[:, 1:], wheel_sample)

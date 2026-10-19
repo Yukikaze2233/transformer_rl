@@ -26,12 +26,15 @@ def fixture(tmp_path):
     (tmp_path / 'model_spec.json').write_bytes(model)
     usd = b'# synthetic fixture, never loaded by an SDK\n'
     (tmp_path / 'robot.usda').write_bytes(usd)
+    urdf = b'<robot name="synthetic_scene_configuration_fixture"/>\n'
+    (tmp_path / 'robot.urdf').write_bytes(urdf)
     manifest.update(spring_joint_names=['L_spring_slide', 'R_spring_slide'],
                     passive_damping={'active_Nm_s_per_rad': 0., 'passive_hinge_Nm_s_per_rad': .002,
                                      'slider_N_s_per_m': .002},
-                    nominal_base_height_m=.32, self_collision_enabled=False, usd='robot.usda',
+                    nominal_base_height_m=.32, self_collision_enabled=False, usd='robot.usda', urdf='robot.urdf',
                     files_sha256={'model_spec.json': hashlib.sha256(model).hexdigest(),
-                                  'robot.usda': hashlib.sha256(usd).hexdigest()})
+                                  'robot.usda': hashlib.sha256(usd).hexdigest(),
+                                  'robot.urdf': hashlib.sha256(urdf).hexdigest()})
     raw = (json.dumps(manifest, indent=2) + '\n').encode()
     (tmp_path / 'manifest.json').write_bytes(raw)
     sha = hashlib.sha256(raw).hexdigest()
@@ -75,6 +78,18 @@ def test_recipe_and_configs_do_not_import_or_start_an_sdk(tmp_path):
     assert configs['wheels']['armature']['L_joint3'] == parameters().additional_armature[4]
     assert configs['wheels']['friction']['R_joint3'] == parameters().coulomb_effort[5]
     assert all(v == 0 for v in configs['pressure']['armature'].values())
+
+
+def test_scene_without_bound_urdf_cannot_offer_a_wheel_geometry_source(tmp_path):
+    recipe, _, manifest, *_ = fixture(tmp_path)
+    del manifest['urdf']
+    raw = (json.dumps(manifest, indent=2) + '\n').encode()
+    (tmp_path / 'manifest.json').write_bytes(raw)
+    before = set(sys.modules)
+    with pytest.raises(ValueError, match='complete selected asset'):
+        NativeSceneRecipe(tmp_path, hashlib.sha256(raw).hexdigest(), recipe.response,
+                           recipe.origins, recipe.meshes)
+    assert not ({'isaaclab', 'isaaclab_physx', 'omni', 'isaacsim'} & (set(sys.modules) - before))
 
 
 def test_parameter_readback_separates_explicit_passive_damping_from_zero_solver_pd(tmp_path):

@@ -80,7 +80,7 @@ class SkillMeasurement:
     healthy: torch.Tensor
     true_failure: torch.Tensor
     velocity_reference: str = 'base_link_origin_world_z'
-    clearance_reference: str = 'actual_wheel_collider_lowest_point_minus_own_terrain'
+    clearance_reference: str = 'whole_cylinder_minimum_world_z_gap_over_own_terrain_footprint'
 
 
 @dataclass(frozen=True)
@@ -202,7 +202,7 @@ class PhysicalJumpEvidence:
                 or self._tick % self.substeps == 0 and self._drained_tick != self._tick):
             raise ValueError('physical evidence requires every next native tick and one drain per policy interval')
         if (sample.velocity_reference != 'base_link_origin_world_z'
-                or sample.clearance_reference != 'actual_wheel_collider_lowest_point_minus_own_terrain'):
+                or sample.clearance_reference != 'whole_cylinder_minimum_world_z_gap_over_own_terrain_footprint'):
             raise ValueError('physical evidence requires actual link-origin velocity and collision clearance')
         invalid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         for name, width in (('root_world_z_m', None), ('ground_world_z_m', None),

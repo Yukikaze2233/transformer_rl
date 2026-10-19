@@ -17,6 +17,7 @@ from ._native_scene import NativeSceneState
 from ._output_actuation import DriveInterval, EffectiveDriveResponse, FeedbackEffort, OutputFeedbackController
 from ._passive_pressure import NativeSliderPressure, PressureState
 from ._physical_observation import MeasuredState, RigidBodyMotion, WheelContactHistory
+from ._wheel_clearance import WheelClearanceSample
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class GroundReference:
     root_world_z_m: torch.Tensor
     wheel_world_z_m: torch.Tensor
     wheel_friction: torch.Tensor
+    wheel_clearance: WheelClearanceSample | None = None
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,7 @@ class PhysicalTick:
     contact_labels_valid: torch.Tensor
     physical_tick: int
     body_motion: RigidBodyMotion
+    wheel_clearance: WheelClearanceSample | None = None
 
 
 class NativePhysicsPlant:
@@ -135,6 +138,13 @@ class NativePhysicsPlant:
             ground = self._ground(robot, self.scene)
             if not isinstance(ground, GroundReference):
                 raise ValueError('ground query must return named values from this scene geometry')
+            clearance = ground.wheel_clearance
+            if clearance is not None and (not isinstance(clearance, WheelClearanceSample)
+                    or clearance.physical_tick != bridge.physical_tick or clearance.model_epoch != bridge.model_epoch
+                    or not torch.equal(clearance.timestamp_s, bridge.timestamp_s())
+                    or clearance.body_names != tuple(bridge.binding.native_body_names[i]
+                                                     for i in bridge.binding.wheel_body_indices)):
+                raise ValueError('wheel clearance differs from the actual physical tick/model/named wheel identity')
             self._matrix('ground wheel z', ground.wheel_world_z_m, 2)
             self._matrix('wheel friction', ground.wheel_friction, 2)
             if (not isinstance(ground.root_world_z_m, torch.Tensor) or ground.root_world_z_m.shape != (self.num_envs,)
@@ -156,7 +166,7 @@ class NativePhysicsPlant:
             bridge.invalidate_state()
             raise
         result = PhysicalTick(feedback, drive, pressure, submitted, explicit, contacts, measured,
-                                valid, bridge.physical_tick, motion)
+                                valid, bridge.physical_tick, motion, clearance)
         self._last_tick_packet = result
         return result
 

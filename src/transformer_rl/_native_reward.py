@@ -1,8 +1,8 @@
 """Private native reward inputs bound to the actual model and collection clock.
 
 This adapter reads its own admitted plant only. It creates no SDK, context,
-training run or qualification. True wheel clearance and the complete task/
-termination environment remain separate; contacts cannot invent that evidence.
+training run or qualification. Skill measurements require the whole-cylinder
+geometry packet and native collision equivalence, never contact separation.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import torch
 from ._control_reward import PhysicalRewardComposer, RewardPhysics, RewardTuning
 from ._joint_boundaries import JointBoundaryState, LegBoundaryGeometry
 from ._native_plant import NativePhysicsPlant, PhysicalTick
+from ._skill_evidence import SkillMeasurement
 from ._structured_collection import StructuredCollectionConfig
 
 
@@ -61,6 +62,7 @@ class NativeRewardBridge:
         self.num_envs, self.device, self.knee_margin_rad = plant.num_envs, plant.device, float(knee_margin_rad)
         self._view, self._physics_view = plant.scene.robot.root_view, plant.scene.contacts.physics_view
         self._epoch, self._ready, self._last_tick = None, False, bridge.physical_tick
+        self._last_sample = None
         self.composer = None
         self.refresh_model()
         tuning = RewardTuning(geometry.nominal_mass_kg, gamma=collection_config.gamma,
@@ -195,8 +197,58 @@ class NativeRewardBridge:
         if bridge.physical_tick != tick.physical_tick or bridge.model_epoch != self._epoch:
             raise RuntimeError('native reward sampling crossed a physical or mechanical model epoch')
         self._last_tick = tick.physical_tick
-        return NativeRewardSample(sample, boundary, self.mass_kg_by_environment.clone(), tick.physical_tick,
-                                    self._epoch, self.plant.controller.pair_domain is not None)
+        result = NativeRewardSample(sample, boundary, self.mass_kg_by_environment.clone(), tick.physical_tick,
+                                     self._epoch, self.plant.controller.pair_domain is not None)
+        self._last_sample = result
+        return result
+
+    @torch.no_grad()
+    def skill_measurement(self, tick, sample, *, healthy, true_failure):
+        self._identity()
+        bridge = self.plant.scene.observation
+        bridge.before_state_read()
+        if (not self._ready or sample is not self._last_sample or tick is not self.plant._last_tick_packet
+                or not isinstance(sample, NativeRewardSample) or not isinstance(tick, PhysicalTick)
+                or sample.physical_tick != bridge.physical_tick or tick.physical_tick != sample.physical_tick
+                or sample.model_epoch != bridge.model_epoch or sample.model_epoch != self._epoch):
+            raise ValueError('skill truth requires the actual last native reward and physical tick')
+        for name, value in (('healthy', healthy), ('true failure', true_failure)):
+            self._tensor(name, value, (self.num_envs,), torch.bool)
+        clearance = tick.wheel_clearance
+        expected_wheels = tuple(bridge.binding.native_body_names[i] for i in bridge.binding.wheel_body_indices)
+        if (clearance is None or not clearance.source_geometry_bound
+                or not clearance.native_collision_equivalence_verified
+                or not isinstance(clearance.urdf_sha256, str) or len(clearance.urdf_sha256) != 64
+                or clearance.urdf_sha256 != self._scene.readback.get('selected_urdf_sha256')
+                or clearance.body_names != expected_wheels or clearance.model_epoch != self._epoch
+                or clearance.physical_tick != tick.physical_tick
+                or clearance.reference != 'whole_cylinder_minimum_world_z_gap_over_own_terrain_footprint'
+                or not torch.equal(clearance.timestamp_s, bridge.timestamp_s())
+                or not torch.equal(clearance.environment_origins_world_m, self._scene.environment_origins_m)):
+            raise ValueError('skill truth requires same-tick whole-wheel geometry and actual native collision equivalence')
+        gap = clearance.geometry
+        self._tensor('wheel clearance', gap.vertical_gap_m, (self.num_envs, 2))
+        for name, value in (('valid clearance', gap.valid), ('covered wheel footprint', gap.domain_covered)):
+            self._tensor(name, value, (self.num_envs, 2), torch.bool)
+        if (not gap.valid.all() or not gap.domain_covered.all() or not torch.isfinite(gap.vertical_gap_m).all()
+                or (healthy & true_failure).any()):
+            raise ValueError('skill truth cannot invent gap values outside authored terrain or after a true failure')
+        physics = sample.physics
+        gravity = physics.gravity_body
+        tilt = torch.atan2(gravity[:, :2].norm(dim=-1), -gravity[:, 2])
+        result = SkillMeasurement(tick.physical_tick, physics.timestamp_s.clone(), physics.episode_id.clone(),
+                                  physics.control_epoch.clone(), physics.root_world_z_m.clone(),
+                                  (physics.root_world_z_m - physics.height_above_ground_m).clone(),
+                                  physics.velocity_origin_world_m_s[:, 2].clone(),
+                                  tick.contacts.normal_load_n[:, list(bridge.binding.wheel_body_indices)].clone(),
+                                  gap.vertical_gap_m.clone(), tilt, physics.angular_velocity_body_rad_s.norm(dim=-1),
+                                  physics.policy_owned.clone(), healthy.clone(), true_failure.clone())
+        self._identity()
+        bridge.before_state_read()
+        if (bridge.physical_tick != result.physical_tick or bridge.model_epoch != sample.model_epoch
+                or not torch.equal(bridge.timestamp_s(), result.timestamp_s)):
+            raise RuntimeError('skill truth sampling crossed a physical or mechanical model epoch')
+        return result
 
     @torch.no_grad()
     def observe(self, tick, reference, *, episode_id, control_epoch, policy_owned):

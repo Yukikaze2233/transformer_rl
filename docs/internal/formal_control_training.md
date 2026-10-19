@@ -294,6 +294,18 @@ episode固定的物理量不逐tick跳变。载荷突变、单侧衰减、接地
 
 运动学只展开两轮实际sensor/filter片段范围，没有对最大预分配buffer再构建一份全体owner前缀，也不把每body平均容量64误当单pair上限；有效单pair70片段已作定向检查。动态索引、有限性与归约同步仍有成本，实际GPU与整轮耗时尚未测量，不据代码路径或CPU检查声称加速比。actor轮角槽、轮速度目标及网络参数量保持原样。
 
+### 整轮碰撞体的垂向间隙
+
+私有[轮体间隙查询](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_wheel_clearance.py)消费同一份作者化地形三角网格，以及从所选URDF解析的两轮圆柱半径、宽度、碰撞中心偏移和collision RPY。圆柱局部轴为Z，经collision RPY及当帧实际link四元数旋转到世界系；中心同样应用碰撞偏移。原始URDF SHA与场景manifest绑定，不能用visual或轮铰点代替，也不能丢掉圆柱宽度和倾斜后轴向分量。
+
+这里的gap明确定义为：整个有限实心圆柱投影在已作者化地形上的各点，`圆柱点世界Z−该XY处最高地形世界Z`的最小值。它是有符号垂向间隙，不是欧氏最近距离或PhysX/EPA穿透深度；不能把两种量换名用于阈值。倾斜轮子、横坡和台阶轮缘均会影响该最小值。只查询轮心下方、只取全轮最低点下方地形，或者`linkZ−radius`都可能漏掉轮缘下更高的台阶。
+
+每个三角面以自己的垂向棱柱约束圆柱；分别检查无约束支撑点、三条竖直边平面与三条竖直顶点线的活动集，得到可行几何见证点。该闭式求解不依赖离散轮缘点采样，也不把有限三角面外推成无限坡面。只展开实际圆柱AABB相交的网格单元，而非对所有环境构造完整地形面乘积。未知地形孔洞用真实圆柱投影相交判定，不能仅凭AABB角点覆盖就误报；轮体任何部分超出作者化域则保留逐轮valid=false和NaN，不补无限平地。当前课程竖直面须被实际top faces覆盖为台阶立面，隐藏的额外高墙会拒绝绑定。
+
+[原生地面查询](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_ground.py)保持原有root/轮心参考高度的独立口径，另输出完整轮体gap、圆柱/地形见证点、面ID、域覆盖、时间、tick和model epoch。数据独立持有，随实际`PhysicalTick`传递；旧帧、错误轮名、错误URDF或clock不符不得混入同一个物理包。场景构建只记录源绑定，`native_wheel_collision_equivalence_verified`仍明确为false，作者化source通过不自动获得native cook资格。
+
+[原生奖励桥](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_reward.py)可由刚发布的实际reward/physical packet产生技能测量，直接使用世界垂向速度、正法向载荷和该轮体间隙，不用净力向量大小充载荷。源未绑定、footprint无效、缺少实际原生碰撞等价证明或copy/旧reward包均拒绝进入技能真值。这些是私有接口约束；完整环境仍须实现越界逐行结局/reset归属及真实SDK场景验收。
+
 ### 膝内夹角、目标投影与原生奖励模型绑定
 
 私有[关节边界生产器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_joint_boundaries.py)从所选manifest和model_spec原始字节绑定源SHA、实际native关节/body次序与几何定义。每侧由具名髋输出找到上连杆、被动膝和下连杆轮铰点；将髋销至膝销、轮销至膝销两向量投影到真实铰轴法平面，用atan2求内夹角。它使用当帧完整body link姿态，不以电机角差、轮角或单个原生关节坐标冒充几何内角。原生被动关节的有符号限位距离另行保留，几何角不因它显示“安全”而被覆盖；膝销与下连杆原点的残差也保留。
@@ -316,7 +328,7 @@ reward的gamma和policy dt直接来自同一份`StructuredCollectionConfig`，�
 
 默认压缩0.20s，深度d=min(0.04m,h0−0.17m)，采用五次minimum-jerk位置曲线。伸展默认0.10s，速度为v(3u²−2u³)，其总位移为vT/2；起跳速度解方程`vT/2 + v²/(2g) = J+d`，保证总顶点是h0+J而非在伸展位移上再额外增加J。若该伸展位移超过0.40m支撑高度余量，则缩短伸展时间并重新解速度，保持原请求顶点，不裁掉高请求。压缩、伸展和自由飞行入口的位置与速度连续；预计落回h0后参考保持h0且速度归零，此落地保持切换不声明速度连续。事件时钟及其解析起跳速度保留float64，奖励目标投影为float32。该构造覆盖连续h0∈[0.17,0.40]、J∈[0.03,0.30]，但不证明所需加速度、力矩或时间在107°实物上可达。
 
-私有[物理技能评价器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_skill_evidence.py)与可部署请求FSM共享请求ID和接受收据，但独立读取每个PRE-reset物理子步。默认双轮法向力均至多2N且各自实际碰撞最低点离本地形至少5mm，连续10ms才确认腾空；单轮腾空、仅力降为零或接地伸腿抬高都不能建立飞行顶点。实际轮碰撞最低点必须来自已绑定碰撞几何和姿态，不能用轮link高度直接减半径充数。该真实最低点生产器与native碰撞对照尚待接入，当前合成输入检查不构成机器人腾空证据。
+私有[物理技能评价器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_skill_evidence.py)与可部署请求FSM共享请求ID和接受收据，但独立读取每个PRE-reset物理子步。默认双轮法向力均至多2N且各自整轮相对本地形的最小垂向间隙至少5mm，连续10ms才确认腾空；单轮腾空、仅力降为零或接地伸腿抬高都不能建立飞行顶点。轮体生产器已按上文完整几何定义接入实际采样包，但native碰撞对照与物理验收尚未执行，当前合成输入检查不构成机器人腾空证据。
 
 落地需双轮各至少5N，实际间隙不高于10mm、穿透不超过5mm，连续15ms后才开始稳定计时；世界垂向速度不超过0.15m/s、倾角不超过0.25rad、角速度范数不超过0.5rad/s，再连续稳定2s才可完成。任一条件失效重新计时，漏物理步直接拒绝，不插补“稳定时间”。成功只在完整100Hz区间的最终物理端点发布，避免区间首子步刚满足2s、后子步已经失稳却提前计分。物理跟踪器不在0.48s的rollout切段时清零。
 
@@ -487,7 +499,11 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 几何边界和奖励源绑定先在Kaiser通过[35项合成检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-leg-reward-20261019T052828Z-8f8bcb45/validation-0001.json)，增加运行中源身份校验后通过[146项整体回归](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-leg-reward-20261019T052828Z-8f8bcb45/validation-0002.json)。真实资产角度探针随后显式采用source root高度，[单项几何复核通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-leg-reward-20261019T052828Z-8f8bcb45/validation-0003.json)；首版探针的公共世界平移不影响角度，原记录和澄清说明保留，没有把它当出生验收。最终加入显式冷恢复ID及动作边界构造检查后，[21项奖励桥定向检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-leg-reward-20261019T052828Z-8f8bcb45/validation-0004.json)。分组有重叠，不相加为独立实验或宣称146项是最后一个单次运行。检查覆盖三维姿态/原生body次序、超限、几何与关节坐标不一致、共同解缠、逐环境质量、参数缓冲复用、错误限位/重力/源身份、模型epoch失效、重复物理包、折扣及脚本归属；SDK上下文、机器人仿真步和正式PPO仍为零。
 
-正式PPO仍未启动。下一步须在资源准入后实际执行107°场景构建与native接触/执行器回读，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域、真实整轮碰撞间隙生产器、当前滑移/几何余量/质量重力路径的真实SDK验收、辨识参数及通信整链回放、新候选周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停闭环不能替代新候选在真实环境中的联合恢复验收。
+整轮间隙、采样包和技能输入绑定在Kaiser通过[130项回归与定向检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-wheel-clearance-20261019T060644Z-8a70dd09/validation-0001.json)。随后[两项独立复核](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-wheel-clearance-20261019T060644Z-8a70dd09/validation-0002.json)中，160组不同姿态和裁剪三角面与SLSQP约束优化结果最大差约7.60e−9m，并独立检查约束可行性及KKT驻点；这些是CPU数值检查，不能解释为真实碰撞精度。所选107°源码代入得到两轮名义垂向gap约0.309780mm和2.304636mm，差1.994856mm，仍不满足原1mm准备条件；没有移动资产或放宽阈值。该source FK不代表出生稳定或实际SDK碰撞等价。
+
+补充所有既有连续地形家族的正反向绑定与场景URDF依赖后，[107项课程/场景/回合/地面/技能接口检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-wheel-clearance-20261019T060644Z-8a70dd09/validation-0003.json)。最后再收紧缺失source SHA与组包期间model epoch改变的拒绝规则，[12项技能输入检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-wheel-clearance-20261019T060644Z-8a70dd09/validation-0004.json)。分组有重叠，不相加为实验数；家族接口检查也不等于144案例物理评价或GPU成本校准。SciPy仅用于Kaiser上已有环境中的独立数值对照，没有加入部署依赖。SDK上下文、真实机器人仿真步和新正式PPO仍为零。
+
+正式PPO仍未启动。下一步须在资源准入后实际执行107°场景构建与native接触/执行器回读，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力路径的真实SDK验收、辨识参数及通信整链回放、新候选周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停闭环不能替代新候选在真实环境中的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 

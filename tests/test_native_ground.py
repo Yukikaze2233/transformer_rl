@@ -171,3 +171,55 @@ def test_recorded_collider_precision_is_not_replaced_by_a_rounded_nominal_offset
     assert centres.local_xyz_m == ((0., 0., offset), (0., 0., -offset))
     assert centres.local_xyz_m[0][2] != .02035
     assert centres.length_m == (.02500000037252903, .02500000037252903)
+
+
+def test_collision_rpy_is_applied_to_the_cylinder_axis_and_urdf_bytes_are_bound():
+    _, bridge, _, _, _ = fixture()
+    names = tuple(bridge.binding.native_body_names[i] for i in bridge.binding.wheel_body_indices)
+    urdf = '<robot>' + ''.join('<link name="' + name + '"><collision><origin xyz="0 0 0" '
+                               'rpy="1.5707963267948966 0 0"/><geometry><cylinder radius=".06" '
+                               'length=".025"/></geometry></collision></link>' for name in names) + '</robot>'
+    value = WheelCollisionCentres.from_urdf(urdf, bridge.binding)
+    assert value.local_axis_xyz[0] == pytest.approx((0., -1., 0.), abs=1e-12)
+    assert len(value.urdf_sha256) == 64
+    assert WheelCollisionCentres.from_urdf(urdf + ' ', bridge.binding).urdf_sha256 != value.urdf_sha256
+    with pytest.raises(ValueError):
+        WheelCollisionCentres.from_urdf(urdf.replace('1.5707963267948966', 'nan'), bridge.binding)
+
+
+def test_full_collision_gap_is_owned_same_tick_and_explicitly_unqualified_without_native_evidence():
+    robot, bridge, scene, courses, centres = fixture()
+    ids = list(bridge.binding.wheel_body_indices)
+    # Rotate the actual link and its offset/axis; neither link-Z minus radius
+    # nor a cylinder assumed to remain vertical describes this packet.
+    robot.data.body_link_pose_w.torch[:, ids, 3:7] = torch.tensor([math.sqrt(.5), 0., 0., math.sqrt(.5)])
+    query = NativeGroundQuery(scene, courses, centres)
+    bridge.after_physics_step(1)
+    value = query(robot, scene).wheel_clearance
+    assert value is query.last_sample.wheel_clearance
+    assert value.physical_tick == 1 and value.model_epoch == bridge.model_epoch
+    assert value.geometry.valid.all() and value.geometry.domain_covered.all()
+    torch.testing.assert_close(value.geometry.vertical_gap_m, torch.tensor([[-.4, -.4], [0., 0.]]), atol=2e-7, rtol=0)
+    assert not value.source_geometry_bound and not value.native_collision_equivalence_verified
+    before = value.geometry.cylinder_point_local_m.clone()
+    robot.data.body_link_pose_w.torch[:, ids, 2] += .1
+    query(robot, scene)
+    assert torch.equal(value.geometry.cylinder_point_local_m, before)
+
+
+def test_complete_footprint_can_be_invalid_while_centre_height_remains_valid():
+    robot, bridge, scene, courses, centres = fixture()
+    robot.data.body_link_pose_w.torch[:, list(bridge.binding.wheel_body_indices), 0] = 2.99
+    query = NativeGroundQuery(scene, courses, centres)
+    bridge.after_physics_step(1)
+    result = query(robot, scene)
+    assert query.last_sample.terrain.valid.all()
+    assert not result.wheel_clearance.geometry.valid.any()
+    assert torch.isnan(result.wheel_clearance.geometry.vertical_gap_m).all()
+
+
+def test_actual_scene_urdf_source_mismatch_is_rejected_before_any_geometry_read():
+    robot, bridge, scene, courses, centres = fixture()
+    scene.readback['selected_urdf_sha256'] = 'a' * 64
+    with pytest.raises(ValueError, match='URDF bytes'):
+        NativeGroundQuery(scene, courses, centres)

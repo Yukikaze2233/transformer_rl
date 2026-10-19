@@ -64,6 +64,7 @@ class NativeSceneRecipe:
             raise ValueError('selected asset manifest hash differs')
         manifest = json.loads(data)
         if (manifest['usd'] not in manifest['files_sha256'] or 'model_spec.json' not in manifest['files_sha256']
+                or not isinstance(manifest.get('urdf'), str) or manifest['urdf'] not in manifest['files_sha256']
                 or manifest['self_collision_enabled'] is not False
                 or type(manifest['nominal_base_height_m']) not in (int, float)
                 or not math.isfinite(manifest['nominal_base_height_m']) or manifest['nominal_base_height_m'] <= 0):
@@ -272,6 +273,8 @@ class NativeSceneRecipe:
                         collision_groups_verified=len(env_paths), native_clone_order_resolved=True,
                         selected_asset_manifest_sha256=self.manifest_sha256,
                         selected_model_spec_sha256=self.manifest['files_sha256']['model_spec.json'],
+                        selected_urdf_sha256=self.manifest['files_sha256'][self.manifest['urdf']],
+                        native_wheel_collision_equivalence_verified=False,
                         nominal_source_mass_kg=self.manifest['total_mass_kg'],
                         physics_qualified=False)
         readback.update(self._static_terrain_readback(stage, terrain_paths, UsdPhysics.RigidBodyAPI))
