@@ -146,6 +146,8 @@ class NativeTaskEnvironment:
                 or not isinstance(commands, TaskCommandProgram)
                 or skills.protocol is not lifecycle.protocol or commands.protocol is not lifecycle.protocol
                 or skills.config.physics_dt_s != lifecycle.plant.dt
+                or skills._tick != lifecycle.plant.scene.observation.physical_tick
+                or skills._drained_tick != skills._tick
                 or commands.jump.config.gravity_m_s2 != rewards.gravity_m_s2
                 or not callable(reset_source) or not callable(sensor_source)
                 or trace_sink is not None and not callable(trace_sink)):

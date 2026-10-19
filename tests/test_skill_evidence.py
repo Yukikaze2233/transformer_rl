@@ -73,6 +73,27 @@ class SkillHarness:
         raise AssertionError('synthetic evidence did not finish within its declared stable interval')
 
 
+def test_tracker_binds_the_real_nonzero_startup_tick_without_inventing_observations():
+    h = SkillHarness()
+    h.tracker = PhysicalJumpEvidence(h.protocol, h.tracker.config, initial_physical_tick=6)
+    now = torch.full((h.n,), .03, dtype=torch.float64)
+    h.tracker.reset(torch.ones(h.n, dtype=torch.bool), now, torch.zeros(h.n, dtype=torch.long),
+                    torch.zeros(h.n, dtype=torch.long), physical_tick=6)
+    assert h.tracker._tick == h.tracker._drained_tick == 6
+    assert not h.tracker._cache_valid.any() and h.tracker._sample is None
+    h.tracker.observe(h.measurement())
+    assert h.tracker._tick == 7
+    torch.testing.assert_close(h.tracker._time, torch.full((h.n,), .035, dtype=torch.float64))
+    with pytest.raises(ValueError, match='next native tick'):
+        h.tracker.observe(h.measurement(physical_tick=9))
+
+
+@pytest.mark.parametrize('tick', [-2, 1, True, 2.0])
+def test_startup_binding_rejects_invalid_or_partial_physical_boundaries(tick):
+    with pytest.raises(ValueError, match='actual complete policy boundary'):
+        PhysicalJumpEvidence(RequestProtocol(2), initial_physical_tick=tick)
+
+
 def assert_protocol_equal(actual, saved):
     assert actual['configuration'] == saved['configuration']
     for key, value in saved['tensors'].items():

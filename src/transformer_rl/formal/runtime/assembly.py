@@ -119,7 +119,8 @@ class NativeTaskRuntime:
         stream = CommandStream(initial, cls._drive_envelope(kin, wheels), tuning.command_rates)
         reference = JumpReferenceProgram(replace(JumpReferenceConfig(), gravity_m_s2=reward.gravity_m_s2))
         commands = TaskCommandProgram(components.protocol, stream, reference, domain=recipe.domain)
-        skills = PhysicalJumpEvidence(components.protocol, SkillEvidenceConfig(physics_dt_s=plant.dt))
+        skills = PhysicalJumpEvidence(components.protocol, SkillEvidenceConfig(physics_dt_s=plant.dt),
+                                       initial_physical_tick=bridge.physical_tick)
         preparer = TaskResetPreparer(components.sampler, components.terrain,
             RecoveryPoseCompiler(kin, tuning.recovery), collision, tuning.reset,
             pose_seed=recipe.training_seed + 104729)

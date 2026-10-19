@@ -121,7 +121,7 @@ class PhysicalJumpEvidence:
     Cancel/reset/timeout records never become success, and IDs remain retired.
     """
 
-    def __init__(self, protocol: RequestProtocol, config=SkillEvidenceConfig()):
+    def __init__(self, protocol: RequestProtocol, config=SkillEvidenceConfig(), *, initial_physical_tick=0):
         if (not isinstance(protocol, RequestProtocol) or not isinstance(config, SkillEvidenceConfig)
                 or protocol.config.policy_dt_s != .01
                 or config.stable_landing_s != protocol.config.stable_landing_s
@@ -132,11 +132,15 @@ class PhysicalJumpEvidence:
         self.protocol, self.config = protocol, config
         self.num_envs, self.device = protocol.num_envs, protocol.device
         self.substeps = round(protocol.config.policy_dt_s / config.physics_dt_s)
-        self._tick, self._drained_tick = 0, 0
+        if (type(initial_physical_tick) is not int or initial_physical_tick < 0
+                or initial_physical_tick % self.substeps):
+            raise ValueError('physical evidence must start at an actual complete policy boundary')
+        self._tick = self._drained_tick = initial_physical_tick
         n, device = self.num_envs, self.device
         self._episode = torch.full((n,), -1, dtype=torch.long, device=device)
         self._control = torch.zeros(n, dtype=torch.long, device=device)
-        self._time = torch.zeros(n, dtype=torch.float64, device=device)
+        self._time = torch.full((n,), initial_physical_tick * config.physics_dt_s,
+                                dtype=torch.float64, device=device)
         self._cache_valid = torch.zeros(n, dtype=torch.bool, device=device)
         self._sample = None
         self._retired = protocol.max_seen_id.detach().clone()
