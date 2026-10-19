@@ -86,16 +86,16 @@ class NativeShapeQueries:
 class UsdTerrainAccess:
     """The SDK adapter is constructed only after external context admission."""
 
-    def __init__(self, stage, geometry_api, physics_api, material_api, sim_utils):
+    def __init__(self, stage, geometry_api, physics_api, material_api, materials):
         self.stage, self.geometry_api, self.physics_api = stage, geometry_api, physics_api
-        self.material_api, self.sim_utils = material_api, sim_utils
+        self.material_api, self.materials = material_api, materials
 
     def exists(self, path):
         return self.stage.GetPrimAtPath(path).IsValid()
 
     def author(self, root, mesh):
         return NativeSceneRecipe._author_terrain_mesh(self.stage, root, mesh, self.geometry_api,
-                                                       self.physics_api, self.sim_utils, enabled=False)
+                                                       self.physics_api, self.materials, enabled=False)
 
     def enabled(self, path, value):
         if not self.physics_api.CollisionAPI(self.stage.GetPrimAtPath(path)).GetCollisionEnabledAttr().Set(value):
@@ -111,14 +111,14 @@ class UsdTerrainAccess:
                 or tuple(geometry.GetFaceVertexCountsAttr().Get()) != (3,) * len(mesh.triangles)
                 or tuple(geometry.GetFaceVertexIndicesAttr().Get()) != tuple(i for f in mesh.triangles for i in f)
                 or geometry.GetSubdivisionSchemeAttr().Get() != 'none'
-                or geometry.GetDoubleSidedAttr().Get() is not True
+                or geometry.GetDoubleSidedAttr().Get() is not False
                 or self.physics_api.CollisionAPI(prim).GetCollisionEnabledAttr().Get() is not enabled
                 or self.physics_api.MeshCollisionAPI(prim).GetApproximationAttr().Get() != 'none'):
             raise ValueError('authored collider topology, enabled state or point3f encoding differs from source')
         root = path.removesuffix('/geometry/mesh')
         targets = tuple(str(p) for p in prim.GetRelationship('material:binding:physics').GetTargets())
-        if targets != (root + '/Material',):
-            raise ValueError('terrain physics material is not bound to its own exact collider')
+        if targets != (self.materials.path_for_friction(mesh.friction),):
+            raise ValueError('terrain collider is not bound to its exact shared physical material')
         material = self.stage.GetPrimAtPath(targets[0])
         value = self.physics_api.MaterialAPI(material)
         friction = struct.unpack('<f', struct.pack('<f', mesh.friction))[0]
@@ -139,11 +139,12 @@ class UsdTerrainAccess:
             prim = self.stage.GetPrimAtPath(root)
             collider = self.stage.GetPrimAtPath(root + '/geometry/mesh')
             children = {str(c.GetPath()) for c in prim.GetChildren()}
-            if (children != {root + '/geometry', root + '/Material'}
+            if (children != {root + '/geometry'}
                     or self.physics_api.CollisionAPI(collider).GetCollisionEnabledAttr().Get() is not False):
                 raise ValueError('retired collider root contains unowned or missing children')
             if not self.stage.RemovePrim(root) or self.exists(root):
                 raise RuntimeError('retired owned collider root was not removed')
+            self.materials.release(root + '/geometry/mesh')
         for parent in sorted(parents):
             if re.search(r'/Terrain/generation_[0-9]+$', parent) and self.exists(parent):
                 if not tuple(self.stage.GetPrimAtPath(parent).GetChildren()):
@@ -196,7 +197,7 @@ class NativeTerrainEditor:
         scene_api = PhysxSchema.PhysxSceneAPI(sim.stage.GetPrimAtPath(sim.cfg.physics_prim_path))
         if scene_api.GetEnableSceneQuerySupportAttr().Get() is not True:
             raise ValueError('native terrain replacement requires scene-query support in the admitted configuration')
-        return cls(scene, UsdTerrainAccess(sim.stage, UsdGeom, UsdPhysics, PhysxSchema, sim_utils),
+        return cls(scene, UsdTerrainAccess(sim.stage, UsdGeom, UsdPhysics, PhysxSchema, scene.terrain_materials),
                     omni.physx.get_physx_interface(), omni.physx.get_physx_simulation_interface(),
                     _physx.acquire_physx_cooking_private_interface(), stage_id_source=get_current_stage_id,
                     physics_view_source=PhysxManager.get_physics_sim_view, native_to_tensor=wp.to_torch,

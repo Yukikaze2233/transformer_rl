@@ -18,6 +18,7 @@ from .actuation import NativeEffortWriter
 from .contacts import NativeTerrainContacts
 from .observation import NativeObservationBridge
 from .health import NativePhysicsHealth
+from .materials import NativeTerrainMaterials
 from ..control.actuation import ResponseParameters
 from ..control.observation import MechanicalBinding
 from ..contracts import ACTION_ORDER
@@ -44,6 +45,7 @@ class NativeSceneState:
     clone_indices: tuple[int, ...]
     readback: dict
     physics_health: NativePhysicsHealth | None = None
+    terrain_materials: NativeTerrainMaterials | None = None
 
 
 class NativeSceneRecipe:
@@ -217,20 +219,16 @@ class NativeSceneRecipe:
         return {'collision_groups_verified': len(environment_paths), 'shared_collision_group_authored': False}
 
     @staticmethod
-    def _author_terrain_mesh(stage, path, mesh, geometry_api, physics_api, sim_utils, *, enabled):
+    def _author_terrain_mesh(stage, path, mesh, geometry_api, physics_api, materials, *, enabled):
         geometry = geometry_api.Mesh.Define(stage, path + '/geometry/mesh')
         geometry.CreatePointsAttr(mesh.vertices_m)
         geometry.CreateFaceVertexCountsAttr([3] * len(mesh.triangles))
         geometry.CreateFaceVertexIndicesAttr([i for face in mesh.triangles for i in face])
         geometry.CreateSubdivisionSchemeAttr('none')
-        geometry.CreateDoubleSidedAttr(True)
+        geometry.CreateDoubleSidedAttr(False)
         physics_api.CollisionAPI.Apply(geometry.GetPrim()).CreateCollisionEnabledAttr(enabled)
         physics_api.MeshCollisionAPI.Apply(geometry.GetPrim()).CreateApproximationAttr('none')
-        material = sim_utils.RigidBodyMaterialCfg(static_friction=mesh.friction, dynamic_friction=mesh.friction,
-                                                  restitution=0., friction_combine_mode='multiply',
-                                                  restitution_combine_mode='multiply')
-        material.func(path + '/Material', material)
-        sim_utils.bind_physics_material(str(geometry.GetPath()), path + '/Material')
+        materials.bind(str(geometry.GetPath()), mesh.friction)
         return str(geometry.GetPath())
 
     def build_on_admitted_context(self, sim, *, physics_health=None):
@@ -247,16 +245,17 @@ class NativeSceneRecipe:
 
         stage = sim.stage
         if any(stage.GetPrimAtPath(path).IsValid()
-               for path in ('/World/envs', '/World/PlantMaterial', '/World/collisions')):
+               for path in ('/World/envs', '/World/PlantMaterial', '/World/collisions', '/World/TerrainMaterials')):
             raise RuntimeError('owned scene roots already exist; never adopt or overwrite another scene')
         env_paths = tuple('/World/envs/env_' + str(index) for index in range(len(self.origins)))
+        materials = NativeTerrainMaterials(stage, sim_utils)
         terrain_paths = []
         for env, origin, meshes in zip(env_paths, self.origins, self.meshes):
             UsdGeom.Xform.Define(stage, env).AddTranslateOp().Set(tuple(float(v) for v in origin))
             paths = []
             for index, mesh in enumerate(meshes):
                 path = env + '/Terrain/surface_' + str(index)
-                paths.append(self._author_terrain_mesh(stage, path, mesh, UsdGeom, UsdPhysics, sim_utils, enabled=True))
+                paths.append(self._author_terrain_mesh(stage, path, mesh, UsdGeom, UsdPhysics, materials, enabled=True))
             terrain_paths.append(tuple(paths))
         cfg = self._articulation_config(sim_utils, ArticulationCfg, IdealPDActuatorCfg)
         robot = Articulation(cfg)
@@ -307,6 +306,7 @@ class NativeSceneRecipe:
         readback = self._actuator_readback(robot, wp.to_torch, device)
         readback.update(groups)
         readback['authored_base_positions_m'] = self._position_readback(authored_base_positions)
+        readback['terrain_materials_unique'] = materials.unique_count
         masses = wp.to_torch(robot.root_view.get_masses())
         if (masses.shape != (len(env_paths), 19) or not torch.isfinite(masses).all() or (masses <= 0).any()
                 or not torch.allclose(masses.sum(-1), masses.new_full((len(env_paths),), self.manifest['total_mass_kg']),
@@ -329,4 +329,4 @@ class NativeSceneRecipe:
         return NativeSceneState(robot, bridge, NativeEffortWriter(robot, bridge.binding, self.model_spec,
                                                                  len(env_paths), device=device),
                                 contacts, native_envs, torch.tensor([self.origins[i] for i in order], device=device),
-                                tuple(self.meshes[i] for i in order), order, readback, physics_health)
+                                tuple(self.meshes[i] for i in order), order, readback, physics_health, materials)

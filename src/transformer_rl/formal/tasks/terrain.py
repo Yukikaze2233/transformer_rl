@@ -214,13 +214,12 @@ class ContinuousTerrainGenerator:
                     low, high = request.extent.x_m
                     width = high - low
                     self._flat_grids[key] = FlatTileGrid(
-                        self._axis(low, high, t.rough_grid_spacing_m),
-                        self._axis(*request.extent.y_m, t.rough_grid_spacing_m),
+                        self._axis(low, high, .5), self._axis(*request.extent.y_m, .5),
                         0., 0, low + width*.25, width*.125, low + width*.75, mu)
                 grid = self._flat_grids[key]
                 bounds = tuple((max(low, -1.), min(high, 1.))
                                for low, high in (request.extent.x_m, request.extent.y_m))
-                keys = grid.tile_keys(*bounds, cells=8, halo=1)
+                keys = grid.tile_keys(*bounds, cells=8, halo=0)
                 return TerrainCourse(request, geometry_seed,
                                      TerrainSurface(tuple(grid.tile(*key, cells=8) for key in keys)), grid, keys)
             surface = TerrainSurface((HeightPatch(request.extent.x_m, request.extent.y_m, ((0., 0.), (0., 0.)), mu),))

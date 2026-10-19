@@ -58,6 +58,7 @@ def test_full_flat_domain_uses_small_exact_plane_tiles_and_one_shared_source():
     first = generator.build(request, geometry_seed=17, resident_tiles=True)
     second = generator.build(replace(request, direction=-1), geometry_seed=18, resident_tiles=True)
     assert first.tile_source is second.tile_source
+    assert len(first.surface.meshes) == 1
     assert first.request.extent == request.extent
     assert all(len(mesh.vertices_m) == 4 for mesh in first.surface.meshes)
     assert max(p.x_m[-1] for p in first.surface.patches) - min(p.x_m[0] for p in first.surface.patches) < 10
