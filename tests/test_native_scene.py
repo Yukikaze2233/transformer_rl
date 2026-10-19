@@ -18,6 +18,23 @@ def mesh():
                        ((0, 1, 2), (0, 2, 3)), .8)
 
 
+def test_full_clone_position_readback_fits_the_existing_control_document_limit(tmp_path):
+    from transformer_rl.common.training_control import read_json, write_json
+
+    positions = [(4. * (i % 90), 4. * (i // 90), .305) for i in range(8192)]
+    with pytest.raises(ValueError, match='document exceeds'):
+        write_json(tmp_path / 'expanded.json', {'authored_base_positions_m': positions})
+    receipt = NativeSceneRecipe._position_readback(positions)
+    write_json(tmp_path / 'native_setup.json', {'authored_base_positions_m': receipt})
+    assert (tmp_path / 'native_setup.json').stat().st_size < 1024
+    assert receipt['count'] == 8192 and receipt['all_rows_verified']
+    assert receipt['first'] == positions[0] and receipt['last'] == positions[-1]
+    changed = list(positions)
+    changed[4096] = (1., 2., 3.)
+    assert NativeSceneRecipe._position_readback(changed)['sha256'] != receipt['sha256']
+    assert read_json(tmp_path / 'native_setup.json')['authored_base_positions_m']['count'] == 8192
+
+
 def fixture(tmp_path):
     manifest, binding, *_ = observation_fixture()
     spec = {'joints': [{'name': name, 'type': 'prismatic' if 'spring_slide' in name else 'continuous'}

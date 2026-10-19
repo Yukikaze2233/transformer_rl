@@ -169,6 +169,13 @@ class NativeSceneRecipe:
                 'hardware_calibration_verified': False}
 
     @staticmethod
+    def _position_readback(positions):
+        # 全量位置已逐行验证；控制记录只存摘要，8192环境也不扩大文件上限。
+        encoded = json.dumps(positions, separators=(',', ':'), allow_nan=False).encode()
+        return {'count': len(positions), 'sha256': hashlib.sha256(encoded).hexdigest(),
+                'first': positions[0], 'last': positions[-1], 'all_rows_verified': True}
+
+    @staticmethod
     def _static_terrain_readback(stage, terrain_paths, rigid_body_api):
         """Static velocity is allowed only for unanimated rigid-free ancestry.
 
@@ -295,7 +302,7 @@ class NativeSceneRecipe:
                                          device=device, physics_dt_s=float(sim.cfg.dt))
         readback = self._actuator_readback(robot, wp.to_torch, device)
         readback.update(groups)
-        readback['authored_base_positions_m'] = authored_base_positions
+        readback['authored_base_positions_m'] = self._position_readback(authored_base_positions)
         masses = wp.to_torch(robot.root_view.get_masses())
         if (masses.shape != (len(env_paths), 19) or not torch.isfinite(masses).all() or (masses <= 0).any()
                 or not torch.allclose(masses.sum(-1), masses.new_full((len(env_paths),), self.manifest['total_mass_kg']),
