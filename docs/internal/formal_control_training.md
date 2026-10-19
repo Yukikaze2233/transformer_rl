@@ -109,7 +109,11 @@ reset后使用第一帧重复填满历史；训练、评估和部署严格一致
 
 对这两个具体版本的结构化比较得到：model spec仅两个限位值改变，URDF也仅两个被动膝铰链镜像限位改变；[USD逐行比较](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/usd_asset_difference.json)同样只有两处限位，各放宽2°，没有变换变化。闭链约束、坐标映射、轴舍入修正、惯性来源和气簧安装参数一致。manifest内20个mesh与28个collision文件的哈希全部一致。没有移动连杆、改变关节origin、重设关节轴或修改质心。放宽限位后可出现的新姿态不等于移动了固定铰点。
 
-107°定义为大小腿几何内角上界，不是膝电机轴绝对角。该候选明确记录未重新标定编码器零位、物理验证待完成、非硬件发布。用户已明确回答“采用107°候选，完成物理验收后正式训练”。正式启动前仍须绑定完整资产文件并完成物理验收，不能只引用manifest字符串；105°的姿态表不能用于107°闭链出生，107°的高度范围也不能回填旧研究。
+107°定义为大小腿几何内角上界，不是膝电机轴绝对角。该候选明确记录未重新标定编码器零位、物理验证待完成、非硬件发布。用户已明确回答“采用107°候选，完成物理验收后正式训练”。完整资产现已按固定Git提交部署至Kaiser：manifest及其64个引用文件逐一核对SHA256，共21944491字节，未修改候选资产。正式启动仍须完成物理验收；105°的姿态表不能用于107°闭链出生，107°的高度范围也不能回填旧研究。
+
+Kaiser独立CPU几何检查确认URDF和model_spec的名义位姿一致，最大矩阵差约`7.6e-16`；六个点闭链残差均小于`2e-16m`。18维树坐标的约束Jacobian秩为12，去除六个主动轴后的被动Jacobian也为满列秩12；仅说明该名义点的局部约束，不证明完整工作域可达或动力学正确。两轮滚动碰撞体为半径0.06m的圆柱，轴向中心偏移为正负0.02035m，轮距必须取碰撞中心，得到0.4372992524m，不能用wheel link原点距离代替。资产控制列表与策略轴序不同，按关节名称重排，不能按列位置直接拷贝。
+
+出生姿态尚未验收：该资产USD明确采用水平机身、高度0.32m及其名义关节角，独立计算得到两轮最低点离地约0.310mm和2.305mm，相差约1.995mm，因此“名义双轮支撑误差不超过1mm”的准备检查未通过。这是需要在物理落地、约束稳定和控制平衡检查中解释的初始化现象，不据此断言资产不可用，也不通过修改阈值、移动连杆或静默覆盖出生姿态来消除记录。[几何检查原始结果](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-task-integration-20261019T004810Z-3f8c7d7f/geometry-0002.json)明确保留`physics_qualified=false`和仿真步数0。
 
 ### 六轴与传动
 
@@ -338,7 +342,7 @@ validation seeds为44101、44102；held-out seeds为44901、44902，held-out在�
 | 8 | 提交经验证源码与候选配置，冻结release并通过trainctl登记独立任务 | 正式接口审查、资源准入、存储合同、boot授权和全部输入pin一致 |
 | 9 | 同结构完成三个seed的连续完整课程与封存评价 | 计数完整、课程门槛与失败保留、预算不重置，输出各子域资格 |
 
-第5项和第7项不同：已有1kHz轮留出证据不替代新的整车200Hz数值闭合，也不替代该网络的SDK与存储校准。当前只读方案整理没有启动这些模型或SDK测试。
+第5项和第7项不同：已有1kHz轮留出证据不替代新的整车200Hz数值闭合，也不替代该网络的SDK与存储校准。私有网络和训练合同已执行Kaiser CPU合成测试；这些整链物理、SDK及GPU校准尚未执行。
 
 所有模型、接口、性能和仿真测试仅在Kaiser执行。本机用于文件、源码、日志和配置分析，不建立venv或下载测试依赖。原正式SDK与fullH的三队列闭合、内核锁、实际runtime和全剩余存储实测以及外部原子GPU资源准入仍是硬条件；新设计不绕过它们。
 
@@ -360,13 +364,17 @@ validation seeds为44101、44102；held-out seeds为44901、44902，held-out在�
 
 ## 当前实现与验收边界
 
-2026年10月19日，已实现独立的[结构化策略](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_policy.py)、[历史与边界合同](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_training_contract.py)及[PPO事务](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_policy_optimization.py)。这些模块仍是私有候选，不加入旧架构枚举，不改变旧PPO、CLI release、配置或checkpoint格式。原测试队列已按用户要求停止，1071更新的可恢复checkpoint和全部既有结果保留，不自动接续剩余48格。
+2026年10月19日，已实现独立的[结构化策略](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_policy.py)、[历史与边界合同](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_training_contract.py)及[PPO事务](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_policy_optimization.py)。新增[请求状态机](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_task_protocol.py)、[连续课程与预算](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_task_curriculum.py)、[命令轨迹与准入](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_command_trajectory.py)和[具名标签采样器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_collection.py)，保持职责分离。这些模块仍是私有候选，不加入旧架构枚举，不改变旧PPO、CLI release、配置或checkpoint格式。原测试队列已按用户要求停止，1071更新的可恢复checkpoint和全部既有结果保留，不自动接续剩余48格。
 
-Kaiser上[56项合成检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/structured-policy-implementation-20261019T002043Z-4a9e4aa3/validation-0003.json)已通过，覆盖完整宽度的因果性、轮角排除、单一actor梯度、原始Gaussian动作及动态batch的TorchScript/ONNX一致性。优化器合同测试包含每轮64步上限、跨脚本/失败/time-limit边界、同一次actor和Adam回滚、整轮KL兜底、辅助梯度非有限、critic失败原子恢复、诊断不改变更新和RNG消费，以及消费计数不退款。事务代数测试使用较小测试宽度；完整宽度另执行3072端点的三次单minibatch合成优化检查。它们没有机器人仿真样本，不能作为物理或训练能力证明。
+Kaiser上[141项合成检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-task-integration-20261019T004810Z-3f8c7d7f/integration-0002.json)已通过，无失败或跳过；其中保留此前56项策略与优化检查。策略检查覆盖完整宽度的因果性、轮角排除、单一actor梯度、原始Gaussian动作及动态batch的TorchScript/ONNX一致性。优化器合同测试包含每轮64步上限、跨脚本/失败/time-limit边界、同一次actor和Adam回滚、整轮KL兜底、辅助梯度非有限、critic失败原子恢复、诊断不改变更新和RNG消费，以及消费计数不退款。事务代数测试使用较小测试宽度；完整宽度另执行3072端点的三次单minibatch合成优化检查。本轮另通过完整网络的合成采样、PPO更新、再采样闭环。它们没有机器人仿真样本，不能作为物理或训练能力证明。
+
+请求协议使用此前已完成tick的估计，检查重复ID、忙时拒绝、起跳前取消、腾空取消、落地后连续2秒稳定和冷恢复去重；漏采的时间不计入连续稳定，协议完成不支付物理成功奖励。课程实现保留六阶段20000更新，连续70/15/15分层抽样与精确零指令概率质量，单环境小批reset也不会饿死低频任务；两次不同checkpoint的独立通过才晋级，提前晋级预算转入巩固，不重置Adam或退还消费。场景几何、奖励相位和完整物理评价器仍需接入，采样器生成任务描述不等于已在仿真中实现全部地形和技能。
+
+采样器以具名PRE-reset附件绑定base_link原点/body坐标线速度、策略顺序六轴速度、接触、时刻及控制epoch；拒绝用reset后的状态代替物理终点，脚本接管不获得actor、辅助或critic学习信用。命令流保留原始请求及其分母，轮速必要边界与连续限速后的交付目标分别记录；共同插值比例保持轮速可行菱形，不把独立分量限速误当联合约束。该菱形仅为轮目标速度的必要条件，不证明力矩、牵引、全高度或硬件能力；几何和变化率均须显式绑定证据。
 
 [CPU成本记录](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/structured-policy-implementation-20261019T002043Z-4a9e4aa3/performance-0001.json)使用Kaiser单线程和随机初始化模型，单batch推理各测1000次：PyTorch中位0.541ms、P95为0.604ms，ONNX中位0.144ms、P95为0.157ms，ONNX样本最大0.392ms。仅包括网络推理，不含观测打包、控制环、传输和物理响应。完整宽度的单3072端点actor/critic事务含KL与回滚准备，CPU三次为2.179、1.941、1.918秒，进程峰值RSS约1.96GB；不是64minibatch正式整轮耗时，不能外推GPU训练速度。原型ONNX仅为随机权重性能产物，不是可上机策略。
 
-正式PPO仍未启动。下一步必须完成具名辅助标签与采样器接线、可部署请求状态机、连续命令与完整课程实现、107°出生和闭链物理验收、辨识参数及通信整链回放、完整学习状态启停、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。
+正式PPO仍未启动。下一步必须将具名采样器、请求协议和课程接入真实107°场景，完成出生和闭链物理验收、完整可达域及奖励相位、辨识参数及通信整链回放、新候选完整学习状态启停、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。此前旧CLI的启停测试不能替代新候选的两个优化器、课程、采样器RNG和请求去重状态的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 
