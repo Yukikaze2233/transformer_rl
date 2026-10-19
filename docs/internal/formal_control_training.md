@@ -415,7 +415,15 @@ Kaiser分别通过[60项地形/课程检查](/home/yukikaze/Documents/workspace/
 
 [CPU成本记录](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/structured-policy-implementation-20261019T002043Z-4a9e4aa3/performance-0001.json)使用Kaiser单线程和随机初始化模型，单batch推理各测1000次：PyTorch中位0.541ms、P95为0.604ms，ONNX中位0.144ms、P95为0.157ms，ONNX样本最大0.392ms。仅包括网络推理，不含观测打包、控制环、传输和物理响应。完整宽度的单3072端点actor/critic事务含KL与回滚准备，CPU三次为2.179、1.941、1.918秒，进程峰值RSS约1.96GB；不是64minibatch正式整轮耗时，不能外推GPU训练速度。原型ONNX仅为随机权重性能产物，不是可上机策略。
 
-正式PPO仍未启动。下一步须在资源准入后实际执行107°场景构建与native接触/执行器回读，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域及奖励相位、辨识参数及通信整链回放、新候选完整学习状态启停、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。此前旧CLI的启停测试不能替代新候选的两个优化器、课程、采样器RNG和请求去重状态的联合恢复验收。
+新增私有[消费日志](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_learning_accounting.py)、[完整学习快照](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_checkpoint.py)和[更新边界控制](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_learning.py)。每轮先将完整采样预约写入有排他写锁的fsync哈希链，再执行采样与PPO；完整预约、实际提交/返回转移、PPO fresh、两个优化器的执行次数及端点使用分别记录。部分采样或更新失败后，原预约不退款；日志含pending、failed或与快照边界不一致时拒绝自动恢复。该机制处理正常持久化与中断，不承诺抵抗人工同时回滚日志和快照。
+
+快照包含单一actor与critic、两个Adam及参数组、完整全局RNG、课程阶段/累计预算/晋级记录、任务配额与采样RNG、地形RNG、请求去重及已消费ID、收集器累计计数和源/资产/初始模型绑定。加载先校验大小、SHA和完成标记，再以weights-only方式构建独立对象图核对张量、固定mask和优化器状态；不提前改变调用者的全局RNG。冷恢复中止未完成的物理技能、保留已消费ID，重新建立物理回合和原始历史，完成该准备后才显式恢复策略采样RNG。它不序列化接触现场、闭链求解器、执行器暂态或旧latent，也不宣称断电后的物理轨迹逐bit连续。
+
+新候选复用已有`TrainingControl`请求/确认协议，仅在完整更新边界处理pause/resume/stop。pause保存后留在同一进程，保留当前收集器历史与物理现场；stop在完整快照及最终控制收据存在后确认。私有冷加载还核对已知父进程的waitpid退出收据，拒绝用仍在运行时的pause快照冒充保存退出，且不重新poll终态PID。最终控制收据的累计活动时间包含快照I/O，其数值不能在下一次接续时退款。新私有格式尚未注册到生产`trainctl`，周期保留/阶段保护点和正式任务前端仍需完成与审查；旧公开格式和运行release保持原样。
+
+Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-learning-state-20261019T031124Z-783bb015/validation-0001.json)通过，包含完整408824参数模型及两个已初始化Adam、恢复后下一次合成更新一致性、RNG无副作用、过期/损坏状态拒绝；另一组[36项控制与采样/PPO回归](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-learning-state-20261019T031124Z-783bb015/validation-0002.json)通过，其中用两个真实CPU子进程验证pause→resume→stop→父进程waitpid→冷恢复的闭环，接续后累计预算与两个Adam不归零。随后[13项启停定向检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-learning-state-20261019T031124Z-783bb015/validation-0003.json)通过，补充非零退出码、错误boot/token、pause冒充stop、倒退活动时间及错误checkpoint pin在反序列化前被拒绝。测试中的环境为合成fixture，不是机器人，私有父进程收据也不是SDK/GPU资源准入。定向检查包含前组用例，原有PPO/采样用例也与此前回归有重叠，不将分组结果累加冒充单次全量或物理验收。
+
+正式PPO仍未启动。下一步须在资源准入后实际执行107°场景构建与native接触/执行器回读，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域及奖励相位、辨识参数及通信整链回放、新候选周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停闭环不能替代新候选在真实环境中的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 

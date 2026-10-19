@@ -293,6 +293,7 @@ class StructuredActorCritic(nn.Module):
 
     def __init__(self, config=StructuredPolicyConfig()):
         super().__init__()
+        self.config = config
         self.actor = StructuredGaussianActor(config)
         self.critic = nn.Sequential(nn.Linear(81, 256), nn.ELU(), nn.Linear(256, 128), nn.ELU(),
                                     nn.Linear(128, 64), nn.ELU(), nn.Linear(64, 1), nn.Flatten(0))
