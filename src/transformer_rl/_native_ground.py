@@ -12,7 +12,7 @@ from ._native_plant import GroundReference
 from ._native_scene import NativeSceneState
 from ._physical_observation import MechanicalBinding
 from ._terrain_geometry import TerrainQuery, TerrainQueryBatch
-from ._terrain_tasks import TerrainCourse
+from ._terrain_tasks import TerrainCourse, TerrainRequest
 from ._wheel_clearance import CylinderTerrainGap, WheelClearanceSample
 
 
@@ -123,6 +123,35 @@ class NativeGroundQuery:
         self._source_sha = scene.readback.get('selected_urdf_sha256')
         if self._source_sha is not None and self._source_sha != wheels.urdf_sha256:
             raise ValueError('wheel URDF bytes differ from the actual selected scene source')
+        self.last_sample = None
+
+    def validate_same_surface_courses(self, courses, reset_mask):
+        """Validate native-order metadata against the already authored surface.
+
+        A fresh geometry seed or request can describe identical colliders.
+        This permits only that case; it is not live mesh cooking or a way to
+        exchange a different height/material field over old native shapes.
+        """
+        courses = tuple(courses)
+        bridge = self.scene.observation
+        bridge.before_physics_step()
+        if (self.scene.robot.root_view is not self._view or self.scene.terrain_meshes is not self._meshes
+                or not torch.equal(self.scene.environment_origins_m, self._origins)
+                or len(courses) != self.num_envs
+                or any(not isinstance(c, TerrainCourse) or not isinstance(c.request, TerrainRequest)
+                       or type(c.geometry_seed) is not int or not 0 <= c.geometry_seed < 2**63 for c in courses)
+                or not isinstance(reset_mask, torch.Tensor) or reset_mask.shape != (self.num_envs,)
+                or reset_mask.dtype != torch.bool or reset_mask.device != self.device):
+            raise ValueError('course metadata needs the unchanged native owner and exact native-order reset rows')
+        for row, (old, new) in enumerate(zip(self.courses, courses)):
+            if not reset_mask[row] and new is not old:
+                raise ValueError('course metadata may change only explicitly reset rows')
+            if new.surface != old.surface or new.surface.meshes != self._meshes[row]:
+                raise ValueError('course metadata cannot change its bound collision surface or material')
+        return courses
+
+    def replace_same_surface_courses(self, courses, reset_mask):
+        self.courses = self.validate_same_surface_courses(courses, reset_mask)
         self.last_sample = None
 
     @torch.no_grad()

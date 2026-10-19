@@ -1,5 +1,8 @@
 """Full native task composition with synthetic SDK buffers on Kaiser only."""
 from dataclasses import replace
+from dataclasses import asdict
+import hashlib
+import json
 
 import pytest
 import torch
@@ -308,6 +311,30 @@ def test_changed_terrain_plan_fails_before_initial_physics_or_any_native_reset_w
     with pytest.raises(TerrainRebuildRequired):
         env.reset()
     assert sim.steps == 0 and writes == []
+
+
+def test_task_auto_reset_accepts_only_exact_same_surface_metadata_at_its_completed_boundary():
+    env, _, sim, _, _ = fixture(horizons=(.01, .2))
+    source, life = env.reset_source, env.lifecycle
+
+    def courses(mask, episode, now):
+        plan = source(mask, episode, now)
+        current = list(life.ground.courses)
+        for i in mask.nonzero().flatten().tolist():
+            current[i] = replace(current[i], geometry_seed=current[i].geometry_seed + 1)
+        hashes = tuple(hashlib.sha256(json.dumps(asdict(c), sort_keys=True, separators=(',', ':'),
+                                                allow_nan=False).encode()).hexdigest() for c in current)
+        return replace(plan, source_courses=tuple(current), course_sha256=hashes)
+
+    env.reset_source = courses
+    env.reset()
+    before = life.course_sha256
+    for _ in range(6):
+        result = advance(env)
+    assert result.truncated.tolist() == [True, False] and result.observation.episode_id.tolist() == [1, 0]
+    assert life.course_sha256[0] != before[0] and life.course_sha256[1] == before[1]
+    assert sim.steps == 12 and result.final_critic_valid.all()
+    assert env.last_outcome['pre_reset_observation'].episode_id.tolist() == [0, 0]
 
 
 def test_invalid_sensor_source_faults_the_consumed_interval_instead_of_replaying_or_changing_budget():

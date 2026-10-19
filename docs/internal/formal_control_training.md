@@ -392,7 +392,19 @@ TensorBoard统一记录奖励每秒、每步贡献、事件数、mask启用率�
 
 出生平面只从该行完整课程的entry证明。准备器保留每行闭链、当前输出hold、整机footprint和支撑的不同状态；名义直立/蹲姿才采用显式有界双轮roll修正，其余方向和连续roll/pitch扰动不被投影回站立。浮点编码后的native计划再次检查实际controller的pair投影和输出范围。释放速度定义为世界向下，再换算到body；native COM速度另使用实际逐环境base COM以及`vCOM=vOrigin+ω×offset`，不能把source名义COM偷偷用在随机化实体上。
 
-准备动作由实际出生输出位置反算：两侧共同整圈解缠、四腿位置hold、两轮零速度。不能用独立wrap改变闭链相对位置，也不能把越界位置clip后宣称hold成功。NativeTaskEnvironment在任何native reset写入前验证动作，并只更新被reset的行；前五帧继续作为脚本准备，actor采样不计PPO收益。数据计划仍要求当前实际course SHA，改变course先抛TerrainRebuildRequired，不能以新的任务标签覆盖旧碰撞。该实现完成批次的source准备与native数据组包，尚未完成任意连续地形的native重建、部分环境新旧批次协调、真实扰动/传感/时序注入及物理恢复准入。
+准备动作由实际出生输出位置反算：两侧共同整圈解缠、四腿位置hold、两轮零速度。不能用独立wrap改变闭链相对位置，也不能把越界位置clip后宣称hold成功。NativeTaskEnvironment在任何native reset写入前验证动作，并只更新被reset的行；前五帧继续作为脚本准备，actor采样不计PPO收益。数据计划保留明确的requested course SHA，不能以新的任务标签覆盖旧碰撞。该实现完成批次的source准备与native数据组包；后续部分行计划协调与等表面身份更新见下一节，任意连续地形的native重建、真实扰动/传感/时序注入及物理恢复准入仍未完成。
+
+### 部分复位计划与等表面课程更新
+
+私有[部分复位协调器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_reset_coordinator.py)绑定实际lifecycle、所选source hash、native克隆次序、controller及当前base COM，只为mask选中行消费TaskDraw和几何/姿态RNG。完整计划合并时，未选中行的root/q/速度/准备动作及命令轨迹六个字段、任务时限/请求参数、course SHA和course对象保持原值；这些是旧的**复位计划缓存**，不是复制或重建未选中行的当前物理状态。native reset仍只向选中行写入。
+
+一个draw在几何准备前就封存为提案。同一mask、下一episode ID和当前timestamp再次请求时返回同一计划，不再次采样；前提案尚未真实应用，不能另抽请求。求解/资源拒绝及中途打断都保留原draw、三个RNG状态和pending标记，不以重抽standing补位。数值所有权检查包含CommandTrajectory的端点、duration、kind及频率；不会遍历本来已是不可变数值tuple的完整地形mesh去做tensor version检查。
+
+协调器的state_dict仅描述source RNG及复位提案状态，不代表完整learner事务已提交。pending提案自动冷载入被拒绝；完整边界也只能在显式的新cold lifecycle中恢复采样状态，原活动物理回合按既有合同中止，不能回放旧复位计划。完整学习journal、模型与两组Adam、parent stop receipt、预算和协议ID验收仍独立进行；这里没有注册新的生产checkpoint格式或CLI恢复入口。pending快照保存小型source请求/geometry seed与准备坐标，不展开重复保存整块mesh。
+
+新的NativeTaskResetPlan可携带完整**native顺序**的source courses。若新请求仅改变geometry seed等元数据，lifecycle只有在source SHA逐项相符、TerrainSurface（含高度三角格、竖面和摩擦）及实际已绑定meshes完全相同、未选中行对象未变时，才随成功reset更新course身份。此路径保持原scene、root view、contact view、地形query batch与实际碰撞形状，不stop/play、不重置全局时钟，不把新的几何当旧形状接受。真实高度/摩擦/形状变化仍在任何native reset写入前抛TerrainRebuildRequired；scope和分母不变，变化课程的提案保留待真实重建。
+
+Kaiser安装的SDK源码核对见[生命周期审查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-coordination-20261019T091636Z-041e7e81/sdk_scene_lifecycle_review.json)：PhysxManager的stop回调会invalidate views，warmup含正dt update_simulation调用。因此不能将全局stop/reset/play当无损的部分地形替换。官方USD变更通知能力也不证明当前GPU pipeline的contact filters/views、cook完成、未选中状态及计步已通过联合验收；实际变化地形的安装和epoch交接仍须实现并在准入后的原生场景验证。
 
 ## 正式优化与预算
 
@@ -569,7 +581,9 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 连续reset及恢复配方先在Kaiser通过[54项检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-program-20261019T084225Z-ed10b3e9/validation-0002.json)，接入三RNG、六任务族、整机出生与准备动作后[71项检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-program-20261019T084225Z-ed10b3e9/validation-0003.json)，增加请求域/身份/dtype的前置拒绝后[76项最终检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-program-20261019T084225Z-ed10b3e9/validation-0004.json)。分组重叠，不相加。包括镜像膝角映射、16配方不合并、动作box/pair投影拒绝、连续扰动保留、完整extent与粗糙课程保留、三RNG/配额接续且不改变global RNG、失败尝试不回滚、COM速度独立公式、course变更拒绝、数值proof变更拒绝，以及准备动作只影响reset行、前五帧不计actor收益和非法动作先于native写入拒绝。所有结果仍为Kaiser CPU合成/源码几何检查；SDK、真实机器人仿真与新正式PPO均为零。
 
-正式PPO仍未启动。下一步须完成任意连续课程的native碰撞重建与部分环境新旧批次协调，补齐16恢复候选中未解和未准入的请求，以及扰动/传感/时序来源和实际107°准入/速率/物理条件配方，144案例的原生场景/profile/请求序列与独立技能判据、连续挑战manifest、评价预算的持久预留及正式调度；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
+部分复位协调与等表面课程身份更新在Kaiser先通过[135项检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-coordination-20261019T091636Z-041e7e81/validation-0001.json)，补充draw封存后中断及非法geometry seed拒绝后，[137项最终检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-coordination-20261019T091636Z-041e7e81/validation-0002.json)。分组重叠，不相加。包括部分行只消费对应draw、未选中计划/命令/course对象不变、相同boundary不再推进RNG、未应用或失败提案不能重抽、pending冷载入拒绝、显式cold setup保持采样顺序而不回放旧回合、trajectory/controller变更拒绝；合成native task的等表面auto-reset还验证PRE-reset critic/标签、episode/控制权、真实子步数及未选中行不变。新表面/摩擦、不符hash及未选中course对象变更均在reset写入前拒绝。仍然只有Kaiser CPU合成检查与静态源码核对，SDK上下文、真实机器人仿真和新正式PPO为零。
+
+正式PPO仍未启动。下一步须完成任意连续课程的真实native碰撞重建及变化几何的view/scene epoch交接，补齐16恢复候选中未解和未准入的请求，以及扰动/传感/时序来源和实际107°准入/速率/物理条件配方，144案例的原生场景/profile/请求序列与独立技能判据、连续挑战manifest、评价预算的持久预留及正式调度；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 

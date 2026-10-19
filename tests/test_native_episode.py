@@ -1,5 +1,8 @@
 """Native episode/reset ownership with synthetic buffers, not an SDK scene."""
 from dataclasses import replace
+from dataclasses import asdict
+import hashlib
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -60,7 +63,8 @@ def reset(lifecycle, robot, mask=None, **changes):
     mask = torch.ones(2, dtype=torch.bool) if mask is None else mask
     values = [getattr(robot.data, name).torch.clone() for name in
               ('root_link_pose_w', 'root_com_vel_w', 'joint_pos', 'joint_vel')]
-    return lifecycle.reset(mask, *values, course_sha256=changes.get('course_sha256', lifecycle.course_sha256))
+    return lifecycle.reset(mask, *values, course_sha256=changes.get('course_sha256', lifecycle.course_sha256),
+                           source_courses=changes.get('source_courses'))
 
 
 def observe(lifecycle, tick, *, delay_s=0.):
@@ -154,6 +158,60 @@ def test_new_terrain_is_rejected_before_any_native_write_or_epoch_change():
     assert raised.value.rows == (0,) and raised.value.requested == requested
     assert writes == [] and sim.steps == 0
     torch.testing.assert_close(lifecycle.episode_id, before)
+
+
+def test_identical_surface_metadata_can_advance_one_task_without_recooking_or_touching_other_rows():
+    life, robot, sim, writes = fixture()
+    reset(life, robot)
+    for _ in range(5):
+        advance(life)
+    original = life.ground.courses
+    new = (replace(original[0], geometry_seed=original[0].geometry_seed + 1), original[1])
+    hashes = tuple(hashlib.sha256(json.dumps(asdict(c), sort_keys=True, separators=(',', ':'),
+                                            allow_nan=False).encode()).hexdigest() for c in new)
+    contacts, view, batch, meshes = (life.plant.scene.contacts, robot.root_view, life.ground.batch,
+                                    life.plant.scene.terrain_meshes)
+    other_action, other_control, other_reset = life.previous_issued[1].clone(), life.control_epoch[1].clone(), life._reset_at_s[1].clone()
+    writes.clear()
+    steps = sim.steps
+    result = reset(life, robot, torch.tensor([True, False]), course_sha256=hashes, source_courses=new)
+    assert sim.steps == steps and all(ids.tolist() == [0] for _, ids in writes)
+    assert life.plant.scene.contacts is contacts and robot.root_view is view
+    assert life.ground.batch is batch and life.plant.scene.terrain_meshes is meshes
+    assert life.course_sha256 == hashes and life.ground.courses[1] is original[1]
+    assert result.observation.episode_id.tolist() == [1, 0]
+    assert result.observation.policy_allowed.tolist() == [False, True]
+    assert torch.equal(life.previous_issued[1], other_action) and life.control_epoch[1] == other_control
+    assert life._reset_at_s[1] == other_reset
+    advance(life)
+    assert sim.steps == steps + life.substeps
+
+
+@pytest.mark.parametrize('fault', ['surface', 'hash', 'unselected_identity', 'invalid_geometry_seed'])
+def test_course_metadata_never_bypasses_new_geometry_hash_or_unselected_row_guards(fault):
+    life, robot, sim, writes = fixture()
+    reset(life, robot)
+    advance(life)
+    old = life.ground.courses
+    new = [replace(old[0], geometry_seed=old[0].geometry_seed + 1), old[1]]
+    if fault == 'surface':
+        patch = old[0].surface.patches[0]
+        new[0] = replace(new[0], surface=replace(old[0].surface, patches=(replace(patch, friction=.123),)))
+    elif fault == 'unselected_identity':
+        new[1] = replace(old[1])
+    elif fault == 'invalid_geometry_seed':
+        new[0] = replace(new[0], geometry_seed=-1)
+    hashes = tuple(hashlib.sha256(json.dumps(asdict(c), sort_keys=True, separators=(',', ':'),
+                                            allow_nan=False).encode()).hexdigest() for c in new)
+    if fault == 'hash':
+        hashes = ('0' * 64, hashes[1])
+    writes.clear()
+    before, steps = life.episode_id.clone(), sim.steps
+    error = TerrainRebuildRequired if fault == 'surface' else ValueError
+    with pytest.raises(error):
+        reset(life, robot, torch.tensor([True, False]), course_sha256=hashes, source_courses=tuple(new))
+    assert not writes and sim.steps == steps and torch.equal(life.episode_id, before)
+    assert life.ground.courses is old
 
 
 def test_reset_cannot_double_count_empty_episodes_or_initialize_only_half_the_rows():

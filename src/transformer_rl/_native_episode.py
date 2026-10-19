@@ -136,7 +136,8 @@ class NativeEpisodeLifecycle:
                                    self.policy_allowed.clone(), labels)
 
     @torch.no_grad()
-    def reset(self, mask, root_pose_xyzw, root_com_velocity, joint_position, joint_velocity, *, course_sha256):
+    def reset(self, mask, root_pose_xyzw, root_com_velocity, joint_position, joint_velocity, *,
+              course_sha256, source_courses=None):
         self._identity()
         self._mask(mask)
         bridge = self._scene.observation
@@ -150,7 +151,22 @@ class NativeEpisodeLifecycle:
         if len(requested) != self.num_envs:
             raise ValueError('reset course identities must include every native row')
         changed = [i for i in mask.nonzero().flatten().tolist() if requested[i] != self.course_sha256[i]]
-        if changed:
+        courses = None
+        if source_courses is not None:
+            courses = tuple(source_courses)
+            if (len(courses) != self.num_envs
+                    or any(not isinstance(c, type(self._courses[i])) for i, c in enumerate(courses))):
+                raise ValueError('reset source courses require every actual native-order course')
+            hashes = tuple(hashlib.sha256(json.dumps(asdict(c), sort_keys=True, separators=(',', ':'),
+                                                      allow_nan=False).encode()).hexdigest() for c in courses)
+            if hashes != requested:
+                raise ValueError('reset course request hashes differ from their exact source descriptions')
+            geometry_changed = [i for i in mask.nonzero().flatten().tolist()
+                                if courses[i].surface != self._courses[i].surface]
+            if geometry_changed:
+                raise TerrainRebuildRequired(geometry_changed, self.course_sha256, requested)
+            self.ground.validate_same_surface_courses(courses, mask)
+        elif changed:
             raise TerrainRebuildRequired(changed, self.course_sha256, requested)
         model_changed = bridge.model_epoch != self._model_epoch
         if model_changed and not mask.all():
@@ -165,6 +181,9 @@ class NativeEpisodeLifecycle:
         try:
             self.plant.reset(mask, root_pose_xyzw, root_com_velocity, joint_position, joint_velocity)
             aborted = self.protocol.reset(mask, now_s)
+            if courses is not None:
+                self.ground.replace_same_surface_courses(courses, mask)
+                self._courses, self._course_sha256 = self.ground.courses, requested
         except BaseException:
             self._faulted = True
             raise

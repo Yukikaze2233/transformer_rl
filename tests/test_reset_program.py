@@ -159,6 +159,14 @@ def test_release_world_down_is_not_a_tilted_body_z_velocity():
     torch.testing.assert_close(world, torch.tensor([[0., 0., -.15]] * 2, dtype=torch.float64), atol=1e-15, rtol=0)
 
 
+def test_source_command_trajectory_mutation_is_part_of_the_preparation_numeric_guard():
+    program, controller, origins = fixture()
+    value = program.prepare_draw(draw([0, 0]), origins, controller)
+    value.commands.trajectory.end[0, 0] += .1
+    with pytest.raises(ValueError, match='numeric inputs changed'):
+        value.encode_plan(program.geometry, controller, base_com_body_m=torch.zeros(2, 3, dtype=torch.float64))
+
+
 @pytest.mark.parametrize('fault', ['unknown_family', 'invalid_height', 'nonfinite', 'dtype', 'wrong_nominal'])
 def test_invalid_source_configuration_is_rejected_before_sampling_geometry_or_advancing_pose_rng(fault):
     program, controller, origins = fixture()

@@ -11,13 +11,14 @@ import math
 
 import torch
 
+from ._command_trajectory import CommandTrajectory
 from ._native_episode import TerrainRebuildRequired
 from ._output_actuation import OutputFeedbackController
 from ._recovery_poses import RecoveryCandidates, RecoveryPoseCompiler
 from ._reset_collision import AssetCollisionGeometry, CollisionPlacement, FlatSpawnPatch
 from ._task_commands import TaskCommandPlan
 from ._task_curriculum import ContinuousTaskSampler, TaskDraw, TaskFamily
-from ._terrain_tasks import ContinuousTerrainGenerator, TerrainExtent
+from ._terrain_tasks import ContinuousTerrainGenerator, TerrainCourse, TerrainExtent
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,14 @@ class ResetProgramTuning:
 def _tensor_versions(value):
     if isinstance(value, torch.Tensor):
         return ((id(value), value._version),)
+    if isinstance(value, CommandTrajectory):
+        return tuple(pair for name in ('start', 'end', 'duration_s', 'kind',
+                                        'frequency_start_hz', 'frequency_end_hz')
+                     for pair in _tensor_versions(getattr(value, name)))
+    if isinstance(value, TerrainCourse):
+        # Source courses contain only validated immutable numeric tuples. Do
+        # not walk millions of mesh coordinates to check tensor ownership.
+        return ()
     if is_dataclass(value):
         return tuple(pair for f in fields(value) if not f.name.startswith('_')
                      for pair in _tensor_versions(getattr(value, f.name)))
@@ -88,6 +97,17 @@ class PreparedTaskReset:
 
     @torch.no_grad()
     def native_plan(self, geometry, controller, *, actual_course_sha256, actual_base_com_body_m):
+        actual = tuple(actual_course_sha256)
+        requested = self.patch.course_sha256
+        if len(actual) != len(requested):
+            raise ValueError('native reset needs every actual authored course identity')
+        changed = [i for i, (a, b) in enumerate(zip(actual, requested)) if a != b]
+        if changed:
+            raise TerrainRebuildRequired(changed, actual, requested)
+        return self.encode_plan(geometry, controller, base_com_body_m=actual_base_com_body_m)
+
+    @torch.no_grad()
+    def encode_plan(self, geometry, controller, *, base_com_body_m):
         """Recheck encoded coordinates and use the actual randomized base COM.
 
         This returns data only. Scene construction, native collider equivalence
@@ -105,18 +125,11 @@ class PreparedTaskReset:
                 or kinematics.manifest_sha256 != self.recovery.closure.source_manifest_sha256
                 or kinematics.model_sha256 != self.recovery.closure.source_model_sha256):
             raise ValueError('native reset geometry or actual controller differs from the prepared source')
-        requested = self.patch.course_sha256
-        actual = tuple(actual_course_sha256)
-        if len(actual) != n:
-            raise ValueError('native reset needs every actual authored course identity')
-        changed = [i for i, (a, b) in enumerate(zip(actual, requested)) if a != b]
-        if changed:
-            raise TerrainRebuildRequired(changed, actual, requested)
         if not self.source_ready.all():
             raise ValueError('requested reset contains unresolved source closure, output hold or collision support')
-        if (not isinstance(actual_base_com_body_m, torch.Tensor) or actual_base_com_body_m.shape != (n, 3)
-                or actual_base_com_body_m.device != device or actual_base_com_body_m.dtype != torch.float64
-                or not torch.isfinite(actual_base_com_body_m).all()):
+        if (not isinstance(base_com_body_m, torch.Tensor) or base_com_body_m.shape != (n, 3)
+                or base_com_body_m.device != device or base_com_body_m.dtype != torch.float64
+                or not torch.isfinite(base_com_body_m).all()):
             raise ValueError('native reset requires finite float64 actual per-row base COM coordinates')
         plan, placement = geometry.reset_plan(
             self.recovery.closure.tree_position, self.placement.root_pose_xyzw[:, 3:],
@@ -134,12 +147,13 @@ class PreparedTaskReset:
         orientation /= orientation.norm(dim=-1, keepdim=True)
         rotation = geometry._rotation(orientation)
         omega = (rotation @ self.recovery.angular_velocity_body_rad_s[..., None]).squeeze(-1)
-        offset = (rotation @ actual_base_com_body_m[..., None]).squeeze(-1)
+        offset = (rotation @ base_com_body_m[..., None]).squeeze(-1)
         linear = (rotation @ self.recovery.origin_velocity_body_m_s[..., None]).squeeze(-1)
         velocity = torch.cat((linear + torch.linalg.cross(omega, offset), omega), -1).float()
         if not torch.isfinite(velocity).all():
             raise ValueError('encoded native reset COM velocity is nonfinite')
-        return replace(plan, root_com_velocity=velocity, preparation_issued_action=hold.requested_action), placement
+        return replace(plan, root_com_velocity=velocity, preparation_issued_action=hold.requested_action,
+                       source_courses=self.courses), placement
 
     def _clearance(self):
         return self.recovery.release_clearance_m + self.tuning.standing_clearance_m
