@@ -245,7 +245,7 @@ class NativeEpisodeLifecycle:
         frame = assembler.actor(sensors, commands, now_s=tick.measured.timestamp_s)
         critic = assembler.critic(commands, tick.measured)
         labels = assembler.labels(tick.measured, self.plant.contact_history, self.episode_id, self.control_epoch)
-        fresh = ((sensors.sampled_at_s >= self._reset_at_s[:, None] - 1e-9)
+        fresh = ((sensors.sampled_at_s > self._reset_at_s[:, None] + 1e-9)
                  & (sensors.sampled_at_s > self._last_sensor_times + 1e-9)).all(-1)
         proposed = torch.where(fresh, self._fresh_frames + 1, torch.zeros_like(self._fresh_frames))
         handoff = ~self.policy_allowed & (proposed >= 5) & labels.valid

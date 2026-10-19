@@ -200,6 +200,7 @@ def test_unchanged_old_sensor_timestamps_cannot_complete_warmup():
     for _ in range(6):
         tick = lifecycle.advance(torch.ones(2, 6), script_issued=torch.zeros(2, 6))
         observe(lifecycle, tick, delay_s=float(tick.measured.timestamp_s[0]))
+        assert lifecycle._fresh_frames.eq(0).all()  # A timestamp equal to reset has no post-write ordering proof.
     assert not lifecycle.policy_allowed.any() and lifecycle._fresh_frames.eq(0).all()
 
 
