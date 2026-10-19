@@ -174,6 +174,23 @@ class NativeSceneRecipe:
                 'static_terrain_ancestry_prims_checked': len(checked),
                 'native_static_collision_equivalence_verified': False}
 
+    @staticmethod
+    def _author_terrain_mesh(stage, path, mesh, geometry_api, physics_api, sim_utils, *, enabled):
+        geometry = geometry_api.Mesh.Define(stage, path + '/geometry/mesh')
+        geometry.CreatePointsAttr(mesh.vertices_m)
+        geometry.CreateFaceVertexCountsAttr([3] * len(mesh.triangles))
+        geometry.CreateFaceVertexIndicesAttr([i for face in mesh.triangles for i in face])
+        geometry.CreateSubdivisionSchemeAttr('none')
+        geometry.CreateDoubleSidedAttr(True)
+        physics_api.CollisionAPI.Apply(geometry.GetPrim()).CreateCollisionEnabledAttr(enabled)
+        physics_api.MeshCollisionAPI.Apply(geometry.GetPrim()).CreateApproximationAttr('none')
+        material = sim_utils.RigidBodyMaterialCfg(static_friction=mesh.friction, dynamic_friction=mesh.friction,
+                                                  restitution=0., friction_combine_mode='multiply',
+                                                  restitution_combine_mode='multiply')
+        material.func(path + '/Material', material)
+        sim_utils.bind_physics_material(str(geometry.GetPath()), path + '/Material')
+        return str(geometry.GetPath())
+
     def build_on_admitted_context(self, sim):
         """Author this owned scene; the caller has already acquired admission."""
         if type(sim.cfg.dt) not in (int, float) or sim.cfg.dt not in (.001, .005):
@@ -196,20 +213,7 @@ class NativeSceneRecipe:
             paths = []
             for index, mesh in enumerate(meshes):
                 path = env + '/Terrain/surface_' + str(index)
-                geometry = UsdGeom.Mesh.Define(stage, path + '/geometry/mesh')
-                geometry.CreatePointsAttr(mesh.vertices_m)
-                geometry.CreateFaceVertexCountsAttr([3] * len(mesh.triangles))
-                geometry.CreateFaceVertexIndicesAttr([i for face in mesh.triangles for i in face])
-                geometry.CreateSubdivisionSchemeAttr('none')
-                geometry.CreateDoubleSidedAttr(True)
-                UsdPhysics.CollisionAPI.Apply(geometry.GetPrim()).CreateCollisionEnabledAttr(True)
-                UsdPhysics.MeshCollisionAPI.Apply(geometry.GetPrim()).CreateApproximationAttr('none')
-                material = sim_utils.RigidBodyMaterialCfg(static_friction=mesh.friction, dynamic_friction=mesh.friction,
-                                                          restitution=0., friction_combine_mode='multiply',
-                                                          restitution_combine_mode='multiply')
-                material.func(path + '/Material', material)
-                sim_utils.bind_physics_material(str(geometry.GetPath()), path + '/Material')
-                paths.append(str(geometry.GetPath()))
+                paths.append(self._author_terrain_mesh(stage, path, mesh, UsdGeom, UsdPhysics, sim_utils, enabled=True))
             terrain_paths.append(tuple(paths))
         cfg = ArticulationCfg(
             prim_path='/World/envs/env_.*/Robot',

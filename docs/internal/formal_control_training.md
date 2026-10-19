@@ -352,7 +352,7 @@ TensorBoard统一记录奖励每秒、每步贡献、事件数、mask启用率�
 
 终止与时限首先保留PRE-reset的真实critic、标签及身份，再同一timestamp重置选中行。时限bootstrap使用旧回合完整末帧；脚本投影、新回合占位和旧episode标签不混用。可选trace sink同步获得每个真实物理子步的tick、奖励输入、条件和参考，默认关闭，不在默认路径额外生成逐步JSON。sink或传感器失败使已消耗区间fault，不补步、不重放；控制接管前的真实末帧与接管后的脚本投影分别保留。
 
-该闭环仍绑定一个实际已作者化的场景。reset来源若要求不同course SHA，必须在native写入前抛出`TerrainRebuildRequired`，不能用新的任务标签覆盖旧碰撞几何，也不以有限atlas替代完整连续课程。动态地形重建、完整reset/扰动来源、逐行越界结局、144案例的原生场景与请求序列解析、连续挑战生成及完整技能判据、原生参数和碰撞验收、正式前端与全部资源准入仍须完成。新增模块没有改变网络参数量、100Hz/35D/81D边界、公开checkpoint格式或旧冻结研究release。
+该闭环仍绑定一个实际已作者化的场景。未接入下面的私有地形安装器时，变化表面必须在native reset写入前抛出`TerrainRebuildRequired`；不能用新的任务标签覆盖旧碰撞几何，也不以有限atlas替代完整连续课程。安装器现已实现作者化和完整对象图交接，真实SDK cooking、接触与未选中行轨迹等价仍待验收。完整reset/扰动来源、逐行越界结局、144案例的原生场景与请求序列解析、连续挑战生成及完整技能判据、原生参数和碰撞验收、正式前端与全部资源准入仍须完成。新增模块没有改变网络参数量、100Hz/35D/81D边界、公开checkpoint格式或旧冻结研究release。
 
 ### 固定案例与首回合评价
 
@@ -392,7 +392,7 @@ TensorBoard统一记录奖励每秒、每步贡献、事件数、mask启用率�
 
 出生平面只从该行完整课程的entry证明。准备器保留每行闭链、当前输出hold、整机footprint和支撑的不同状态；名义直立/蹲姿才采用显式有界双轮roll修正，其余方向和连续roll/pitch扰动不被投影回站立。浮点编码后的native计划再次检查实际controller的pair投影和输出范围。释放速度定义为世界向下，再换算到body；native COM速度另使用实际逐环境base COM以及`vCOM=vOrigin+ω×offset`，不能把source名义COM偷偷用在随机化实体上。
 
-准备动作由实际出生输出位置反算：两侧共同整圈解缠、四腿位置hold、两轮零速度。不能用独立wrap改变闭链相对位置，也不能把越界位置clip后宣称hold成功。NativeTaskEnvironment在任何native reset写入前验证动作，并只更新被reset的行；前五帧继续作为脚本准备，actor采样不计PPO收益。数据计划保留明确的requested course SHA，不能以新的任务标签覆盖旧碰撞。该实现完成批次的source准备与native数据组包；后续部分行计划协调与等表面身份更新见下一节，任意连续地形的native重建、真实扰动/传感/时序注入及物理恢复准入仍未完成。
+准备动作由实际出生输出位置反算：两侧共同整圈解缠、四腿位置hold、两轮零速度。不能用独立wrap改变闭链相对位置，也不能把越界位置clip后宣称hold成功。NativeTaskEnvironment在任何native reset写入前验证动作，并只更新被reset的行；前五帧继续作为脚本准备，actor采样不计PPO收益。数据计划保留明确的requested course SHA，不能以新的任务标签覆盖旧碰撞。该实现完成批次的source准备与native数据组包；后续部分行计划协调、等表面身份更新及变化表面安装见下面两节。真实扰动/传感/时序注入、任意连续地形的SDK联合验收及物理恢复准入仍未完成。
 
 ### 部分复位计划与等表面课程更新
 
@@ -404,7 +404,21 @@ TensorBoard统一记录奖励每秒、每步贡献、事件数、mask启用率�
 
 新的NativeTaskResetPlan可携带完整**native顺序**的source courses。若新请求仅改变geometry seed等元数据，lifecycle只有在source SHA逐项相符、TerrainSurface（含高度三角格、竖面和摩擦）及实际已绑定meshes完全相同、未选中行对象未变时，才随成功reset更新course身份。此路径保持原scene、root view、contact view、地形query batch与实际碰撞形状，不stop/play、不重置全局时钟，不把新的几何当旧形状接受。真实高度/摩擦/形状变化仍在任何native reset写入前抛TerrainRebuildRequired；scope和分母不变，变化课程的提案保留待真实重建。
 
-Kaiser安装的SDK源码核对见[生命周期审查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-coordination-20261019T091636Z-041e7e81/sdk_scene_lifecycle_review.json)：PhysxManager的stop回调会invalidate views，warmup含正dt update_simulation调用。因此不能将全局stop/reset/play当无损的部分地形替换。官方USD变更通知能力也不证明当前GPU pipeline的contact filters/views、cook完成、未选中状态及计步已通过联合验收；实际变化地形的安装和epoch交接仍须实现并在准入后的原生场景验证。
+Kaiser安装的SDK源码核对见[生命周期审查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-coordination-20261019T091636Z-041e7e81/sdk_scene_lifecycle_review.json)：PhysxManager的stop回调会invalidate views，warmup含正dt update_simulation调用。因此不能将全局stop/reset/play当无损的部分地形替换。官方USD变更通知能力也不证明当前GPU pipeline的contact filters/views、cook完成、未选中状态及计步已通过联合验收；新私有安装路径如下，仍须在准入后的原生场景验证。
+
+### 连续地形的零步编辑与完整对象图交接
+
+私有[地形编辑与安装器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_terrain.py)消费已封存的复位提案，只替换mask选中行的实际表面。它在完整策略边界、奖励窗口已清空且没有待消费物理包时执行；同一物理tick已reset的行在消费新draw之前拒绝。命令、准备动作、native布局、单位四元数及每行source course SHA先检查，再触碰USD。只改geometry seed等元数据继续使用前一节的等表面路径；实际高度、网格或摩擦变化才进入编辑。
+
+编辑器复用初始场景的网格和材料作者化方法，在本行独有的generation路径创建disabled形状，核对Point3f编码、三角形、双面、原始mesh碰撞及独立材料，再禁用旧形状、启用新形状。安装源码确认的`flush_changes`用于处理变更；当前110版cooking接口使用`get_cooking_statistics`的scheduled/finished及GPU兼容、polygon-limit warning计数，不能套用较旧文档中的阻塞cooking方法。等待有显式上限，已有任务未完成、计数回退或新增warning均拒绝；这项源码核对不等于实际运行通过。
+
+USD路径存在、contact filter字符串回读和cooking计数归零都不足以证明native形状正确。新路径另用实际scene query接口逐collider探测：在一个非退化三角形内部沿法向作双面all-hits射线，必须命中对应的新collision路径；移除旧的本任务surface根和空generation后，旧路径必须不再命中。其他robot或地形的命中不提前结束查询。该探针只证明指定路径的存在/消失，不能代替每个三角面、摩擦、接触法向或完整碰撞等价验收；实际准入配置须明确启用scene queries，编辑器不代改配置。
+
+全过程订阅physics step事件并要求零次，按原生顺序对root/link姿态与COM速度、18关节位置/速度、19本体COM/质量、原生limits、具名拓扑、clock和model epoch作前后精确核对。连续关节limits可保留无限边界但不得NaN。旧scene在第一次编辑前立即失效；失败保留阶段、已变更行和无自动恢复标记，不回滚物理、不重抽任务，也不清理未核验的失败现场。可见状态相等仍不证明隐藏solver/contact caches相等，必须另作真实未选中行的成对轨迹对照。
+
+新接触视图按各环境实际collider数量重新建立，不截断可变表面数；robot、root view、机械观测桥、effort、clone映射及model epoch不变。安装器在同一边界更新plant、lifecycle、task、reward、协调器与ground的scene/query引用；未选中行的驱动和接触历史保持。新场景记录独立terrain epoch及必须reset的行，全部选中行完成物理reset以前，plant禁止任何下一物理步。旧scene/query不能继续读或步进。完整不可变TerrainCourse的canonical SHA只计算一次，保持原序列化公式，避免每次局部reset重复展开未变的整块高度场。
+
+当前作者化、flush/cooking适配、native路径探针和交接代码已实现，但实际pxr材料读回、native cooking、真实contact filters、隐藏solver缓存影响和107°整机物理验收均未执行。没有stop/reset/play、app update或隐含仿真步，也没有创建SDK上下文或启动正式训练；合成adapter通过不能改变这些false。
 
 ## 正式优化与预算
 
@@ -543,9 +557,9 @@ Kaiser上分组通过[96项执行链与场景接口检查](/home/yukikaze/Docume
 
 Kaiser分别通过[60项地形/课程检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-integration-20261019T023844Z-c7367372/validation-0001.json)、[61项native地面查询与既有执行链回归](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-integration-20261019T023844Z-c7367372/validation-0002.json)，补充原始坐标精度检查后[native地面15项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-integration-20261019T023844Z-c7367372/validation-0003.json)。这些是分次CPU检查，不能将重复回归相加为一次全量测试。真实目录的[24个地形案例准备核验](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-integration-20261019T023844Z-c7367372/catalogue-0002.json)保持原30s时长和速度，显式地形范围覆盖其声明的行程，并记录作者化网格buffer哈希；不是实际native cooking、整机表现或完整剩余存储实测。其材料值是明确的工程fixture，不能充作硬件材料标定。第一次准备脚本在末尾用简化小数断言轮中心而失败，已根据[原始URDF只读核对](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-integration-20261019T023844Z-c7367372/wheel_geometry_source_review.json)改为文件精确值，原失败保留；没有修改资产、几何容差或生产模型。
 
-地形生成器独立保存RNG，按课程TaskDraw构造连续参数与原始请求记录；几何构造发生在受控场景准备边界。当前native地面引用是不可热换的：不能在live reset只换TaskDraw而继续使用旧碰撞体，也不假设编辑USD会自动正确重建PhysX形状。Kaiser安装源码的有界核查尚未建立运行中重烘焙接口的可用性；不据此宣称整个SDK不存在这类能力。完整课程的逐行碰撞几何替换、独立越界和技能验收、真正native碰撞查询对照尚未完成。这些准备结果不把144案例标为可运行或已通过。
+地形生成器独立保存RNG，按课程TaskDraw构造连续参数与原始请求记录；几何构造发生在受控场景准备边界。不能在live reset只换TaskDraw而继续使用旧碰撞体，也不假设编辑USD会自动正确重建PhysX形状。后续私有编辑器已补齐显式作者化、cooking计数同步、native路径探针及完整scene/query交接；真实重烘焙可用性、未选中轨迹等价、独立越界和技能验收仍须在准入后验证。这些准备结果不把144案例标为可运行或已通过。
 
-新增[原生回合边界](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_episode.py)，绑定当前scene、实际clone顺序、地面query和每行完整course SHA。固定几何上的逐行reset会同时更新episode/control epoch、请求中止与去重状态、驱动/接触历史；未选择行的状态与命令保留，物理时钟不清零。同一物理边界不能重复生成空回合。机械模型epoch改变后必须整批重新建立回合，不能让未reset行继续沿用旧模型标签。请求不同course时，在任何native写入前返回带行号及实际/请求身份的`TerrainRebuildRequired`；这只是拒绝错误接线，尚未实现任意连续新地形的原生重建，也没有用有限静态地形替换完整课程分布。
+新增[原生回合边界](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_episode.py)，绑定当前scene、实际clone顺序、地面query和每行完整course SHA。固定几何上的逐行reset会同时更新episode/control epoch、请求中止与去重状态、驱动/接触历史；未选择行的状态与命令保留，物理时钟不清零。同一物理边界不能重复生成空回合。机械模型epoch改变后必须整批重新建立回合，不能让未reset行继续沿用旧模型标签。未安装新表面时仍在native reset写入前返回带行号及实际/请求身份的`TerrainRebuildRequired`；正确的变化课程须先经过私有编辑器和全对象图交接，再应用选中行reset，不用有限静态地形替换完整课程分布。
 
 reset发生在已经发布的100Hz边界。旧回合的PRE-reset帧、critic和监督独立保留；新回合即时返回同一timestamp的脚本控制投影，有限actor占位值显式不称为传感器测量，critic/辅助标签无效且不参与PPO。它不读失效的native缓存，不补一次假物理步。随后严格执行200Hz两步或1kHz十步，再读实际传感器；五个新的100Hz传感器帧及完整15ms接触窗口建立后才切回策略。传感器允许有已声明延迟，但采样时刻必须严格晚于该次reset且逐帧前进；时间戳恰好等于reset缺少先后顺序证明，不能计为新帧，重复旧时间戳也不能完成准备。旧投影不会跨新的control epoch进入有效历史。新增`step_requests`入口在物理区间完成后、发布新观测前消费上一帧估计，准备期同时关闭估计valid与新请求准入；NOT_READY请求仍消费ID，不能等准备结束后重放同一ID起跳。后续新增的NativeTaskEnvironment已经使用该入口接线，继续同时屏蔽准备期估计和新请求准入；真实场景、传感器时序及动态课程仍须单独验收，不能仅关闭PPO mask却另行让FSM消费占位估计。
 
@@ -583,7 +597,9 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 部分复位协调与等表面课程身份更新在Kaiser先通过[135项检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-coordination-20261019T091636Z-041e7e81/validation-0001.json)，补充draw封存后中断及非法geometry seed拒绝后，[137项最终检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-coordination-20261019T091636Z-041e7e81/validation-0002.json)。分组重叠，不相加。包括部分行只消费对应draw、未选中计划/命令/course对象不变、相同boundary不再推进RNG、未应用或失败提案不能重抽、pending冷载入拒绝、显式cold setup保持采样顺序而不回放旧回合、trajectory/controller变更拒绝；合成native task的等表面auto-reset还验证PRE-reset critic/标签、episode/控制权、真实子步数及未选中行不变。新表面/摩擦、不符hash及未选中course对象变更均在reset写入前拒绝。仍然只有Kaiser CPU合成检查与静态源码核对，SDK上下文、真实机器人仿真和新正式PPO为零。
 
-正式PPO仍未启动。下一步须完成任意连续课程的真实native碰撞重建及变化几何的view/scene epoch交接，补齐16恢复候选中未解和未准入的请求，以及扰动/传感/时序来源和实际107°准入/速率/物理条件配方，144案例的原生场景/profile/请求序列与独立技能判据、连续挑战manifest、评价预算的持久预留及正式调度；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
+连续地形编辑在Kaiser先通过[117项接口检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-replacement-20261019T094514Z-957fc6b1/validation-0001.json)，加入plant/reset债务和已有评价回归后[150项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-replacement-20261019T094514Z-957fc6b1/validation-0002.json)，最后补齐native路径存在/退休探针及同tick重复reset拒绝后[154项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-replacement-20261019T094514Z-957fc6b1/validation-0003.json)。分组有重叠，不相加为独立实验。检查包含可变形状数、多次不同课程、反向clone映射、完整graph采用、选中行reset及未选中驱动/历史保留，还有步事件、关节/model/view变更、cooking warning/timeout、遗漏新形状及残留旧形状的拒绝。测试明确使用fake USD/PhysX adapters，实际pxr作者化与真实native query都未执行；这些仍是Kaiser CPU合成检查，SDK上下文、机器人仿真与新正式PPO为零。
+
+正式PPO仍未启动。下一步须完成连续地形编辑的真实SDK cooking/contact及未选中轨迹联合验收，补齐16恢复候选中未解和未准入的请求，以及扰动/传感/时序来源和实际107°准入/速率/物理条件配方，144案例的原生场景/profile/请求序列与独立技能判据、连续挑战manifest、评价预算的持久预留及正式调度；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 

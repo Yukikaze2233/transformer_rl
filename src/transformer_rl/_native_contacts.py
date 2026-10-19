@@ -86,6 +86,8 @@ class NativeTerrainContacts:
                for env, paths in zip(env_paths, terrain_paths_by_env) for path in paths):
             raise ValueError('terrain filters must belong to their corresponding environment')
         self.binding, self.num_envs, self.device = binding, len(env_paths), torch.device(device)
+        self.environment_paths, self.terrain_paths_by_environment = env_paths, terrain_paths_by_env
+        self.patches_per_body = patches_per_body
         self._convert = native_to_tensor
         self.physics_view = physics_view
         self.terrain_motion_reference = terrain_motion_reference

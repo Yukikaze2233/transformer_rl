@@ -63,6 +63,14 @@ class ResetBatchCoordinator:
         self._controller_versions = _tensor_versions(self._controller_tensors())
         self._origins = scene.environment_origins_m.double().detach().clone()
         self._issued, self._sequence = None, 0
+        self._native_installer = None
+
+    def bind_native_installer(self, installer):
+        self._identity()
+        if (self._issued is not None or self._native_installer is not None or not callable(installer)
+                or installer.coordinator is not self or installer.lifecycle is not self.lifecycle):
+            raise ValueError('native terrain installer must bind its one source before the first proposal')
+        self._native_installer = installer
 
     def _identity(self):
         self.lifecycle._identity()
@@ -137,6 +145,8 @@ class ResetBatchCoordinator:
                 raise RuntimeError('previous reset proposal has not been applied; never resample its pending requests')
         elif not reset_mask.all():
             raise ValueError('initial reset proposal requires every native row')
+        if (reset_mask & life._last_reset_tick.eq(self._scene.observation.physical_tick)).any():
+            raise RuntimeError('native rows already reset at this same physical boundary; do not draw another task')
         rows = reset_mask.nonzero().flatten()
         local_com = self._scene.observation._local_com_m
         if (not isinstance(local_com, torch.Tensor) or local_com.shape != (self.num_envs, 3)
@@ -165,6 +175,8 @@ class ResetBatchCoordinator:
         self._issued = ResetProposal(*args, prepared, plan, error)
         if error is not None:
             raise ResetSourceNotReady(self._issued)
+        if self._native_installer is not None:
+            self._native_installer(plan, reset_mask)
         return plan
 
     def state_dict(self):

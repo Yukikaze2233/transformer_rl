@@ -26,7 +26,13 @@ def fixture():
     program.tuning = replace(program.tuning, xy_jitter_m=0, roll_pitch_jitter_rad=0,
                               inner_knee_jitter_rad=0, leg_pitch_jitter_rad=0)
     clock = torch.zeros(2, dtype=torch.float64)
-    observation = SimpleNamespace(binding=program.geometry.kinematics.binding,
+
+    class Observation(SimpleNamespace):
+        @property
+        def physical_tick(self):
+            return round(float(clock[0]) / .005)
+
+    observation = Observation(binding=program.geometry.kinematics.binding,
                                    timestamp_s=lambda: clock.clone(), _local_com_m=torch.zeros(2, 3))
     scene = SimpleNamespace(observation=observation, environment_origins_m=origins.float(),
                              readback={'selected_asset_manifest_sha256': program.geometry.kinematics.manifest_sha256,
@@ -37,6 +43,7 @@ def fixture():
     life.num_envs, life.device = 2, torch.device('cpu')
     life.plant = SimpleNamespace(scene=scene, controller=controller)
     life.episode_id, life._last = torch.full((2,), -1, dtype=torch.long), None
+    life._last_reset_tick = torch.full((2,), -1, dtype=torch.long)
     life._course_sha256 = ('0' * 64, '1' * 64)
     life._identity = lambda: None
     sizes = []
@@ -53,6 +60,7 @@ def apply(life, plan, mask=None):
     mask = torch.ones(2, dtype=torch.bool) if mask is None else mask
     life.episode_id += mask.long()
     life._course_sha256, life._last = plan.course_sha256, object()
+    life._last_reset_tick[mask] = life.plant.scene.observation.physical_tick
 
 
 def test_partial_resets_draw_only_selected_rows_and_keep_every_other_plan_field_and_course_identity():
@@ -70,6 +78,17 @@ def test_partial_resets_draw_only_selected_rows_and_keep_every_other_plan_field_
         assert torch.equal(getattr(first.commands, name)[0], getattr(second.commands, name)[0])
     assert second.source_courses[0] is first.source_courses[0]
     assert second.course_sha256[0] == first.course_sha256[0] and second.course_sha256[1] != first.course_sha256[1]
+
+
+def test_already_applied_same_tick_reset_cannot_consume_another_task_or_start_another_edit():
+    coordinator, life, _, sizes = fixture()
+    first = request(coordinator, life)
+    apply(life, first)
+    before = coordinator.preparer.state_dict()
+    with pytest.raises(RuntimeError, match='already reset'):
+        request(coordinator, life)
+    assert sizes == [2] and coordinator.preparer.requested_rows == 2
+    assert torch.equal(coordinator.preparer.generator.get_state(), before['pose_rng'])
 
 
 def test_unapplied_boundary_reuses_its_plan_without_rng_advance_and_never_draws_a_replacement_request():

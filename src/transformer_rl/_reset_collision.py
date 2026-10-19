@@ -8,7 +8,7 @@ separate acceptance work; neither a plane fit nor closure grants qualification.
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import math
@@ -87,8 +87,7 @@ class FlatSpawnPatch:
                         and max(v[1] for v in vertices) >= y0 and min(v[1] for v in vertices) <= y1
                         and max(v[2] for v in vertices) > height + 1e-8):
                     raise ValueError('spawn rectangle intersects a raised source wall')
-        hashes = tuple(hashlib.sha256(json.dumps(asdict(course), sort_keys=True, separators=(',', ':'),
-                                                allow_nan=False).encode()).hexdigest() for course in courses)
+        hashes = tuple(course.sha256 for course in courses)
         return cls(bounds_local_xy_m.detach().clone() + origins_world_m[:, :2, None],
                     height_local_z_m.detach().clone() + origins_world_m[:, 2], hashes, True)
 

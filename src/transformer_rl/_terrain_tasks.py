@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from functools import cached_property
+import hashlib
+import json
 import math
 import struct
 
@@ -87,6 +90,14 @@ class TerrainCourse:
     request: TerrainRequest
     geometry_seed: int
     surface: TerrainSurface
+
+    @cached_property
+    def sha256(self):
+        # Courses contain frozen validated numeric structures. Cache their
+        # existing canonical digest instead of expanding a full unchanged
+        # height field again for every partial episode reset.
+        return hashlib.sha256(json.dumps(asdict(self), sort_keys=True, separators=(',', ':'),
+                                         allow_nan=False).encode()).hexdigest()
 
 
 class ContinuousTerrainGenerator:

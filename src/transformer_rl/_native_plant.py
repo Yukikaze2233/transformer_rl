@@ -82,7 +82,8 @@ class NativePhysicsPlant:
         if self._faulted:
             raise RuntimeError('partially advanced physical plant is faulted; do not replay its interval')
         bridge = self.scene.observation
-        if (self.scene.robot.root_view is not self._view or bridge.robot is not self.scene.robot
+        if (self.scene.readback.get('terrain_binding_invalidated') is True
+                or self.scene.robot.root_view is not self._view or bridge.robot is not self.scene.robot
                 or self.scene.contacts.terrain_motion_reference != 'authored_static_own_terrain'
                 or tuple(self.scene.robot.joint_names) != bridge.binding.native_joint_names
                 or tuple(self.scene.robot.body_names) != bridge.binding.native_body_names):
@@ -112,6 +113,8 @@ class NativePhysicsPlant:
     @torch.no_grad()
     def step_physics(self, *, motor_strength=None, pressure_strength=None):
         self._identity()
+        if self.scene.readback.get('terrain_reset_required_rows', ()):
+            raise RuntimeError('new native terrain requires its selected physical reset before any step')
         if self.targets is None:
             raise RuntimeError('an explicit policy or control-probe target is required before physics')
         bridge, robot = self.scene.observation, self.scene.robot
@@ -201,6 +204,9 @@ class NativePhysicsPlant:
                 # Keep untouched rows' issued targets and timing exactly.
                 for field in fields(fresh):
                     getattr(self.targets, field.name)[mask] = getattr(fresh, field.name)[mask]
+            pending = self.scene.readback.get('terrain_reset_required_rows', ())
+            selected = set(ids.tolist())
+            self.scene.readback['terrain_reset_required_rows'] = tuple(row for row in pending if row not in selected)
         except BaseException:
             self._faulted = True
             raise

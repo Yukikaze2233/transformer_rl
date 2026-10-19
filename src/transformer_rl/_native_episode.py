@@ -7,9 +7,7 @@ this component never relabels stale collision geometry as a new task.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
-import hashlib
-import json
+from dataclasses import dataclass, replace
 
 import torch
 
@@ -69,9 +67,7 @@ class NativeEpisodeLifecycle:
         self._scene, self._view = plant.scene, plant.scene.robot.root_view
         self._meshes, self._courses = plant.scene.terrain_meshes, ground.courses
         self._model_epoch = plant.scene.observation.model_epoch
-        self._course_sha256 = tuple(hashlib.sha256(json.dumps(asdict(course), sort_keys=True,
-                                                             separators=(',', ':'), allow_nan=False).encode()).hexdigest()
-                                   for course in self._courses)
+        self._course_sha256 = tuple(course.sha256 for course in self._courses)
         self.episode_id = torch.full((self.num_envs,), -1, dtype=torch.long, device=self.device)
         self.control_epoch = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.policy_allowed = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -157,8 +153,8 @@ class NativeEpisodeLifecycle:
             if (len(courses) != self.num_envs
                     or any(not isinstance(c, type(self._courses[i])) for i, c in enumerate(courses))):
                 raise ValueError('reset source courses require every actual native-order course')
-            hashes = tuple(hashlib.sha256(json.dumps(asdict(c), sort_keys=True, separators=(',', ':'),
-                                                      allow_nan=False).encode()).hexdigest() for c in courses)
+            hashes = tuple(self._course_sha256[i] if c is self._courses[i] else c.sha256
+                           for i, c in enumerate(courses))
             if hashes != requested:
                 raise ValueError('reset course request hashes differ from their exact source descriptions')
             geometry_changed = [i for i in mask.nonzero().flatten().tolist()

@@ -135,7 +135,8 @@ class NativeGroundQuery:
         courses = tuple(courses)
         bridge = self.scene.observation
         bridge.before_physics_step()
-        if (self.scene.robot.root_view is not self._view or self.scene.terrain_meshes is not self._meshes
+        if (self.scene.readback.get('terrain_binding_invalidated') is True
+                or self.scene.robot.root_view is not self._view or self.scene.terrain_meshes is not self._meshes
                 or not torch.equal(self.scene.environment_origins_m, self._origins)
                 or len(courses) != self.num_envs
                 or any(not isinstance(c, TerrainCourse) or not isinstance(c.request, TerrainRequest)
@@ -143,8 +144,11 @@ class NativeGroundQuery:
                 or not isinstance(reset_mask, torch.Tensor) or reset_mask.shape != (self.num_envs,)
                 or reset_mask.dtype != torch.bool or reset_mask.device != self.device):
             raise ValueError('course metadata needs the unchanged native owner and exact native-order reset rows')
+        selected = set(reset_mask.nonzero().flatten().tolist())
         for row, (old, new) in enumerate(zip(self.courses, courses)):
-            if not reset_mask[row] and new is not old:
+            if new is old:
+                continue
+            if row not in selected:
                 raise ValueError('course metadata may change only explicitly reset rows')
             if new.surface != old.surface or new.surface.meshes != self._meshes[row]:
                 raise ValueError('course metadata cannot change its bound collision surface or material')
@@ -158,7 +162,8 @@ class NativeGroundQuery:
     def __call__(self, robot, scene):
         bridge = self.scene.observation
         bridge.before_state_read()
-        if (scene is not self.scene or robot is not self.scene.robot or robot.root_view is not self._view
+        if (scene.readback.get('terrain_binding_invalidated') is True
+                or scene is not self.scene or robot is not self.scene.robot or robot.root_view is not self._view
                 or scene.terrain_meshes is not self._meshes
                 or scene.readback.get('selected_urdf_sha256') != self._source_sha
                 or not torch.equal(scene.environment_origins_m, self._origins)):
