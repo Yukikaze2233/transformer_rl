@@ -80,6 +80,23 @@ def test_recipe_and_configs_do_not_import_or_start_an_sdk(tmp_path):
     assert all(v == 0 for v in configs['pressure']['armature'].values())
 
 
+def test_spawn_preserves_usd_body_height_without_adding_a_second_container_height(tmp_path):
+    recipe, _, manifest, *_ = fixture(tmp_path)
+
+    class Configuration(SimpleNamespace):
+        InitialStateCfg = SimpleNamespace
+
+    utilities = SimpleNamespace(UsdFileCfg=SimpleNamespace, RigidBodyPropertiesCfg=SimpleNamespace,
+                                ArticulationRootPropertiesCfg=SimpleNamespace)
+    config = recipe._articulation_config(utilities, Configuration, SimpleNamespace)
+    source_body_height = manifest['nominal_base_height_m']
+    assert source_body_height + config.init_state.pos[2] == recipe.initial_root_position_m[2]
+    assert config.init_state.joint_pos == manifest['nominal_joint_pos']
+    assert config.spawn.usd_path == str(recipe.asset / manifest['usd'])
+    assert config.spawn.articulation_props.solver_position_iteration_count == 12
+    assert config.spawn.articulation_props.solver_velocity_iteration_count == 6
+
+
 def test_scene_without_bound_urdf_cannot_offer_a_wheel_geometry_source(tmp_path):
     recipe, _, manifest, *_ = fixture(tmp_path)
     del manifest['urdf']
@@ -180,3 +197,42 @@ def test_mesh_input_is_snapshotted_instead_of_changed_by_later_layout_edits():
     expected = deepcopy(terrain.vertices_m)
     source[0][0] = 500
     assert terrain.vertices_m == expected
+
+
+@pytest.mark.parametrize('fault', [None, 'not_inverted', 'shared', 'wrong_env', 'cross_group', 'expansion'])
+def test_collision_groups_match_empty_global_paths_without_allowing_cross_environment_contacts(fault):
+    class Prim:
+        def __init__(self, attributes=None, relationships=None, valid=True):
+            self.attributes, self.relationships, self.valid = attributes or {}, relationships or {}, valid
+
+        def IsValid(self):
+            return self.valid
+
+        def GetAttribute(self, name):
+            return SimpleNamespace(Get=lambda: self.attributes.get(name))
+
+        def GetRelationship(self, name):
+            return SimpleNamespace(GetTargets=lambda: self.relationships.get(name, []))
+
+    envs = ('/World/envs/env_0', '/World/envs/env_1')
+    prims = {'/physicsScene': Prim({'physxScene:invertCollisionGroupFilter': fault != 'not_inverted'})}
+    for index, env in enumerate(envs):
+        path = '/World/collisions/group' + str(index)
+        prims[path] = Prim({'collection:colliders:expansionRule': 'expandPrims'},
+                          {'collection:colliders:includes': [env], 'physics:filteredGroups': [path]})
+    first = prims['/World/collisions/group0']
+    if fault == 'shared':
+        prims['/World/collisions/global_group'] = Prim()
+    elif fault == 'wrong_env':
+        first.relationships['collection:colliders:includes'] = [envs[1]]
+    elif fault == 'cross_group':
+        first.relationships['physics:filteredGroups'].append('/World/collisions/group1')
+    elif fault == 'expansion':
+        first.attributes['collection:colliders:expansionRule'] = 'explicitOnly'
+    stage = SimpleNamespace(GetPrimAtPath=lambda path: prims.get(path, Prim(valid=False)))
+    if fault:
+        with pytest.raises(RuntimeError):
+            NativeSceneRecipe._collision_groups_readback(stage, '/physicsScene', envs)
+    else:
+        result = NativeSceneRecipe._collision_groups_readback(stage, '/physicsScene', envs)
+        assert result == {'collision_groups_verified': 2, 'shared_collision_group_authored': False}

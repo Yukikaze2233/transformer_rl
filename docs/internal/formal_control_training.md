@@ -622,7 +622,17 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 所选107°资产的[完整出生组包检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-script-preparation-20261019T110017Z-9f7d1edb/selected_birth_binding_result.json)已在Kaiser单独通过：16个原请求均保持60s任务时限与双轴±302m完整课程范围，source闭链、全body对地支持、float32编码及原位准备保持联合通过，使用所选source base COM，未改全局RNG。原策略box的第14项hold仍拒绝；新增准备保持不扩大policy box。此检查只含名义配方和source平面碰撞几何，pair-domain仍显式标为探针，未验证self-contact、随机扰动、真实SDK碰撞或动态准备，不能授予物理或正式开训资格。
 
-正式PPO仍未启动。下一步须完成连续地形编辑的真实SDK cooking/contact及未选中轨迹联合验收，完成全部16恢复候选的真实准备/接管/恢复物理准入，以及扰动/传感/时序来源和实际107°准入/速率/物理条件配方，144案例的原生场景/profile/请求序列与独立技能判据、连续挑战manifest、手动评价入口及正式调度；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
+### 真实GPU场景与固定闭链求解设置
+
+用户已明确要求检查通过后直接启动正式PPO，并固定闭链位置12次、速度6次，不再等待这项设置的重复确认。连续课程、手动评价和既有训练预算保持不变。以下真实SDK结果覆盖前述各CPU检查阶段的“SDK为零”状态；它们不改写那些历史收据。
+
+Kaiser已实际创建headless AppLauncher、GPU SimulationContext与所选107°资产。首先修正了空global-path碰撞组回读：已安装cloner只创建各环境自身组，没有共享global_group。随后定位到PhysX加载`libcuda.so`失败，而WSL目录中该库与`libcuda.so.1`均可正常加载；[上游加载实现](https://github.com/NVIDIA-Omniverse/PhysX/blob/b97365c6ddb32fda8469bc788ec18024862b0368/ovphysx/ovruntime/source/omni.physx/plugins/OmniPhysX.cpp#L411)与实际日志一致。新的[私有互操作层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_interop.py)只在子进程环境补充显式驱动库目录，并在该进程内把SDK ProxyArray的原始Warp视图传给内核，保持内存、device与stream，不拷贝到CPU、不修改共享SDK或全局环境。原失败完整保留；SDK关闭曾把失败返回为0，实际结果同时以关闭前写入的结构化状态判断。
+
+真实物理回读还发现USD的base_link已含0.32m出生高度，Robot容器的初始化再次叠加高度会造成约0.64m出生位置。现已去掉重复容器平移，并在物理初始化前回读每个base_link的世界位置。[修正后的GPU执行](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-native-bootstrap-20261019T115513Z-02037a1a/scene-0009.json)回读出生位置为`(0,0,0.32)`、整机质量13.886kg、全部18个关节的具名armature/friction、显式执行器、零solver PD、每机器人六个排除在树外的球铰闭环。源码及互操作的[45项Kaiser检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-native-bootstrap-20261019T115513Z-02037a1a/validation-0004.json)，34、44、45项各轮有重叠，不相加为独立实验。
+
+固定12/6下，[200个真实200Hz物理步](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-native-bootstrap-20261019T115513Z-02037a1a/scene-0012.json)已接入所选六轴有效响应、名义腿位置与零轮速反馈、原资产气弹簧曲线、实际刚体运动及逐点接触读数。按已安装SDK对TGS速度更新的说明，当前私有启动器显式启用`enable_external_forces_every_iteration=True`并回读USD属性；位置和速度迭代数仍是12和6。六个约束以实际body link姿态变换各自局部锚点，记录了约2.595mm峰值误差，末步最大约1.319mm；未启用该选项的原检查也单独保留。这里没有actor，名义反馈未实现机身平衡，不能将这1秒称为站立成功、完整恢复验收、硬件资格或PPO训练。所有子进程由自己的parent waitpid回收后释放原资源锁，没有恢复旧测试队列。
+
+正式PPO仍未启动。接下来把实际场景、闭链准备、传感/时序、原生奖励和连续地形组成正式worker，完成实际整轮GPU及剩余存储检查后接入CLI并开训；不增加定时模型评价或课程晋级评估门槛。轮体/地形native碰撞等价、完整恢复功能、Sim2Real与部署资格仍单独留痕，不能把当前接口连通性称为全部物理能力通过。144案例与连续挑战保留为手动评价范围。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 

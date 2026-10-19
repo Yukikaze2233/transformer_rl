@@ -114,6 +114,21 @@ class NativeSceneRecipe:
                                        velocity_limit_sim=group.velocity_limit, **values)
         return result
 
+    def _articulation_config(self, sim_utils, articulation_config, actuator_config):
+        return articulation_config(
+            prim_path='/World/envs/env_.*/Robot',
+            spawn=sim_utils.UsdFileCfg(
+                usd_path=str(self.asset / self.manifest['usd']), activate_contact_sensors=True,
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(max_depenetration_velocity=1.),
+                articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+                    enabled_self_collisions=False, solver_position_iteration_count=12, solver_velocity_iteration_count=6)),
+            # The selected USD already positions base_link at its nominal
+            # height. This position translates the Robot container, not that
+            # rigid body; adding the height again would spawn it twice as high.
+            init_state=articulation_config.InitialStateCfg(pos=(0., 0., 0.), joint_pos=self.manifest['nominal_joint_pos'],
+                                                          joint_vel={'.*': 0.}),
+            actuators=self._actuator_configs(actuator_config), soft_joint_pos_limit_factor=1.)
+
     def _actuator_readback(self, robot, converter, device):
         """Read SDK explicit gains separately from zero solver PD gains."""
         binding = MechanicalBinding.from_manifest(self.manifest, robot.joint_names, robot.body_names)
@@ -175,6 +190,24 @@ class NativeSceneRecipe:
                 'native_static_collision_equivalence_verified': False}
 
     @staticmethod
+    def _collision_groups_readback(stage, physics_path, environment_paths):
+        if stage.GetPrimAtPath(physics_path).GetAttribute('physxScene:invertCollisionGroupFilter').Get() is not True:
+            raise RuntimeError('cross-environment collision filtering was not authored')
+        # This scene passes no global paths. The installed cloner then authors
+        # only each clone's own group, not an empty shared global group.
+        if stage.GetPrimAtPath('/World/collisions/global_group').IsValid():
+            raise RuntimeError('owned terrain must not acquire an unexpected shared collision group')
+        for index, env in enumerate(environment_paths):
+            path = '/World/collisions/group' + str(index)
+            prim = stage.GetPrimAtPath(path)
+            includes = tuple(str(p) for p in prim.GetRelationship('collection:colliders:includes').GetTargets())
+            allowed = {str(p) for p in prim.GetRelationship('physics:filteredGroups').GetTargets()}
+            expansion = prim.GetAttribute('collection:colliders:expansionRule').Get()
+            if not prim.IsValid() or includes != (env,) or allowed != {path} or expansion != 'expandPrims':
+                raise RuntimeError('environment collision group readback differs')
+        return {'collision_groups_verified': len(environment_paths), 'shared_collision_group_authored': False}
+
+    @staticmethod
     def _author_terrain_mesh(stage, path, mesh, geometry_api, physics_api, sim_utils, *, enabled):
         geometry = geometry_api.Mesh.Define(stage, path + '/geometry/mesh')
         geometry.CreatePointsAttr(mesh.vertices_m)
@@ -204,7 +237,8 @@ class NativeSceneRecipe:
         from isaaclab_physx.physics import PhysxManager
 
         stage = sim.stage
-        if stage.GetPrimAtPath('/World/envs').IsValid() or stage.GetPrimAtPath('/World/PlantMaterial').IsValid():
+        if any(stage.GetPrimAtPath(path).IsValid()
+               for path in ('/World/envs', '/World/PlantMaterial', '/World/collisions')):
             raise RuntimeError('owned scene roots already exist; never adopt or overwrite another scene')
         env_paths = tuple('/World/envs/env_' + str(index) for index in range(len(self.origins)))
         terrain_paths = []
@@ -215,17 +249,17 @@ class NativeSceneRecipe:
                 path = env + '/Terrain/surface_' + str(index)
                 paths.append(self._author_terrain_mesh(stage, path, mesh, UsdGeom, UsdPhysics, sim_utils, enabled=True))
             terrain_paths.append(tuple(paths))
-        cfg = ArticulationCfg(
-            prim_path='/World/envs/env_.*/Robot',
-            spawn=sim_utils.UsdFileCfg(
-                usd_path=str(self.asset / self.manifest['usd']), activate_contact_sensors=True,
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(max_depenetration_velocity=1.),
-                articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-                    enabled_self_collisions=False, solver_position_iteration_count=12, solver_velocity_iteration_count=6)),
-            init_state=ArticulationCfg.InitialStateCfg(pos=self.initial_root_position_m, joint_pos=self.manifest['nominal_joint_pos'],
-                                                     joint_vel={'.*': 0.}),
-            actuators=self._actuator_configs(IdealPDActuatorCfg), soft_joint_pos_limit_factor=1.)
+        cfg = self._articulation_config(sim_utils, ArticulationCfg, IdealPDActuatorCfg)
         robot = Articulation(cfg)
+        transforms = UsdGeom.XformCache()
+        authored_base_positions = []
+        for env, origin in zip(env_paths, self.origins):
+            base = stage.GetPrimAtPath(env + '/Robot/base_link')
+            actual = tuple(transforms.GetLocalToWorldTransform(base).ExtractTranslation())
+            expected = tuple(origin[i] + self.initial_root_position_m[i] for i in range(3))
+            if any(not math.isclose(a, b, abs_tol=1e-6, rel_tol=0) for a, b in zip(actual, expected)):
+                raise RuntimeError('authored base position differs from the selected nominal pose and environment origin')
+            authored_base_positions.append(actual)
         material = sim_utils.RigidBodyMaterialCfg(static_friction=1., dynamic_friction=1., restitution=0.,
                                                   friction_combine_mode='multiply', restitution_combine_mode='multiply')
         material.func('/World/PlantMaterial', material)
@@ -249,15 +283,7 @@ class NativeSceneRecipe:
             if (loops, roots) != (6, 1):
                 raise RuntimeError('each robot requires six excluded point loops and one articulation root')
         cloner.filter_collisions(stage, sim.cfg.physics_prim_path, '/World/collisions', list(env_paths), global_paths=[])
-        if stage.GetPrimAtPath(sim.cfg.physics_prim_path).GetAttribute('physxScene:invertCollisionGroupFilter').Get() is not True:
-            raise RuntimeError('cross-environment collision filtering was not authored')
-        for index, env in enumerate(env_paths):
-            path = '/World/collisions/group' + str(index)
-            prim = stage.GetPrimAtPath(path)
-            includes = tuple(str(p) for p in prim.GetRelationship('collection:colliders:includes').GetTargets())
-            allowed = {str(p) for p in prim.GetRelationship('physics:filteredGroups').GetTargets()}
-            if includes != (env,) or allowed != {path, '/World/collisions/global_group'}:
-                raise RuntimeError('environment collision group readback differs')
+        groups = self._collision_groups_readback(stage, sim.cfg.physics_prim_path, env_paths)
         sim.reset()
         paths = tuple(str(path) for path in robot.root_view.prim_paths)
         native_envs = tuple(path.split('/Robot')[0] for path in paths)
@@ -268,12 +294,15 @@ class NativeSceneRecipe:
         bridge = NativeObservationBridge(robot, self.manifest, len(env_paths), native_to_tensor=wp.to_torch,
                                          device=device, physics_dt_s=float(sim.cfg.dt))
         readback = self._actuator_readback(robot, wp.to_torch, device)
+        readback.update(groups)
+        readback['authored_base_positions_m'] = authored_base_positions
         masses = wp.to_torch(robot.root_view.get_masses())
         if (masses.shape != (len(env_paths), 19) or not torch.isfinite(masses).all() or (masses <= 0).any()
                 or not torch.allclose(masses.sum(-1), masses.new_full((len(env_paths),), self.manifest['total_mass_kg']),
                                       atol=1e-5, rtol=0)):
             raise RuntimeError('native complete body mass differs from the selected asset')
         readback.update(native_mass_sum_verified=True, six_excluded_point_loops_per_robot=True,
+                        solver_position_iterations=12, solver_velocity_iterations=6,
                         collision_groups_verified=len(env_paths), native_clone_order_resolved=True,
                         selected_asset_manifest_sha256=self.manifest_sha256,
                         selected_model_spec_sha256=self.manifest['files_sha256']['model_spec.json'],
