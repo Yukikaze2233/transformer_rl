@@ -62,10 +62,10 @@ def _initial_policy_boundary(sim, scene):
 
 
 def _physics_configuration(config_type):
-    # 8192克隆的重叠地形AABB实测需要约6190万新增配对；保留容量余量。
+    # 地面已改为近身驻留块；不再为旧的重叠大AABB常驻分配亿级配对缓冲。
     return config_type(enable_external_forces_every_iteration=True, enable_scene_query_support=True,
-                       gpu_found_lost_pairs_capacity=2**27, gpu_found_lost_aggregate_pairs_capacity=2**27,
-                       gpu_total_aggregate_pairs_capacity=2**23)
+                       gpu_found_lost_pairs_capacity=2**22, gpu_found_lost_aggregate_pairs_capacity=2**25,
+                       gpu_total_aggregate_pairs_capacity=2**22)
 
 
 @contextmanager

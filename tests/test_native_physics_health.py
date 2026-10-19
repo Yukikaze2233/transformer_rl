@@ -51,9 +51,9 @@ def test_full_scale_pair_buffers_are_passed_to_the_native_config():
         gpu_total_aggregate_pairs_capacity: int
 
     value = _physics_configuration(Configuration)
-    assert value.gpu_found_lost_pairs_capacity > 61882941
-    assert value.gpu_found_lost_aggregate_pairs_capacity > 61882941
-    assert value.gpu_total_aggregate_pairs_capacity > 2891559
+    assert value.gpu_found_lost_pairs_capacity == 2**22
+    assert value.gpu_found_lost_aggregate_pairs_capacity == 2**25
+    assert value.gpu_total_aggregate_pairs_capacity == 2**22
     assert value.enable_external_forces_every_iteration and value.enable_scene_query_support
 
 
