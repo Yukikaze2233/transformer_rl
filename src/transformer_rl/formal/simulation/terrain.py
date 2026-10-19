@@ -297,10 +297,10 @@ class NativeTerrainEditor:
             bounds = protected_xy_m.detach().cpu().tolist()
             for row in changed:
                 old, new = ground.courses[row], courses[row]
-                if (old.rough_source is None or new.rough_source is not old.rough_source
+                if (old.tile_source is None or new.tile_source is not old.tile_source
                         or old.sha256 != new.sha256):
                     raise ValueError('live streaming cannot replace a task or its complete terrain source')
-                required = set(old.rough_source.tile_keys(bounds[row][0], bounds[row][1], cells=8, halo=0))
+                required = set(old.tile_source.tile_keys(bounds[row][0], bounds[row][1], cells=8, halo=0))
                 xy = before['get_link_transforms'][row, :, :2] - scene.environment_origins_m[row, :2]
                 limits = xy.new_tensor(bounds[row])
                 if ((xy < limits[:, 0]).any() or (xy > limits[:, 1]).any()):

@@ -8,9 +8,11 @@ class NativePhysicsHealth:
     def __init__(self, logging):
         self._logging = logging
         self.first_error = None
+        self.messages_seen = 0
         self._handle = logging.add_logger(self._on_message)
 
-    def _on_message(self, source, level, filename, function, line, message):
+    def _on_message(self, source, level, filename, line, message):
+        self.messages_seen += 1
         if self.first_error is None and 'physx' in source.lower() and (
                 'PhysX error:' in message or 'simulation will miss interactions' in message):
             self.first_error = message[:2048]

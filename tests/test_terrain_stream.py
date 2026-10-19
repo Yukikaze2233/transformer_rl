@@ -15,28 +15,28 @@ from transformer_rl.formal.tasks.terrain import ContinuousTerrainGenerator, Terr
 def rough(extent=20.):
     generator = ContinuousTerrainGenerator(7, TerrainTuning(.7, (.2, 1.1), .25))
     request = TerrainRequest(TerrainKind.ROUGH, TerrainExtent((-extent, extent), (-extent, extent)), roughness_m=.02)
-    return generator.build(request, geometry_seed=17, resident_rough=True)
+    return generator.build(request, geometry_seed=17, resident_tiles=True)
 
 
 def test_resident_geometry_is_bounded_while_the_complete_request_and_source_remain_available():
     course = rough(302.)
     assert course.request.extent.x_m == (-302., 302.)
-    assert course.rough_source.shape[0]*course.rough_source.shape[1] > 2_000_000
+    assert course.tile_source.shape[0]*course.tile_source.shape[1] > 2_000_000
     assert sum(len(mesh.vertices_m) for mesh in course.surface.meshes) < 2000
-    keys = course.rough_source.tile_keys((120., 121.), (70., 71.), cells=8, halo=1)
+    keys = course.tile_source.tile_keys((120., 121.), (70., 71.), cells=8, halo=1)
     moved = course.with_tiles(keys)
-    assert moved.sha256 == course.sha256 and moved.rough_source is course.rough_source
+    assert moved.sha256 == course.sha256 and moved.tile_source is course.tile_source
     assert sum(len(mesh.vertices_m) for mesh in moved.surface.meshes) < 2000
     points = torch.tensor([[[120.25, 70.25], [120.5, 70.375], [120.875, 70.5]]])
     query = TerrainQueryBatch((moved.surface,)).at(points)
-    expected = course.rough_source.at(points)
+    expected = course.tile_source.at(points)
     torch.testing.assert_close(query.height_m, expected.height_m)
     assert query.valid.all()
 
 
-def admitted_rough():
+def admitted_rough(terrain=None):
     env, robot, sim, writes, editor, storage, *_ = fixture()
-    courses = (rough(), rough())
+    courses = (rough(), rough()) if terrain is None else (terrain, terrain)
     owner = SimpleNamespace(lifecycle=env.lifecycle, _scene=env.lifecycle.plant.scene, _identity=lambda: None)
     installer = NativeTerrainInstaller(env, owner, editor)
     result = editor.replace_courses(env.lifecycle.ground, courses, torch.ones(2, dtype=torch.bool))
@@ -46,8 +46,32 @@ def admitted_rough():
     return env, robot, sim, writes, editor, storage, installer
 
 
-def test_live_tiles_preserve_protected_prims_and_never_request_a_reset():
-    env, _, sim, writes, editor, storage, installer = admitted_rough()
+def flat(extent=302.):
+    generator = ContinuousTerrainGenerator(7, TerrainTuning(.7, (.2, 1.1), .25))
+    request = TerrainRequest(TerrainKind.FLAT, TerrainExtent((-extent, extent), (-extent, extent)))
+    return generator.build(request, geometry_seed=17, resident_tiles=True)
+
+
+def test_full_flat_domain_uses_small_exact_plane_tiles_and_one_shared_source():
+    generator = ContinuousTerrainGenerator(7, TerrainTuning(.7, (.2, 1.1), .25))
+    request = TerrainRequest(TerrainKind.FLAT, TerrainExtent((-302., 302.), (-302., 302.)))
+    first = generator.build(request, geometry_seed=17, resident_tiles=True)
+    second = generator.build(replace(request, direction=-1), geometry_seed=18, resident_tiles=True)
+    assert first.tile_source is second.tile_source
+    assert first.request.extent == request.extent
+    assert all(len(mesh.vertices_m) == 4 for mesh in first.surface.meshes)
+    assert max(p.x_m[-1] for p in first.surface.patches) - min(p.x_m[0] for p in first.surface.patches) < 10
+    keys = first.tile_source.tile_keys((120., 121.), (70., 71.), cells=8, halo=1)
+    moved = first.with_tiles(keys)
+    points = torch.tensor([[[120.25, 70.25], [120.875, 70.5]]])
+    query = TerrainQueryBatch((moved.surface,)).at(points)
+    assert query.valid.all() and query.height_m.eq(0).all()
+    assert moved.sha256 == first.sha256
+
+
+@pytest.mark.parametrize('kind', ['rough', 'flat'])
+def test_live_tiles_preserve_protected_prims_and_never_request_a_reset(kind):
+    env, _, sim, writes, editor, storage, installer = admitted_rough(flat() if kind == 'flat' else None)
     old = env.lifecycle.ground.courses
     old_paths = editor.scene.contacts.terrain_paths_by_environment
     count = len(storage.writes)
@@ -74,11 +98,11 @@ def test_live_tiles_cannot_remove_protected_geometry_or_replace_the_source():
     env, _, _, _, editor, _, _ = admitted_rough()
     old = env.lifecycle.ground.courses
     bounds = torch.tensor([[[-1., 1.], [-1., 1.]]]*2)
-    required = old[0].rough_source.tile_keys((-1., 1.), (-1., 1.), cells=8, halo=0)
+    required = old[0].tile_source.tile_keys((-1., 1.), (-1., 1.), cells=8, halo=0)
     bad = old[0].with_tiles(set(old[0].resident_tiles)-{required[0]})
     with pytest.raises(ValueError, match='protected'):
         editor.replace_courses(env.lifecycle.ground, (bad, old[1]), torch.tensor([True, False]), protected_xy_m=bounds)
-    changed = replace(old[0], rough_source=replace(old[0].rough_source, geometry_seed=18),
+    changed = replace(old[0], tile_source=replace(old[0].tile_source, geometry_seed=18),
                       surface=rough(22.).surface)
     with pytest.raises(ValueError, match='complete terrain source'):
         editor.replace_courses(env.lifecycle.ground, (changed, old[1]), torch.tensor([True, False]), protected_xy_m=bounds)
@@ -95,8 +119,9 @@ def test_flat_boundary_stream_does_no_native_edit_or_physics_step():
     assert stream.last_result is None and sim.steps == 0 and not writes
 
 
-def test_stream_moves_distant_tiles_without_resetting_episode_or_control_identity():
-    env, robot, sim, writes, editor, _, installer = admitted_rough()
+@pytest.mark.parametrize('kind', ['rough', 'flat'])
+def test_stream_moves_distant_tiles_without_resetting_episode_or_control_identity(kind):
+    env, robot, sim, writes, editor, _, installer = admitted_rough(flat() if kind == 'flat' else None)
     geometry = SimpleNamespace(kinematics=SimpleNamespace(binding=env.lifecycle.plant.scene.observation.binding),
         _mesh_points=[(i, torch.tensor([[.2, 0., 0.]], dtype=torch.float64)) for i in range(19)], _cylinders=[])
     stream = NativeTerrainStream(installer, geometry)

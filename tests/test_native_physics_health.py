@@ -20,11 +20,12 @@ class Logging:
 def test_physics_overflow_is_latched_until_the_interval_is_rejected():
     logging = Logging()
     health = NativePhysicsHealth(logging)
-    logging.callback('omni.physx.plugin', 2, 'file', 'function', 7, 'ordinary TGS warning')
+    logging.callback('omni.physx.plugin', 2, 'file', 7, 'ordinary TGS warning')
     health.check()
     message = 'PhysX error: capacity too small; simulation will miss interactions'
-    logging.callback('omni.physx.plugin', 3, 'file', 'function', 7, message)
-    logging.callback('omni.physx.plugin', 3, 'file', 'function', 8, 'PhysX error: second')
+    logging.callback('omni.physx.plugin', 3, 'file', 7, message)
+    logging.callback('omni.physx.plugin', 3, 'file', 8, 'PhysX error: second')
+    assert health.messages_seen == 3
     assert health.first_error == message
     with pytest.raises(RuntimeError, match='invalid interval'):
         health.check()
@@ -35,7 +36,7 @@ def test_physics_overflow_is_latched_until_the_interval_is_rejected():
 
 def test_unrelated_messages_cannot_fail_physics():
     health = NativePhysicsHealth(Logging())
-    health._on_message('another.plugin', 3, '', '', 0, 'PhysX error: unrelated text')
+    health._on_message('another.plugin', 3, '', 0, 'PhysX error: unrelated text')
     health.check()
     health.close()
 
@@ -46,10 +47,12 @@ def test_full_scale_pair_buffers_are_passed_to_the_native_config():
         enable_external_forces_every_iteration: bool
         enable_scene_query_support: bool
         gpu_found_lost_pairs_capacity: int
+        gpu_found_lost_aggregate_pairs_capacity: int
         gpu_total_aggregate_pairs_capacity: int
 
     value = _physics_configuration(Configuration)
     assert value.gpu_found_lost_pairs_capacity > 61882941
+    assert value.gpu_found_lost_aggregate_pairs_capacity > 61882941
     assert value.gpu_total_aggregate_pairs_capacity > 2891559
     assert value.enable_external_forces_every_iteration and value.enable_scene_query_support
 
@@ -66,7 +69,7 @@ def test_native_overflow_does_not_publish_a_transition_or_replay_the_step():
 
     def overflow(**kwargs):
         original(**kwargs)
-        health._on_message('omni.physx.plugin', 3, '', '', 0, 'PhysX error: lost contacts')
+        health._on_message('omni.physx.plugin', 3, '', 0, 'PhysX error: lost contacts')
 
     sim.step = overflow
     with pytest.raises(RuntimeError, match='invalid interval'):

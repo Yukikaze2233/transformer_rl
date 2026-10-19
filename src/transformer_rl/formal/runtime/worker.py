@@ -64,7 +64,8 @@ def _initial_policy_boundary(sim, scene):
 def _physics_configuration(config_type):
     # 8192克隆的重叠地形AABB实测需要约6190万新增配对；保留容量余量。
     return config_type(enable_external_forces_every_iteration=True, enable_scene_query_support=True,
-                       gpu_found_lost_pairs_capacity=2**27, gpu_total_aggregate_pairs_capacity=2**23)
+                       gpu_found_lost_pairs_capacity=2**27, gpu_found_lost_aggregate_pairs_capacity=2**27,
+                       gpu_total_aggregate_pairs_capacity=2**23)
 
 
 @contextmanager
@@ -95,7 +96,7 @@ def runtime(recipe, components, configuration, *, control):
 
         previous_argv = sys.argv
         try:
-            sys.argv = [sys.argv[0], '--info']
+            sys.argv = [sys.argv[0]]
             launcher = AppLauncher(headless=True, device=recipe.device, enable_cameras=False, livestream=0)
         finally:
             sys.argv = previous_argv
@@ -120,12 +121,16 @@ def runtime(recipe, components, configuration, *, control):
         compatibility = native_proxy_launch(wp, ProxyArray)
         statistics = compatibility.__enter__()
         physics_health = NativePhysicsHealth(carb.logging.acquire_logging())
+        carb.log_warn('native physics error monitor attached')
+        if physics_health.messages_seen == 0:
+            raise RuntimeError('native physics logging callback was not invoked by the installed SDK')
         sim = SimulationContext(SimulationCfg(dt=.005, device=recipe.device, enable_scene_query_support=True,
                                 physics=_physics_configuration(PhysxCfg)))
         maximum_horizon = max(tuning.reset.ordinary_horizon_s, tuning.reset.extended_horizon_s)
         extent = TerrainExtent.for_horizon(maximum_horizon, max(abs(v) for v in recipe.domain.forward_m_s),
                                            tuning.reset.terrain_margin_m)
-        initial = components.terrain.build(TerrainRequest(TerrainKind.FLAT, extent), geometry_seed=0)
+        initial = components.terrain.build(TerrainRequest(TerrainKind.FLAT, extent), geometry_seed=0,
+                                           resident_tiles=True)
         courses = (initial,) * recipe.num_envs
         columns = max(1, int(recipe.num_envs**.5))
         spacing = configuration['environment_spacing_m']
@@ -135,8 +140,9 @@ def runtime(recipe, components, configuration, *, control):
         scene = scene_recipe.build_on_admitted_context(sim, physics_health=physics_health)
         physics_prim = sim.stage.GetPrimAtPath(sim.cfg.physics_prim_path)
         pair_buffers = {name: physics_prim.GetAttribute('physxScene:' + name).Get()
-                        for name in ('gpuFoundLostPairsCapacity', 'gpuTotalAggregatePairsCapacity')}
-        if tuple(pair_buffers.values()) != (2**27, 2**23):
+                        for name in ('gpuFoundLostPairsCapacity', 'gpuFoundLostAggregatePairsCapacity',
+                                     'gpuTotalAggregatePairsCapacity')}
+        if tuple(pair_buffers.values()) != (2**27, 2**27, 2**23):
             raise RuntimeError('native GPU pair-buffer capacity differs from the full-scale configuration')
         scene.readback['GPU_pair_buffers'] = pair_buffers
         dynamics_receipt = apply_startup_dynamics(

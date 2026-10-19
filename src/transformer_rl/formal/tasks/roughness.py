@@ -156,3 +156,16 @@ class SeededRoughGrid:
         return TerrainQuery(torch.where(valid, z, float('nan')),
                             torch.where(valid, self.friction, float('nan')), valid,
                             torch.where(valid, 0, -1).long())
+
+
+class FlatTileGrid(SeededRoughGrid):
+    """零高度场复用全域索引，每个驻留块只需四个共面顶点。"""
+
+    def patch(self, i0, i1, j0, j1):
+        if (self.amplitude_m != 0 or any(type(v) is not int for v in (i0, i1, j0, j1))
+                or not 0 <= i0 < i1 < self.shape[0] or not 0 <= j0 < j1 < self.shape[1]):
+            raise ValueError('flat patch requires a zero-height source and valid global cells')
+        x = (self.x_m[i0], self.x_m[i1])
+        if self.direction < 0:
+            x = (-x[1], -x[0])
+        return HeightPatch(x, (self.y_m[j0], self.y_m[j1]), ((0., 0.), (0., 0.)), self.friction)

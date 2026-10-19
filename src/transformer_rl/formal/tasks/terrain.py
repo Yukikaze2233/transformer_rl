@@ -11,7 +11,7 @@ import struct
 import torch
 
 from .geometry import HeightPatch, TerrainKind, TerrainMesh, TerrainSurface
-from .roughness import SeededRoughGrid
+from .roughness import FlatTileGrid, SeededRoughGrid
 
 class TerrainRebuildRequired(RuntimeError):
     """The requested course cannot be adopted over the current native shapes."""
@@ -99,29 +99,29 @@ class TerrainCourse:
     request: TerrainRequest
     geometry_seed: int
     surface: TerrainSurface
-    rough_source: SeededRoughGrid | None = None
+    tile_source: SeededRoughGrid | None = None
     resident_tiles: tuple[tuple[int, int], ...] = ()
 
     def with_tiles(self, keys):
         """只改变驻留碰撞块，完整请求、源高度场和课程身份保持不变。"""
-        if self.rough_source is None:
+        if self.tile_source is None:
             raise ValueError('resident tiles require the original complete rough source')
         keys = tuple(sorted(set(keys)))
         if not keys:
             raise ValueError('rough terrain must retain a nonempty collision footprint')
         cached = dict(zip(self.resident_tiles, self.surface.patches))
-        patches = tuple(cached[key] if key in cached else self.rough_source.tile(*key, cells=8)
+        patches = tuple(cached[key] if key in cached else self.tile_source.tile(*key, cells=8)
                         for key in keys)
-        return TerrainCourse(self.request, self.geometry_seed, TerrainSurface(patches), self.rough_source, keys)
+        return TerrainCourse(self.request, self.geometry_seed, TerrainSurface(patches), self.tile_source, keys)
 
     @cached_property
     def sha256(self):
         # Courses contain frozen validated numeric structures. Cache their
         # existing canonical digest instead of expanding a full unchanged
         # height field again for every partial episode reset.
-        value = (asdict(self) if self.rough_source is None else
+        value = (asdict(self) if self.tile_source is None else
                  {'request': asdict(self.request), 'geometry_seed': self.geometry_seed,
-                  'rough_source_sha256': self.rough_source.sha256})
+                  'tile_source_sha256': self.tile_source.sha256})
         return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
                                          allow_nan=False).encode()).hexdigest()
 
@@ -139,6 +139,7 @@ class ContinuousTerrainGenerator:
             raise ValueError('terrain generator requires a nonnegative seed and complete tuning')
         self.tuning = tuning
         self.generator = torch.Generator(device='cpu').manual_seed(seed)
+        self._flat_grids = {}
 
     def _uniform(self):
         return torch.rand((), generator=self.generator).item()
@@ -195,7 +196,7 @@ class ContinuousTerrainGenerator:
             amplitude_m=request.roughness_m, geometry_seed=geometry_seed, entry_m=t.entry_m,
             transition_m=t.transition_m, active_end_m=end, friction=t.nominal_friction, direction=request.direction)
 
-    def build(self, request: TerrainRequest, *, geometry_seed=None, resident_rough=False):
+    def build(self, request: TerrainRequest, *, geometry_seed=None, resident_tiles=False):
         if not isinstance(request, TerrainRequest):
             raise ValueError('course construction requires a complete named request')
         if geometry_seed is None:
@@ -206,6 +207,22 @@ class ContinuousTerrainGenerator:
         lo, hi = request.extent.x_m if request.direction > 0 else (-request.extent.x_m[1], -request.extent.x_m[0])
         mu = t.nominal_friction
         if kind == TerrainKind.FLAT:
+            if resident_tiles:
+                # 平地没有几何随机量；共享全域源，避免8192份大AABB互相重叠。
+                key = (request.extent, mu)
+                if key not in self._flat_grids:
+                    low, high = request.extent.x_m
+                    width = high - low
+                    self._flat_grids[key] = FlatTileGrid(
+                        self._axis(low, high, t.rough_grid_spacing_m),
+                        self._axis(*request.extent.y_m, t.rough_grid_spacing_m),
+                        0., 0, low + width*.25, width*.125, low + width*.75, mu)
+                grid = self._flat_grids[key]
+                bounds = tuple((max(low, -1.), min(high, 1.))
+                               for low, high in (request.extent.x_m, request.extent.y_m))
+                keys = grid.tile_keys(*bounds, cells=8, halo=1)
+                return TerrainCourse(request, geometry_seed,
+                                     TerrainSurface(tuple(grid.tile(*key, cells=8) for key in keys)), grid, keys)
             surface = TerrainSurface((HeightPatch(request.extent.x_m, request.extent.y_m, ((0., 0.), (0., 0.)), mu),))
         elif kind in (TerrainKind.STEP_UP, TerrainKind.STEP_DOWN):
             h = abs(request.step_height_m) * (1 if kind == TerrainKind.STEP_UP else -1)
@@ -226,7 +243,7 @@ class ContinuousTerrainGenerator:
             surface = self._platforms(request, (0., 0., 0.), (t.entry_m, middle))
         elif kind == TerrainKind.ROUGH:
             grid = self.rough_grid(request, geometry_seed=geometry_seed)
-            if resident_rough:
+            if resident_tiles:
                 keys = grid.tile_keys((-1., 1.), (-1., 1.), cells=8, halo=1)
                 surface = TerrainSurface(tuple(grid.tile(*key, cells=8) for key in keys))
                 return TerrainCourse(request, geometry_seed, surface, grid, keys)
@@ -269,7 +286,7 @@ class ContinuousTerrainGenerator:
             request = TerrainRequest(kind, extent, -1 if rows['requested_command'][index, 0] < 0 else 1,
                                      float(rows['slope_rad'][index]), bearing, float(rows['roughness_m'][index]),
                                      step, (upper * fraction, upper), materials)
-            courses.append(self.build(request, resident_rough=True))
+            courses.append(self.build(request, resident_tiles=True))
         return tuple(courses)
 
     def from_fixed_case(self, case, extent):

@@ -1,4 +1,4 @@
-"""活跃回合只铺设近身粗糙块；远处仍由完整全局源定义。"""
+"""活跃回合只铺设近身平地/粗糙块；远处仍由完整全局源定义。"""
 from __future__ import annotations
 
 import torch
@@ -32,7 +32,7 @@ class NativeTerrainStream:
         self._com_radius = coms[..., :3].to(life.device).double().norm(dim=-1)
         self._scene = None
         self._limits = None
-        self._rough = None
+        self._tiled = None
         self.last_result = None
 
     def _bind(self):
@@ -42,8 +42,8 @@ class NativeTerrainStream:
         courses = self.installer.lifecycle.ground.courses
         limits = torch.tensor(((-float('inf'), float('inf')),)*2,
                               dtype=torch.float64, device=self._radius.device).repeat(len(courses), 1, 1)
-        rough = torch.tensor([c.rough_source is not None for c in courses], device=self._radius.device)
-        for row in rough.nonzero().flatten().tolist():
+        tiled = torch.tensor([c.tile_source is not None for c in courses], device=self._radius.device)
+        for row in tiled.nonzero().flatten().tolist():
             c = courses[row]
             bounds = ((min(p.x_m[0] for p in c.surface.patches), max(p.x_m[-1] for p in c.surface.patches)),
                       (min(p.y_m[0] for p in c.surface.patches), max(p.y_m[-1] for p in c.surface.patches)))
@@ -53,7 +53,7 @@ class NativeTerrainStream:
                 lo, hi = bounds[axis]
                 limits[row, axis, 0] = lo + (1. if lo > full[axis][0] + 1e-5 else 0.)
                 limits[row, axis, 1] = hi - (1. if hi < full[axis][1] - 1e-5 else 0.)
-        self._scene, self._limits, self._rough = scene, limits, rough
+        self._scene, self._limits, self._tiled = scene, limits, tiled
 
     @torch.no_grad()
     def __call__(self):
@@ -63,7 +63,7 @@ class NativeTerrainStream:
                 or env.rewards.composer._window is not None):
             raise RuntimeError('terrain streaming requires a drained policy boundary')
         self._bind()
-        if not self._rough.any():
+        if not self._tiled.any():
             return
         scene, bridge = life.plant.scene, life.plant.scene.observation
         position = scene.robot.data.body_link_pose_w.torch[..., :2].double()
@@ -74,7 +74,7 @@ class NativeTerrainStream:
                + (velocity[..., 3:].norm(dim=-1)*(self._radius + self._com_radius)*dt)[..., None] + .25)
         local = position - scene.environment_origins_m[:, None, :2]
         protected = torch.stack(((local-pad).amin(1), (local+pad).amax(1)), -1)
-        changed = self._rough & ((protected[..., 0] < self._limits[..., 0]).any(-1)
+        changed = self._tiled & ((protected[..., 0] < self._limits[..., 0]).any(-1)
                                  | (protected[..., 1] > self._limits[..., 1]).any(-1))
         if not changed.any():
             return
@@ -82,7 +82,7 @@ class NativeTerrainStream:
         for row in changed.nonzero().flatten().tolist():
             c = courses[row]
             bounds = protected[row].cpu().tolist()
-            keys = c.rough_source.tile_keys(bounds[0], bounds[1], cells=8, halo=1)
+            keys = c.tile_source.tile_keys(bounds[0], bounds[1], cells=8, halo=1)
             courses[row] = c.with_tiles(keys)
         try:
             result = self.installer.editor.replace_courses(life.ground, tuple(courses), changed,
