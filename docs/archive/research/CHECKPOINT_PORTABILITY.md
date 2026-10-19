@@ -10,7 +10,7 @@
 post-stop 回收包的 **14/14** 真实 checkpoint 已用 `weights_only=True`、CPU 严格加载通过。
 全部模型 state（包括 saved buffers）和 Adam state tensor 都与原文件逐字节相等；
 metadata、update 一致，CPU RNG、文件 SHA 均未改变。
-详见 [`evidence/checkpoint-portability.json`](evidence/checkpoint-portability.json)。
+详见 [`evidence/checkpoint-portability.json`](../../evidence/checkpoint-portability.json)。
 
 原 [`TRAINING_RECOVERY.md`](TRAINING_RECOVERY.md) 的 0/14 是修复前的历史结果。
 本次验证对象为补传后的 12 个 final 977 和 supervised 最终停点 789/732，

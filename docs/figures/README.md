@@ -5,8 +5,8 @@
 - [control-transformer.svg](control-transformer.svg)：`TimeAwareActor` 的 Last-token / Index / Additive 路径，含 `_CausalBlock` 的 Pre-LN、因果mask及残差连接。
 - [estimator-controller.svg](estimator-controller.svg)：`EstimatorActor` 与 `HistoryEstimator`，区分部署计算、PPO冻结、独立辅助更新和训练专用critic。
 
-图示根据 [`model.py`](../../src/transformer_rl/model.py)、
-[`estimation.py`](../../src/transformer_rl/estimation.py)、
+图示根据 [`model.py`](../../src/transformer_rl/research/model.py)、
+[`estimation.py`](../../src/transformer_rl/research/estimation.py)、
 [`optimized_control.json`](../../configs/optimized_control.json) 与
 [`estimator_comparison.json`](../../configs/estimator_comparison.json)绘制。
 SVG为可编辑矢量源码，使用中文字体及常用技术术语，无外链图片或脚本。
@@ -27,7 +27,7 @@ Transformer估计器采用slot-index编码；当前帧反馈保持直接路径�
 
 SD使用`ddof=1`，不是置信区间。训练reward不是任务成功率，稳态均值也不能证明无漂移。
 首轮每项977次更新对应16,007,168条完整rollout样本；额外中断采样另见
-[完整回收记录](../KAISER_ARCHITECTURE_COMPLETE.md)。
+[完整回收记录](../archive/research/KAISER_ARCHITECTURE_COMPLETE.md)。
 Supervised的seed 1011/1022分别从789/732次更新恢复，曲线按累计更新拼接，环境与历史重置。
 
 首轮图包含21个最终模型的147份场景报告，评估seed为301；短训图对应seed 2003、

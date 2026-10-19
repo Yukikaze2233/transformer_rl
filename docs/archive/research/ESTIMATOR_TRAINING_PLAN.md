@@ -6,13 +6,13 @@
 初版日期：2026-09-17。当前为实现与分阶段运行版（protocol revision 3）。
 目标是分别回答“状态估计是否有帮助”和“同样的估计任务是否需要Transformer”。
 
-机器可读设计见 [estimator_comparison.json](protocols/estimator_comparison.json)。
+机器可读设计见 [estimator_comparison.json](../../protocols/estimator_comparison.json)。
 它是研究协议，**不是当前CLI可以执行的完整实验配置**。
-已有两种直接控制网络的参考规格为 [estimator_reference.json](../configs/estimator_reference.json)，
+已有两种直接控制网络的参考规格为 [estimator_reference.json](../../../configs/estimator_reference.json)，
 可以用现有CLI生成plan；环境factory、任务路径和identity仍需在运行环境绑定。
 
 **实现更新：六种网络均已具备训练、检查点和导出路径。** 完整CLI规格为
-[`configs/estimator_comparison.json`](../configs/estimator_comparison.json)，
+[`configs/estimator_comparison.json`](../../../configs/estimator_comparison.json)，
 分阶段入口为 `tools/run_estimator_study.py`。它先执行接线和16M特权诊断，诊断满足
 预先固定的任务门槛后才自动进入18项64M主对照；未通过则写入`needs_review`收据。
 可选64M诊断延长、轻量消融和128M确认不由本次队列自动提交。
@@ -311,10 +311,10 @@ CUDA_VISIBLE_DEVICES='' PYTHONPATH=src python tools/check_model_budget.py \
 ```
 
 工具同时校验主档与轻量档的12项参数清单、参考配置层宽以及条件轻量阶段的预算。
-核算证据见 [model-capacity.json](evidence/model-capacity.json)。
+核算证据见 [model-capacity.json](../../evidence/model-capacity.json)。
 
 revision 3改为实例化真实估计器Actor核算，最新证据见
-[model-capacity-implemented.json](evidence/model-capacity-implemented.json)。
+[model-capacity-implemented.json](../../evidence/model-capacity-implemented.json)。
 全量CPU验证 **1085 passed、46 skipped、10 subtests passed**；覆盖双优化器续训、
 估计器更新拒绝后的参数/Adam/RNG恢复、ONNX八类输入验证和物理失败/漂移反例。
 

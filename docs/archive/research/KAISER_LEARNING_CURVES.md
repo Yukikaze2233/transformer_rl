@@ -7,7 +7,7 @@
 2026-09-14 已启动 **6 variants × 3 新 training seeds 的完整长训练队列**。
 初始观察约 7.2 分钟，两项真实训练均超过 100 updates，并各自产生通过 CPU loader 校验的
 `checkpoint_000100.pt`。队列持续在独立 tmux 中运行；这里是启动收据，尚非完整实验结果。
-机器可读记录见 [learning-curves-start.json](evidence/learning-curves-start.json)。
+机器可读记录见 [learning-curves-start.json](../../evidence/learning-curves-start.json)。
 
 **16M 是学习曲线第一档，不用于宣布架构赢家；共同配方并非每种网络各自最优超参。**
 supervised_attention 保持独立 supervision 分组。训练沿用名义 locomotion 合同中的随机命令，
@@ -170,7 +170,7 @@ python -m transformer_rl.experiment_cli summarize --root "$STUDY/run"
 也不通过续训混入午夜正式实验。后续由主 agent 冻结最终 source/spec，在新 root 重新 plan，
 从原 seeds 的初始化开始。本次停止操作未建立 timer、未启动或恢复任何训练。
 
-停止收据：[learning-curves-stop.json](evidence/learning-curves-stop.json)。
+停止收据：[learning-curves-stop.json](../../evidence/learning-curves-stop.json)。
 以下时间均为 **2026-09-14 UTC+8**，来自实际信号收据、文件 mtime 和进程退出观察：
 
 1. **19:33:46.688497**：核对 scheduler PID 673098、start_ticks=16970053、精确 CLI/root 后，

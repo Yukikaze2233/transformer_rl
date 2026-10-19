@@ -6,7 +6,7 @@
 
 原 gate 仍拒绝，报错文本中的 chunk 最大差仍为 `1.23978e-05`。没有调用 optimizer update，没有修改核心 gate/PPO 或 `rtol=atol=1e-5`。B 的 baseline seed44 update52 未重跑，不能把本次结论直接当作 B 的逐样本根因证明，也不能将历史失败训练改记为成功。
 
-精简机器证据：[evidence/behavior-precision.json](evidence/behavior-precision.json)。本页及该 JSON 是本次仅新增的仓库文件。
+精简机器证据：[evidence/behavior-precision.json](../../evidence/behavior-precision.json)。本页及该 JSON 是本次仅新增的仓库文件。
 
 ## 复现范围与数据所有权
 
@@ -200,4 +200,4 @@ PPO ratio 仍为 `exp(evaluation.log_prob - minibatch.old_log_prob)`，分母始
 
 反例均通过克隆构造，未改原 tensor；最后 endpoint 的篡改同时覆盖末 chunk 扫描。验收后核对 model state、原 PPOBatch 全字段、HistoryBatch 全字段逐位不变，Python/Torch CPU/CUDA RNG 不变，Adam state 为空，原 payload SHA256 不变。容差仍为 `rtol=1e-5, atol=1e-5`。
 
-原始验收脚本、八项实际结果及完整性检查保留于新快照的 `recheck_offline.py`、`offline-acceptance.json`、`offline-runner.log`、`offline-execution-receipt.json`。对应新 source 的训练补验与完整配对复验另见 [KAISER_SENSITIVITY_RECHECK.md](KAISER_SENSITIVITY_RECHECK.md) 及 [evidence/sensitivity-recheck.json](evidence/sensitivity-recheck.json)；本节验收不改写旧训练失败事实。
+原始验收脚本、八项实际结果及完整性检查保留于新快照的 `recheck_offline.py`、`offline-acceptance.json`、`offline-runner.log`、`offline-execution-receipt.json`。对应新 source 的训练补验与完整配对复验另见 [KAISER_SENSITIVITY_RECHECK.md](KAISER_SENSITIVITY_RECHECK.md) 及 [evidence/sensitivity-recheck.json](../../evidence/sensitivity-recheck.json)；本节验收不改写旧训练失败事实。

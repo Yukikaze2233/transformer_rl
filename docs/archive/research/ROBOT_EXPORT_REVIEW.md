@@ -137,8 +137,8 @@ XML 结构/属性 diff 和 CSV 逐字段 diff 均为空。
 ## 7. 验证、复现与证据
 
 - 已先读旧 `reports/knee_source_comparison/README.md`、`audit.py`、`bore_witness.py` 及必要的 `prepare_v40_assets.py` 纯函数。
-- [审计脚本](../tools/audit_robot_export.py) 通过 AST 只加载命名纯函数，不导入旧报告模块、不执行旧 main、不写旧 reports。依赖现有 NumPy/SciPy；没有导入 Isaac、Kit、Torch 或 pxr。
-- [完整证据](evidence/robot-export-review.json) 含本次脚本/纯函数源 SHA、文件散列与大小、全部 XML 属性、CSV 字段、逐组件统计/源面号、拟合 ROI/内点/源面号、各姿态 raw q 和独立二维 FK 核对。
+- [审计脚本](../../../tools/audit_robot_export.py) 通过 AST 只加载命名纯函数，不导入旧报告模块、不执行旧 main、不写旧 reports。依赖现有 NumPy/SciPy；没有导入 Isaac、Kit、Torch 或 pxr。
+- [完整证据](../../evidence/robot-export-review.json) 含本次脚本/纯函数源 SHA、文件散列与大小、全部 XML 属性、CSV 字段、逐组件统计/源面号、拟合 ROI/内点/源面号、各姿态 raw q 和独立二维 FK 核对。
 - **25 项检查通过**：14 项组件面覆盖、7 项字节与几何一致性、4 项独立二维公式与齐次矩阵 FK 交叉核对（容差 `1e-9 mm`）。
 - 两份导出全部文件、旧两仓 `assets/urdf_v40`、旧膝报告目录和旧资产脚本，共 **182 个受保护文件**前后 SHA256 一致；完整前后清单在 JSON。没有仿真或动态验证。
 

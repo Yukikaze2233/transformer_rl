@@ -29,7 +29,7 @@
 正在评估。此时其余四项接线、特权诊断和正式主对照仍是后续计划，不算完成。
 
 同一时段可用内存约6.32GB，全机GPU利用率90%、显存9,997MiB。
-记录见 [estimator-run-start.json](evidence/estimator-run-start.json)。
+记录见 [estimator-run-start.json](../../evidence/estimator-run-start.json)。
 
 后续 **03:41:55 +08:00** 观察：两个直接控制网络均已完成接线；速度估计MLP已到
 78/80 updates、1,277,952条采样，最近一次PPO及估计器均执行8个优化器步。
@@ -42,7 +42,7 @@
 - 双优化器checkpoint重新加载到CUDA后与保存前一致；
 - 该验收进程峰值allocated memory约65MB，不代表仿真总显存。
 
-详见 [estimator-cuda-acceptance.json](evidence/estimator-cuda-acceptance.json)。
+详见 [estimator-cuda-acceptance.json](../../evidence/estimator-cuda-acceptance.json)。
 这些检查不证明策略已经学会控制，也不是MiniPC时延验证。
 
 ## 查看、暂停与回收

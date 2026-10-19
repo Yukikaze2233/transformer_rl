@@ -66,7 +66,7 @@
 
 ## 5. env 侧延迟指令通道接口
 
-实现：[`../src/transformer_rl/timing.py`](../src/transformer_rl/timing.py)。目标是有界、可核对的 batched Torch **控制侧目标锁存模型**，不改变 actuator 语义。
+实现：[`../src/transformer_rl/timing.py`](../../../src/transformer_rl/research/timing.py)。目标是有界、可核对的 batched Torch **控制侧目标锁存模型**，不改变 actuator 语义。
 
 ```python
 from transformer_rl.timing import DelayedCommandChannel, TimingProfile

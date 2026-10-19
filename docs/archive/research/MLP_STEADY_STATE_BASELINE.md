@@ -1,6 +1,6 @@
 # 旧 MLP 稳态基线：已有证据与六网络评价口径
 
-研究日期：2026-09-14。机器证据：[mlp-steady-state.json](evidence/mlp-steady-state.json)。
+研究日期：2026-09-14。机器证据：[mlp-steady-state.json](../../evidence/mlp-steady-state.json)。
 
 ## 结论与完成范围
 
@@ -125,7 +125,7 @@ between_variance = sum(n_e * (μ_e - pooled_mean)^2) / N
 
 ## 4. 原 CSV 复算结果
 
-分析器：[tools/analyze_reference_trace.py](../tools/analyze_reference_trace.py)。Python float（FP64），两遍去均值、`math.fsum` 求和，直接使用 `z−h`、`vx`、`wz` 和 `x,y`。以下 signed bias 与位移均重新计算；与旧 E 的相应指标在浮点精度内一致。每格三个值依次为 env0 episode1/2/3；全精度结果在 JSON。
+分析器：[tools/analyze_reference_trace.py](../../../tools/analyze_reference_trace.py)。Python float（FP64），两遍去均值、`math.fsum` 求和，直接使用 `z−h`、`vx`、`wz` 和 `x,y`。以下 signed bias 与位移均重新计算；与旧 E 的相应指标在浮点精度内一致。每格三个值依次为 env0 episode1/2/3；全精度结果在 JSON。
 
 | h (m) | 稳态 signed height bias (mm) | 整回合世界 XY 净位移 (m) | 仅稳态窗口世界 XY 净位移 (m) |
 |---|---|---|---|

@@ -4,7 +4,7 @@
 
 ## 1. 网络与训练流程
 
-![单帧 MLP、历史 MLP 与 Transformer 的 Actor / Critic 架构](figures/frame-training/architecture.png)
+![单帧 MLP、历史 MLP 与 Transformer 的 Actor / Critic 架构](../../figures/frame-training/architecture.png)
 
 历史按旧到新排列：
 
@@ -151,7 +151,7 @@ SIGINT/SIGTERM 会请求在收集/更新边界停止并保存学习状态。重�
 | `--initialize-from checkpoint.pt` | 同结构/控制合同迁移权重，新阶段新 Adam |
 | `--restore-learning-from checkpoint.pt` | 课程回退恢复权重、Adam、RNG；采样时钟继续按已消耗预算推进 |
 
-自定义环境实现 [`VectorEnv`](../src/transformer_rl/types.py)，并提供 reset 前的成功标志、任务误差、信号及终态。入口还校验 `metadata.identity` 与观测/动作/周期合同的 `control_sha256`。通用环境可用 `frame train` / `frame evaluate` 单独运行；底盘 SDK 环境的单项命令使用 `python -m transformer_rl.frame_process train` 或 `evaluate`，保证 SDK 在专用进程中启动和关闭；`configs/frame_training.json` 的空环境配置用于离线检查，实际仿真配置由准备工具生成。
+自定义环境实现 [`VectorEnv`](../../../src/transformer_rl/research/types.py)，并提供 reset 前的成功标志、任务误差、信号及终态。入口还校验 `metadata.identity` 与观测/动作/周期合同的 `control_sha256`。通用环境可用 `frame train` / `frame evaluate` 单独运行；底盘 SDK 环境的单项命令使用 `python -m transformer_rl.frame_process train` 或 `evaluate`，保证 SDK 在专用进程中启动和关闭；`configs/frame_training.json` 的空环境配置用于离线检查，实际仿真配置由准备工具生成。
 
 ## 5. 遗忘检测与保持训练
 
@@ -191,7 +191,7 @@ python -m transformer_rl frame benchmark \
 
 ## 7. 接入实时控制
 
-部署运行时 [`FrameRuntime`](../src/transformer_rl/frame_runtime.py) 仅需要 NumPy 和 ONNX Runtime；TorchScript 后端另需 PyTorch。硬件输入按 manifest 中的顺序和缩放构造 float32 35D 观测；退出、失步或故障恢复后显式清空历史。
+部署运行时 [`FrameRuntime`](../../../src/transformer_rl/research/frame_runtime.py) 仅需要 NumPy 和 ONNX Runtime；TorchScript 后端另需 PyTorch。硬件输入按 manifest 中的顺序和缩放构造 float32 35D 观测；退出、失步或故障恢复后显式清空历史。
 
 构造运行时会先加载并验证模型，再默认执行 50 次静态形状的均值前向预热。预热发生在启动控制循环之前，不读取传感器、不生成或发送动作；结束后清空历史，第一帧真实观测填满历史窗口。预热中的输出形状、float32 类型或有限数检查失败时，构造直接报错。次数可通过 `priming_iterations` 指定为正整数，预热耗时记录在 `runtime.preparation`。模型加载和预热不计入控制循环或稳态 benchmark 的耗时；控制循环仍保留原有截止时间检查，预热不保证后续调用满足实时预算。
 

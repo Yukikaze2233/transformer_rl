@@ -27,7 +27,7 @@
 `~/trainctl pause estimator --wait 180`并复核，`active=false`、
 `supervisor_active=false`、`orphaned_workers=[]`。相关进程扫描没有匹配项。
 这次是确认停止并结束后续计划，不是又完成了一轮训练。
-核查记录见[研究收尾收据](evidence/research-closure.json)。
+核查记录见[研究收尾收据](../../evidence/research-closure.json)。
 
 ## 首轮实际表现
 

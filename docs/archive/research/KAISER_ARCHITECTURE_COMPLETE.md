@@ -44,7 +44,7 @@
 CPU加载使用本地有限float32频率兼容修复，详见 [CHECKPOINT_PORTABILITY.md](CHECKPOINT_PORTABILITY.md)。
 没有改写原检查点。212个训练检查点均做文件哈希校验，严格模型加载验收范围为21个最终模型。
 
-小型核验收据：[architecture-complete-recovery.json](evidence/architecture-complete-recovery.json)。
+小型核验收据：[architecture-complete-recovery.json](../../evidence/architecture-complete-recovery.json)。
 大归档、权重和原始日志位于被Git忽略的artifacts目录。
 
 ## 后续研究状态

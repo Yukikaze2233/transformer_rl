@@ -24,7 +24,7 @@ $$
 
 ## 2 主要网络结构对比
 
-![策略网络的五种时间信息处理方式](figures/policy-network-overview/families.png)
+![策略网络的五种时间信息处理方式](../../figures/policy-network-overview/families.png)
 
 *图1｜单帧映射、窗口展平、递归记忆、因果卷积和内容注意力。F、L、d与A表示观测维度、窗口长度、表示宽度和动作维度。*
 
@@ -107,7 +107,7 @@ $$
 
 这里C按主要乘加MAC计，表示每个控制周期重新计算完整窗口。参数在时间位置间共享，因此窗口增长未必增加主要参数，却会增加计算与中间张量。采用缓存、稀疏注意力或其他算子后，应按实际计算路径重新评估。
 
-![历史跨度与控制计算成本](figures/policy-network-overview/timing.png)
+![历史跨度与控制计算成本](../../figures/policy-network-overview/timing.png)
 
 *图2｜历史跨度由帧数与采样频率共同决定；参数、单次计算和完整控制时延应分别比较。数值仅为时间窗口示例。*
 

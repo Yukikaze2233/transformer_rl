@@ -193,7 +193,7 @@ O/P/K 固定于 C2；E 由 shank 原关节 frame 和 κ 确定。核对七对轴
 
 ## 8. 验证记录与输出
 
-- 完整数值：[evidence/chassis-geometry-review.json](evidence/chassis-geometry-review.json)。包含六文件 SHA、来源 hash、全部 prim/schema/reference、15 份三角形身份核对、七轴闭合、四姿态独立解、有限差分导数和 USD 关键帧／插值结果。
+- 完整数值：[evidence/chassis-geometry-review.json](../../evidence/chassis-geometry-review.json)。包含六文件 SHA、来源 hash、全部 prim/schema/reference、15 份三角形身份核对、七轴闭合、四姿态独立解、有限差分导数和 USD 关键帧／插值结果。
 - **20 项检查通过**；193 个源资产／静态证据文件前后 SHA 一致。旧 preview 的 `runtime.json` 在初次审计期间被外部持续更新，因此单列前后 hash 观测，不作为资产输入或静态不变性断言；没有读取其运行状态来代替本次计算，也没有写入该文件。
 - CPU 脚本位于 `/tmp/opencode/audit_chassis_geometry.py`，脚本 SHA 保存在 JSON。没有执行 `export.main`、`Assembly` 或旧研究脚本入口，也未保存 USD stage；未导入 Kit/SimulationApp/Torch，无 GPU／仿真／训练启动。
 - 本仓只新增本报告与 JSON，并在旧报告头部补充范围澄清。无旧模型替换、质量／碰撞／物理 body 写入，无 commit/push。

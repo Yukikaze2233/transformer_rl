@@ -4,6 +4,8 @@
 
 正式训练路径在 `main` 开发和维护。网络、PPO、环境、控制台和配置一起版本化；已有研究入口保留兼容，不通过删除旧实现或覆盖历史实验来切换正式路径。独立的大改动可以使用短期工作分支，完成相关检查后合入 `main`。
 
+源码按 `formal/`、`research/`、`common/` 分开，依赖方向见[架构](ARCHITECTURE.md)。新模块放入对应职责包，顶层只保留命令入口。
+
 一个 commit 解决一个可说明的问题，并带上直接相关的验证与文档。提交信息用 English，author/committer 为 Yukikaze。不重写已存在的共享历史，不在源码提交中混入本地输出。提交到 `main` 不等于已发布训练版本。
 
 ## 跟踪边界
@@ -13,8 +15,8 @@
 | 网络、优化器、环境与 CLI 源码 | `src/transformer_rl/`，提交 |
 | 通用训练配置 | `configs/`，提交；实际运行复制为冻结快照 |
 | 测试、确定性文本 fixture、工具 | `tests/`、`tools/`，提交 |
-| 通用架构及使用文档 | `README.md`、`docs/`，提交 |
-| 实验分析与设计审查 | `docs/internal/`；临时收据和运行审计放忽略的 `outputs/` |
+| 当前架构及使用文档 | `README.md`、`docs/NETWORK.md`、`docs/ARCHITECTURE.md`、`docs/USAGE.md`、本文件 |
+| 旧研究与详细设计 | `docs/archive/`；临时收据和运行审计放忽略的 `outputs/` |
 | 原始录包、数组数据、权重、导出模型、运行日志 | `datasets/`、`data/`、`runs/`、`outputs/`、`artifacts/` 等本地目录，不提交 |
 | 机械资产 | 源资产与 manifest/hash 一起版本化；生成缓存不提交。引入大型二进制前单独选择外部制品存储或 Git LFS |
 

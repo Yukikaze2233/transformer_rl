@@ -13,7 +13,7 @@
 新update800检查点通过原冻结源码的严格CPU加载；44份Adam参数状态的step均比
 update789增加88，与这11次更新一致。环境identity与原检查点相同。
 
-机器可读收据见 [architecture-resume-start.json](evidence/architecture-resume-start.json)。
+机器可读收据见 [architecture-resume-start.json](../../evidence/architecture-resume-start.json)。
 这些是启动观察，不代表后续队列已经完成。
 
 ## 恢复范围与预算

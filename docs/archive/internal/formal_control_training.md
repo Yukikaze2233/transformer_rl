@@ -288,9 +288,9 @@ episode固定的物理量不逐tick跳变。载荷突变、单侧衰减、接地
 
 ### 原生接触点滑移读数
 
-私有[接触读取层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_contacts.py)使用[SDK逐接触点接口](https://docs.omniverse.nvidia.com/kit/docs/omni_physics/107.3/extensions/runtime/source/omni.physics.tensors/docs/api/python.html#omni.physics.tensors.impl.api.RigidContactView.get_contact_data)的force、point、normal、separation、count、start六个缓冲。Kaiser实际安装源码已单独核对：`get_contact_data(dt)`将冲量换为力，count与start为uint32；读取层现接受该类型，并保留仅空pair可使用最大无符号哨兵的规则。重叠、越界、容量达到上限及活动载荷非有限仍拒绝，不能为兼容类型放宽数据完整性。接口文档中“五个数组”的总述与实际六项返回矛盾时，以已pin安装源码的六项实现为准。
+私有[接触读取层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/contacts.py)使用[SDK逐接触点接口](https://docs.omniverse.nvidia.com/kit/docs/omni_physics/107.3/extensions/runtime/source/omni.physics.tensors/docs/api/python.html#omni.physics.tensors.impl.api.RigidContactView.get_contact_data)的force、point、normal、separation、count、start六个缓冲。Kaiser实际安装源码已单独核对：`get_contact_data(dt)`将冲量换为力，count与start为uint32；读取层现接受该类型，并保留仅空pair可使用最大无符号哨兵的规则。重叠、越界、容量达到上限及活动载荷非有限仍拒绝，不能为兼容类型放宽数据完整性。接口文档中“五个数组”的总述与实际六项返回矛盾时，以已pin安装源码的六项实现为准。
 
-每次真实物理刷新后，[native观测桥](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_observation.py)按全部19个实际body顺序读取世界COM线速度与角速度，并用最终native本体COM偏移和当帧link姿态重建世界COM位置。机械写入前使全部COM缓存失效，最后一次写入后重新get_coms；不使用可能早于该写入的SDK惰性COM姿态缓存。body0的link位置、姿态和COM速度还须与root读数一致。结果独立持有数据，携带实际tick、时间、body次序和model epoch，不读actor预测或用轮joint转速替代刚体运动。
+每次真实物理刷新后，[native观测桥](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/observation.py)按全部19个实际body顺序读取世界COM线速度与角速度，并用最终native本体COM偏移和当帧link姿态重建世界COM位置。机械写入前使全部COM缓存失效，最后一次写入后重新get_coms；不使用可能早于该写入的SDK惰性COM姿态缓存。body0的link位置、姿态和COM速度还须与root读数一致。结果独立持有数据，携带实际tick、时间、body次序和model epoch，不读actor预测或用轮joint转速替代刚体运动。
 
 对于每个有正法向载荷的轮接触点p，计算`v_point=v_COM+omega_world×(p−p_COM)`，再减地面该点速度并沿实际单位法向去掉法向分量。当前课程的地形均为作者化静态网格；仅在该collider及全部祖先无RigidBodyAPI、无动画采样的显式绑定下，地面速度才为零。没有该绑定、接触点或单位法向时拒绝读取，不能默认静止。该USD检查不等于native碰撞或世界参考系等价验收；之后修改地形必须先使场景绑定失效，不能继续沿用旧“静态”证明。
 
@@ -300,25 +300,25 @@ episode固定的物理量不逐tick跳变。载荷突变、单侧衰减、接地
 
 ### 整轮碰撞体的垂向间隙
 
-私有[轮体间隙查询](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_wheel_clearance.py)消费同一份作者化地形三角网格，以及从所选URDF解析的两轮圆柱半径、宽度、碰撞中心偏移和collision RPY。圆柱局部轴为Z，经collision RPY及当帧实际link四元数旋转到世界系；中心同样应用碰撞偏移。原始URDF SHA与场景manifest绑定，不能用visual或轮铰点代替，也不能丢掉圆柱宽度和倾斜后轴向分量。
+私有[轮体间隙查询](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/control/wheel_clearance.py)消费同一份作者化地形三角网格，以及从所选URDF解析的两轮圆柱半径、宽度、碰撞中心偏移和collision RPY。圆柱局部轴为Z，经collision RPY及当帧实际link四元数旋转到世界系；中心同样应用碰撞偏移。原始URDF SHA与场景manifest绑定，不能用visual或轮铰点代替，也不能丢掉圆柱宽度和倾斜后轴向分量。
 
 这里的gap明确定义为：整个有限实心圆柱投影在已作者化地形上的各点，`圆柱点世界Z−该XY处最高地形世界Z`的最小值。它是有符号垂向间隙，不是欧氏最近距离或PhysX/EPA穿透深度；不能把两种量换名用于阈值。倾斜轮子、横坡和台阶轮缘均会影响该最小值。只查询轮心下方、只取全轮最低点下方地形，或者`linkZ−radius`都可能漏掉轮缘下更高的台阶。
 
 每个三角面以自己的垂向棱柱约束圆柱；分别检查无约束支撑点、三条竖直边平面与三条竖直顶点线的活动集，得到可行几何见证点。该闭式求解不依赖离散轮缘点采样，也不把有限三角面外推成无限坡面。只展开实际圆柱AABB相交的网格单元，而非对所有环境构造完整地形面乘积。未知地形孔洞用真实圆柱投影相交判定，不能仅凭AABB角点覆盖就误报；轮体任何部分超出作者化域则保留逐轮valid=false和NaN，不补无限平地。当前课程竖直面须被实际top faces覆盖为台阶立面，隐藏的额外高墙会拒绝绑定。
 
-[原生地面查询](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_ground.py)保持原有root/轮心参考高度的独立口径，另输出完整轮体gap、圆柱/地形见证点、面ID、域覆盖、时间、tick和model epoch。数据独立持有，随实际`PhysicalTick`传递；旧帧、错误轮名、错误URDF或clock不符不得混入同一个物理包。场景构建只记录源绑定，`native_wheel_collision_equivalence_verified`仍明确为false，作者化source通过不自动获得native cook资格。
+[原生地面查询](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/ground.py)保持原有root/轮心参考高度的独立口径，另输出完整轮体gap、圆柱/地形见证点、面ID、域覆盖、时间、tick和model epoch。数据独立持有，随实际`PhysicalTick`传递；旧帧、错误轮名、错误URDF或clock不符不得混入同一个物理包。场景构建只记录源绑定，`native_wheel_collision_equivalence_verified`仍明确为false，作者化source通过不自动获得native cook资格。
 
-[原生奖励桥](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_reward.py)可由刚发布的实际reward/physical packet产生技能测量，直接使用世界垂向速度、正法向载荷和该轮体间隙，不用净力向量大小充载荷。源未绑定、footprint无效、缺少实际原生碰撞等价证明或copy/旧reward包均拒绝进入技能真值。这些是私有接口约束；完整环境仍须实现越界逐行结局/reset归属及真实SDK场景验收。
+[原生奖励桥](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/reward.py)可由刚发布的实际reward/physical packet产生技能测量，直接使用世界垂向速度、正法向载荷和该轮体间隙，不用净力向量大小充载荷。源未绑定、footprint无效、缺少实际原生碰撞等价证明或copy/旧reward包均拒绝进入技能真值。这些是私有接口约束；完整环境仍须实现越界逐行结局/reset归属及真实SDK场景验收。
 
 ### 膝内夹角、目标投影与原生奖励模型绑定
 
-私有[关节边界生产器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_joint_boundaries.py)从所选manifest和model_spec原始字节绑定源SHA、实际native关节/body次序与几何定义。每侧由具名髋输出找到上连杆、被动膝和下连杆轮铰点；将髋销至膝销、轮销至膝销两向量投影到真实铰轴法平面，用atan2求内夹角。它使用当帧完整body link姿态，不以电机角差、轮角或单个原生关节坐标冒充几何内角。原生被动关节的有符号限位距离另行保留，几何角不因它显示“安全”而被覆盖；膝销与下连杆原点的残差也保留。
+私有[关节边界生产器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/control/joints.py)从所选manifest和model_spec原始字节绑定源SHA、实际native关节/body次序与几何定义。每侧由具名髋输出找到上连杆、被动膝和下连杆轮铰点；将髋销至膝销、轮销至膝销两向量投影到真实铰轴法平面，用atan2求内夹角。它使用当帧完整body link姿态，不以电机角差、轮角或单个原生关节坐标冒充几何内角。原生被动关节的有符号限位距离另行保留，几何角不因它显示“安全”而被覆盖；膝销与下连杆原点的残差也保留。
 
 源码native stop的两端必须重新得到manifest规定的40°和107°，并覆盖相同角度跨度，不能只凭命名认定镜像方向。接近边界的惩罚短缺量为`max(0,0.05rad−signed_clearance)`；0.05rad约2.86°，为本候选明确的保护带设计值，仍须物理验收。超界保留负clearance和相应更大短缺量，不夹回合法范围。其后四槽为四个根输出的原始位置目标相对实际准入目标的修正距离；先去除同侧共同整圈，再比较，不分别解缠掩盖差动修正。奖励的六槽次序固定为“两被动膝几何短缺、四输出目标准入修正”，轮子不增加角位置目标。
 
 所选107°源文件已在Kaiser用完整树FK复核，显式采用manifest的0.32m名义root高度：左右名义内角均约67.85497°，距最近40°边界约0.486161rad；镜像native限位端点分别重现40°、107°。这些是源码几何结果，并非原生机器人测量，也不推翻此前双轮名义支撑高度差1.995mm未通过1mm准备门槛的false记录。输出pair投影是否启用单独报告；本次几何检查使用明确的无投影probe，不授予107°全可达输出域、闭链或硬件资格。
 
-私有[原生奖励桥](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_reward.py)绑定同一个plant、scene、控制器、physics view和所选资产源SHA。它在完整策略边界按model epoch读取全部19个原生body质量、完整DOF limits及原生physics view重力，核对两被动膝的真实限位与选定源一致，并核对配置重力和实际重力都采用世界负Z。参数getter的缓冲立即独立复制，不能让后续getter复用覆盖质量。原生质量和参数读取路径已经实现，但实际SDK尚未启动；目前“调用getter”的通过证据来自合成view。
+私有[原生奖励桥](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/reward.py)绑定同一个plant、scene、控制器、physics view和所选资产源SHA。它在完整策略边界按model epoch读取全部19个原生body质量、完整DOF limits及原生physics view重力，核对两被动膝的真实限位与选定源一致，并核对配置重力和实际重力都采用世界负Z。参数getter的缓冲立即独立复制，不能让后续getter复用覆盖质量。原生质量和参数读取路径已经实现，但实际SDK尚未启动；目前“调用getter”的通过证据来自合成view。
 
 落地冲击归一化使用每环境实际原生总质量向量，支持不同环境质量，不使用fixture的20kg或一份名义质量覆盖全部环境。manifest名义总质量13.886kg仅作为源绑定元数据；真实回读和允许随机化范围须由场景/课程另外验收。机械改写必须先使观测模型失效，最终刷新后取得新epoch，再在关闭的reward区间显式刷新模型快照；任一步失败使快照不可用，不能沿用旧质量继续学习。打开的区间不允许换质量，刷新也不清issued动作历史、累计预算或已消费ID。
 
@@ -328,25 +328,25 @@ reward的gamma和policy dt直接来自同一份`StructuredCollectionConfig`，�
 
 ### 可见时钟参考与独立物理收据
 
-私有[跳跃参考](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_jump_reference.py)仅依赖接受时锁存的可见支撑高度h0、请求增高J和命令时钟，另加恒定的奖励端世界地面锚点；当前真实高度、真正起跳时刻和未来物理状态不反馈进该时钟。该曲线定义任务目标，不输出关节动作，也不替代单一actor。完整环境接线必须在jump模式保持同一份锁存高度同时供actor和参考使用，不能让actor看到另一个持续变化的高度命令。机体和腿的动作仍由同一policy生成。
+私有[跳跃参考](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/jump.py)仅依赖接受时锁存的可见支撑高度h0、请求增高J和命令时钟，另加恒定的奖励端世界地面锚点；当前真实高度、真正起跳时刻和未来物理状态不反馈进该时钟。该曲线定义任务目标，不输出关节动作，也不替代单一actor。完整环境接线必须在jump模式保持同一份锁存高度同时供actor和参考使用，不能让actor看到另一个持续变化的高度命令。机体和腿的动作仍由同一policy生成。
 
 默认压缩0.20s，深度d=min(0.04m,h0−0.17m)，采用五次minimum-jerk位置曲线。伸展默认0.10s，速度为v(3u²−2u³)，其总位移为vT/2；起跳速度解方程`vT/2 + v²/(2g) = J+d`，保证总顶点是h0+J而非在伸展位移上再额外增加J。若该伸展位移超过0.40m支撑高度余量，则缩短伸展时间并重新解速度，保持原请求顶点，不裁掉高请求。压缩、伸展和自由飞行入口的位置与速度连续；预计落回h0后参考保持h0且速度归零，此落地保持切换不声明速度连续。事件时钟及其解析起跳速度保留float64，奖励目标投影为float32。该构造覆盖连续h0∈[0.17,0.40]、J∈[0.03,0.30]，但不证明所需加速度、力矩或时间在107°实物上可达。
 
-私有[物理技能评价器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_skill_evidence.py)与可部署请求FSM共享请求ID和接受收据，但独立读取每个PRE-reset物理子步。默认双轮法向力均至多2N且各自整轮相对本地形的最小垂向间隙至少5mm，连续10ms才确认腾空；单轮腾空、仅力降为零或接地伸腿抬高都不能建立飞行顶点。轮体生产器已按上文完整几何定义接入实际采样包，但native碰撞对照与物理验收尚未执行，当前合成输入检查不构成机器人腾空证据。
+私有[物理技能评价器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/skills.py)与可部署请求FSM共享请求ID和接受收据，但独立读取每个PRE-reset物理子步。默认双轮法向力均至多2N且各自整轮相对本地形的最小垂向间隙至少5mm，连续10ms才确认腾空；单轮腾空、仅力降为零或接地伸腿抬高都不能建立飞行顶点。轮体生产器已按上文完整几何定义接入实际采样包，但native碰撞对照与物理验收尚未执行，当前合成输入检查不构成机器人腾空证据。
 
 落地需双轮各至少5N，实际间隙不高于10mm、穿透不超过5mm，连续15ms后才开始稳定计时；世界垂向速度不超过0.15m/s、倾角不超过0.25rad、角速度范数不超过0.5rad/s，再连续稳定2s才可完成。任一条件失效重新计时，漏物理步直接拒绝，不插补“稳定时间”。成功只在完整100Hz区间的最终物理端点发布，避免区间首子步刚满足2s、后子步已经失稳却提前计分。物理跟踪器不在0.48s的rollout切段时清零。
 
 顶点误差采用双侧判据，目标基准是接受时地面锚点加可见h0，接受时真实支撑高度须在该基准15mm内。普通请求容差至多30mm；小跳容差进一步取`min(30mm,0.5J)`，因此3cm请求为15mm容差，防止没跳也落入±30mm。全程健康、全程策略控制、真实腾空、顶点与完整稳定落地必须同时成立；取消、超时、真实失败、脚本协助、reset和新请求覆盖均有独立结局，不能支付成功。协议的ESTIMATED_COMPLETE只解除可见请求，不关闭或支付尚未完成的物理尝试；若新协议接受先到而旧尝试未完成，明确记录旧尝试被覆盖。物理真值不修改部署FSM或actor输入。
 
-[奖励桥接](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_control_reward.py)仅接受同tick、同episode、同control epoch及同一实际末帧时间的完整物理收据，并复核2s、双侧顶点容差与全程控制归属；请求FSM结果不能当作该收据。成功ID只计一次，reset和冷恢复都不退款旧ID。触地后的奖励恢复高度采用当前地面，不能继续引用接受时另一个地面的绝对高度。所有接触、间隙与能力阈值仍须经107°物理验收；新私有模块没有启动requests课程或新增正式PPO。
+[奖励桥接](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/reward.py)仅接受同tick、同episode、同control epoch及同一实际末帧时间的完整物理收据，并复核2s、双侧顶点容差与全程控制归属；请求FSM结果不能当作该收据。成功ID只计一次，reset和冷恢复都不退款旧ID。触地后的奖励恢复高度采用当前地面，不能继续引用接受时另一个地面的绝对高度。所有接触、间隙与能力阈值仍须经107°物理验收；新私有模块没有启动requests课程或新增正式PPO。
 
 TensorBoard统一记录奖励每秒、每步贡献、事件数、mask启用率、按功能分桶的真实损失与梯度范数。高总reward不能覆盖持续高度偏差、自旋错误、缺失稳态或首次回合失败。
 
 ### 单一策略的原生任务闭环
 
-私有[任务环境](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_task.py)组合已有native plant、episode lifecycle、具名奖励桥、物理技能证据和共享请求协议，提供collector所需的`reset`与`step`。它不创建SDK或资源租约，也不选择第二个学习policy。调用者必须显式提供已绑定场景的reset计划、传感器来源、准备期脚本目标和具名物理条件；使用clean sensor的合成检查不等于真实噪声、USB和时序链已接入。
+私有[任务环境](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/task.py)组合已有native plant、episode lifecycle、具名奖励桥、物理技能证据和共享请求协议，提供collector所需的`reset`与`step`。它不创建SDK或资源租约，也不选择第二个学习policy。调用者必须显式提供已绑定场景的reset计划、传感器来源、准备期脚本目标和具名物理条件；使用clean sensor的合成检查不等于真实噪声、USB和时序链已接入。
 
-私有[命令程序](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_task_commands.py)把原连续TaskDraw映射到轨迹、外部任务模式及请求计划。六个课程阶段及完整目标域沿用原配额生成器；名义body命令单独处理，HOLD明确保持抽中的目标，不能始终停在通用起点而丢掉该样本。原请求、轮速必要包络投影与slew后的实际命令保留，actor和奖励共用实际命令。几何/速率仍需所选107°和执行器的真实证据，必要包络不等于完整可达域。
+私有[命令程序](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/commands.py)把原连续TaskDraw映射到轨迹、外部任务模式及请求计划。六个课程阶段及完整目标域沿用原配额生成器；名义body命令单独处理，HOLD明确保持抽中的目标，不能始终停在通用起点而丢掉该样本。原请求、轮速必要包络投影与slew后的实际命令保留，actor和奖励共用实际命令。几何/速率仍需所选107°和执行器的真实证据，必要包络不等于完整可达域。
 
 一个100Hz区间先锁定当前命令与实际控制权，再开始奖励窗口；完整执行2个200Hz或10个1kHz物理子步。每个子步用实际奖励包更新健康/失败、独立技能真值和奖励参考，随后只在完整端点发布奖励与技能证据。然后才消费此前已完成actor的估计推进请求协议，生成下一帧命令和观测。当前奖励不被新请求或下一帧轨迹覆盖。新接受请求的可见支撑高度锁存自当前准入命令；接受时的真实地面锚点仅存于环境的奖励上下文，部署命令程序推进不需要地面真值。
 
@@ -360,23 +360,23 @@ TensorBoard统一记录奖励每秒、每步贡献、事件数、mask启用率�
 
 ### 固定案例与首回合评价
 
-私有[评价计划](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_evaluation_plan.py)逐项保留原144案例的名称、参数、完整时长和首回合分母。探针每功能两个预封存代表案例，阶段验证包括全部已引入案例并从foundation保留恢复保护，最终validation与held-out分别使用各自seed。held-out必须绑定已选择模型的训练seed、checkpoint和选择记录；连续挑战另外要求封存的完整命令/地形/请求manifest。此目录与旧分层成本估算只服务手动评价；没有定时触发或强制评价预算预留。准备、已经结束首回合但仍随batch推进的行、场景、物理子步、I/O与失败尝试记录实际成本。目录本身不授予物理资格，不自动追加生产任务。
+私有[评价计划](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/evaluation/plan.py)逐项保留原144案例的名称、参数、完整时长和首回合分母。探针每功能两个预封存代表案例，阶段验证包括全部已引入案例并从foundation保留恢复保护，最终validation与held-out分别使用各自seed。held-out必须绑定已选择模型的训练seed、checkpoint和选择记录；连续挑战另外要求封存的完整命令/地形/请求manifest。此目录与旧分层成本估算只服务手动评价；没有定时触发或强制评价预算预留。准备、已经结束首回合但仍随batch推进的行、场景、物理子步、I/O与失败尝试记录实际成本。目录本身不授予物理资格，不自动追加生产任务。
 
-私有[原生评价器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_evaluation.py)在一个已经绑定的NativeTaskEnvironment中执行确定性均值动作，复用collector的时序/标签/控制权校验及同一估计投影，不调用optimizer或读取旧checkpoint。每次初始化、reset和控制权变化都采用相同的五帧历史语义；模型参数或buffer在评价中改变即拒绝报告。物理trace只接受该环境实际当前tick和奖励包，逐200Hz/1kHz子步累计；首回合结束即封存该行统计，后续auto-reset只计物理成本，不能替换首次失败。
+私有[原生评价器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/evaluation/native.py)在一个已经绑定的NativeTaskEnvironment中执行确定性均值动作，复用collector的时序/标签/控制权校验及同一估计投影，不调用optimizer或读取旧checkpoint。每次初始化、reset和控制权变化都采用相同的五帧历史语义；模型参数或buffer在评价中改变即拒绝报告。物理trace只接受该环境实际当前tick和奖励包，逐200Hz/1kHz子步累计；首回合结束即封存该行统计，后续auto-reset只计物理成本，不能替换首次失败。
 
 误差分别相对于原始请求与实际准入命令，body速度跟踪与base_link世界XY速度/位移分开。报告完整任务、policy实际控制和健康支撑稳态三种支持集；稳态先丢弃2s，另记最长连续健康支撑段，不用零碎片段的总时长伪装连续hold。10s净漂移需完整连续站立窗口，少于10s时保留null。力矩、物理步力矩变化率、轮接触切向RMS、整轮垂向gap、膝几何余量/销残差、非轮body法向载荷均保留向量和物理单位。力矩饱和字段指输出反馈请求的cap比例；绝对机械功率`abs(tau*dq)`不解释为电能。动作原始均值、issued值、100Hz变化率和逐轴上下界比例另按policy完整控制区间统计，不能把六轴fraction向量压成float。
 
 评价事件同时保留原请求/取消、拒绝响应、接受收据、独立物理技能结果、估计协议结束及reset取消。接受或估计完成都不等于真实跳跃成功。首版请求测试错误地让初始角速度为`[1,2,3]rad/s`的合成夹具期待接受；协议正确返回NOT_READY。后续仅将“应接受”夹具显式置静止，并保留旋转拒绝对照，没有放宽0.5rad/s准备门槛；原失败收据保留。
 
-私有[结果汇总](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_evaluation_results.py)按独立训练seed、案例、评估seed和可达类别分组；未知、不可达、未观测及未完成保留分母，不伪造零误差或失败原因。物理时间加权合并均值/方差/平方量，包含失败首回合的真实前缀，不平均各卡的RMS。精确二项区间按[NIST的二项尾方程](https://www.itl.nist.gov/div898/software/dataplot/refman2/auxillar/exacbici.htm)数值反解；某案例/评估seed尚未收齐全部首次结局时不发布区间。区间依赖该组独立同分布Bernoulli假设，既不是训练seed置信区间，也不是“观测95%即真实成功率至少95%”的保证。
+私有[结果汇总](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/evaluation/results.py)按独立训练seed、案例、评估seed和可达类别分组；未知、不可达、未观测及未完成保留分母，不伪造零误差或失败原因。物理时间加权合并均值/方差/平方量，包含失败首回合的真实前缀，不平均各卡的RMS。精确二项区间按[NIST的二项尾方程](https://www.itl.nist.gov/div898/software/dataplot/refman2/auxillar/exacbici.htm)数值反解；某案例/评估seed尚未收齐全部首次结局时不发布区间。区间依赖该组独立同分布Bernoulli假设，既不是训练seed置信区间，也不是“观测95%即真实成功率至少95%”的保证。
 
 这三层均为私有候选实现，不自动输出课程晋级决定或native资格。144个请求定义已可生成和校验，具体107°出生、域证据、压力/时延profile、各地形的全车通过判据、恢复判据、重复/取消请求执行序列及完整连续挑战manifest仍需原生解析和物理验收。不能把通过目录或合成统计测试写成已执行144案例，更不能由健康率推断台阶/跳跃已完成。当前不增加生产job、不改原停止队列或正式部署入口。
 
 ### 所选资产的闭链reset几何与整机出生放置
 
-私有[reset运动学](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_reset_kinematics.py)直接绑定所选107°manifest/model_spec、19个body、18个tree joint和六个球铰闭链约束。完整三维FK及约束Jacobian按源joint frame、axis和两侧local pin计算，不用平面连杆近似替代微小的三维装配差异。四个同轴输出及两个轮坐标始终固定在调用者指定值；有界阻尼求解仅更新其余12个被动坐标，转动与slider增量分别定标，保留原被动膝与气簧机械行程。每行独立保留残差、原生限位和收敛结果，不移动电机目标来伪造闭链，也不把未收敛行当合法reset。该计算位于准备边界，不进入100Hz策略推理或改变PPO。
+私有[reset运动学](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/reset_kinematics.py)直接绑定所选107°manifest/model_spec、19个body、18个tree joint和六个球铰闭链约束。完整三维FK及约束Jacobian按源joint frame、axis和两侧local pin计算，不用平面连杆近似替代微小的三维装配差异。四个同轴输出及两个轮坐标始终固定在调用者指定值；有界阻尼求解仅更新其余12个被动坐标，转动与slider增量分别定标，保留原被动膝与气簧机械行程。每行独立保留残差、原生限位和收敛结果，不移动电机目标来伪造闭链，也不把未收敛行当合法reset。该计算位于准备边界，不进入100Hz策略推理或改变PPO。
 
-私有[碰撞支持与出生准备](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_reset_collision.py)读取同一source hash下实际引用的OBJ碰撞face顶点和完整有限圆柱，包含每个collision origin及body姿态。平面支持使用所有19个body；侧躺/俯卧不能只按两轮高度放置，否则机身可能穿地。OBJ未被face引用的孤立顶点不冒充碰撞面；未实现primitive、缺失body碰撞或变更hash直接拒绝，不用估计包围盒替代。点云按显式chunk处理，不能在reset时一次展开所有环境×全部mesh顶点，也不因此缩短远处完整课程。
+私有[碰撞支持与出生准备](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/reset_collision.py)读取同一source hash下实际引用的OBJ碰撞face顶点和完整有限圆柱，包含每个collision origin及body姿态。平面支持使用所有19个body；侧躺/俯卧不能只按两轮高度放置，否则机身可能穿地。OBJ未被face引用的孤立顶点不冒充碰撞面；未实现primitive、缺失body碰撞或变更hash直接拒绝，不用估计包围盒替代。点云按显式chunk处理，不能在reset时一次展开所有环境×全部mesh顶点，也不因此缩短远处完整课程。
 
 出生平面须从该行自己的实际TerrainCourse中证明：检查候选矩形涉及的源三角格、覆盖空洞、较高共享边和突起wall，clone原点与course SHA保留。这里只允许选用完整课程中的平坦出生区，不把后续坡面/台阶/粗糙课程改成平面。姿态和关节均由调用者明确给出，root高度仅按整机source支持计算；任何body/constraint/axis、碰撞mesh或控制参考都不被改写。源码geometry_ready只表示平面footprint覆盖、原关节限位与闭链残差条件，既不证明自碰撞/静力平衡，也不证明native cooking或实际落地。
 
@@ -388,13 +388,13 @@ TensorBoard统一记录奖励每秒、每步贡献、事件数、mask启用率�
 
 ### 连续任务与恢复出生候选
 
-私有[恢复请求编译器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_recovery_poses.py)将原16个名称解析成明确的root方向、左右几何膝角、腿前摆和释放高度/速度。物理前摆符号由所选左右髋轴及轮端杠杆推导，不把镜像电机坐标当同一正方向。复位IK固定两个髋输出、两个指定几何膝角和两个轮坐标，求其余12个坐标（包括两个辅助输出）；这是出生准备，actor仍只控制四个同轴输出位置与两个轮速。几何膝角按原40°..107°止挡映射到两侧不同native坐标，不把非线性辅助输出直接叫作膝电机。
+私有[恢复请求编译器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/recovery.py)将原16个名称解析成明确的root方向、左右几何膝角、腿前摆和释放高度/速度。物理前摆符号由所选左右髋轴及轮端杠杆推导，不把镜像电机坐标当同一正方向。复位IK固定两个髋输出、两个指定几何膝角和两个轮坐标，求其余12个坐标（包括两个辅助输出）；这是出生准备，actor仍只控制四个同轴输出位置与两个轮速。几何膝角按原40°..107°止挡映射到两侧不同native坐标，不把非线性辅助输出直接叫作膝电机。
 
 这些16个请求的具体关节配方是工程候选，并未获得物理恢复资格。此前单次端点求解中15个候选满足该次闭链与当前输出hold检查。第14号（从零编号，腹面着地、双腿朝上）用π前摆解析后未收敛，最大闭链残差约0.240792m，所需髋准备动作约±12.566，而既有腿动作上限为±3。原请求、求解失败和动作值都保留，没有扩大动作box、移动连杆或以站立重抽。这里拒绝的是**当时的求解结果和hold准备路径**，不是证明该名称的所有可能姿态不可达，也不是证明一个合法但输出目标域外的跌倒状态无法被策略恢复。下面的新分段源码求解已找到完整请求的闭链解；hold准备与物理恢复仍须单独验收，不据此删除恢复功能或淘汰网络。
 
 #### 有界姿态延拓与独立的准备域
 
-[reset运动学](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_reset_kinematics.py)新增从已闭合、原生限位内seed开始的有界姿态延拓。髋输出和几何膝角沿同一原始请求作确定性线性分段，轮坐标保持原值；不是运行失败后另抽姿态或改变终点。私有RecoveryTuning显式给出每段最大π/24rad（7.5°）和32段上限，并把原80次非线性更新明确约束为**每行整条路径的总预算**。每行预算与收敛状态独立，已收敛行不继续消费更新，其他失败行不能挪用它的预算。现有PPO每轮64次actor Adam步及学习预算没有变化。
+[reset运动学](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/reset_kinematics.py)新增从已闭合、原生限位内seed开始的有界姿态延拓。髋输出和几何膝角沿同一原始请求作确定性线性分段，轮坐标保持原值；不是运行失败后另抽姿态或改变终点。私有RecoveryTuning显式给出每段最大π/24rad（7.5°）和32段上限，并把原80次非线性更新明确约束为**每行整条路径的总预算**。每行预算与收敛状态独立，已收敛行不继续消费更新，其他失败行不能挪用它的预算。现有PPO每轮64次actor Adam步及学习预算没有变化。
 
 某段失败即结束该行，不重试、换seed或回退RNG。结果分别保存完整最终请求、最后实际尝试的中间姿态、完成/尝试段数、比例、残差与预算耗尽状态。失败行的最终endpoint字段仍明确保留请求的髋、膝和轮坐标，不把成功前缀改名为已完成姿态。未闭合seed、过多段数、错误行预算或越域膝角在求解前拒绝；原单次端点求解接口及其历史false另行保留。
 
@@ -408,7 +408,7 @@ Kaiser上的[源码延拓探针](/home/yukikaze/Documents/workspace/transformer_
 
 #### 原位准备控制与单一策略交接
 
-私有[控制来源与共同相位](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_control_sources.py)和[输出控制器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_output_actuation.py)区分三类实际命令：policy、沿原策略目标域解码的bounded script，以及只锁存实际出生输出位置的preparation hold。后者仍通过同一个输出端PC反馈、力矩限幅、有效驱动响应和气簧链执行；它不是额外学习policy，不修改原策略动作box，也不改变40Nm/4.5Nm原力矩上限。两轮始终只给零速度目标，不设轮角目标。
+私有[控制来源与共同相位](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/control/ownership.py)和[输出控制器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/control/actuation.py)区分三类实际命令：policy、沿原策略目标域解码的bounded script，以及只锁存实际出生输出位置的preparation hold。后者仍通过同一个输出端PC反馈、力矩限幅、有效驱动响应和气簧链执行；它不是额外学习policy，不修改原策略动作box，也不改变40Nm/4.5Nm原力矩上限。两轮始终只给零速度目标，不设轮角目标。
 
 PreparationHold保留实际native腿位置、共同整圈、六维规范化命令、比较容差和准入结果。每侧相对nominal的两轴位移只移除共同整圈，相对位移变化须小于π；规范化命令因此有6π的数学表示界限。该界限不是新增机械运动包络。显式pair domain必须满足，原生坐标重建误差不得超过给定容差；不独立wrap、不clip位置、不移动pair投影来伪造hold。TaskResetPreparer现在要求闭链、这个**实际准备控制**准入与整机碰撞/支撑，native float32计划再次计算hold；旧policy-hold false作为独立诊断保留。所选源码16行均通过新增controller/source hold检查，其中第14行的policy-hold仍为false。完整source放置、native接触、出生稳定和恢复能力继续单独验收。
 
@@ -420,7 +420,7 @@ NativeTaskResetPlan可携带这个有界、具名的准备描述。partial coord
 
 Kaiser先通过[221项回归与接口检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-script-preparation-20261019T110017Z-9f7d1edb/validation-0001.json)，补齐同轴观测分支、当前姿态安全锁存和新地形交接检查后，[225项最终检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-script-preparation-20261019T110017Z-9f7d1edb/validation-0002.json)。分组有重叠，不相加。覆盖200Hz与1kHz合成链、五帧与mask、partial reset、准备篡改/来源伪造/pair越界拒绝、无新特征的35D/81D、同一小测试模型的PPO收集/更新、selected107全部16源码控制描述，以及新地形在错误hold下不改USD。全部仍为Kaiser CPU合成/源码检查，pair-domain探针未获正式资格，SDK上下文、真实机器人仿真和新正式PPO均为零。生产CLI、公共API/schema与恢复格式没有修改。
 
-私有[连续reset准备器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_reset_program.py)组合六类TaskDraw、完整连续TerrainCourse、整机source支持与TaskCommandPlan。任务、地形、姿态三个独立RNG和配额状态一起保存；参数或源hash不同拒绝载入，失败不回滚已消费的draw，也不重试。普通30s、请求/恢复60s与完整速度界决定地形extent；本次所选源码16恢复探针每行仍保留±302m两轴范围，没有用出生小平面缩短远处课程。`nominal`只关闭附加出生扰动并采用既有名义命令语义，不移除抽中的恢复ID或粗糙地形。
+私有[连续reset准备器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/reset_program.py)组合六类TaskDraw、完整连续TerrainCourse、整机source支持与TaskCommandPlan。任务、地形、姿态三个独立RNG和配额状态一起保存；参数或源hash不同拒绝载入，失败不回滚已消费的draw，也不重试。普通30s、请求/恢复60s与完整速度界决定地形extent；本次所选源码16恢复探针每行仍保留±302m两轴范围，没有用出生小平面缩短远处课程。`nominal`只关闭附加出生扰动并采用既有名义命令语义，不移除抽中的恢复ID或粗糙地形。
 
 出生平面只从该行完整课程的entry证明。准备器保留每行闭链、当前输出hold、整机footprint和支撑的不同状态；名义直立/蹲姿才采用显式有界双轮roll修正，其余方向和连续roll/pitch扰动不被投影回站立。浮点编码后的native计划再次检查实际controller的pair投影和输出范围。释放速度定义为世界向下，再换算到body；native COM速度另使用实际逐环境base COM以及`vCOM=vOrigin+ω×offset`，不能把source名义COM偷偷用在随机化实体上。
 
@@ -428,7 +428,7 @@ Kaiser先通过[221项回归与接口检查](/home/yukikaze/Documents/workspace/
 
 ### 部分复位计划与等表面课程更新
 
-私有[部分复位协调器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_reset_coordinator.py)绑定实际lifecycle、所选source hash、native克隆次序、controller及当前base COM，只为mask选中行消费TaskDraw和几何/姿态RNG。完整计划合并时，未选中行的root/q/速度/准备动作及命令轨迹六个字段、任务时限/请求参数、course SHA和course对象保持原值；这些是旧的**复位计划缓存**，不是复制或重建未选中行的当前物理状态。native reset仍只向选中行写入。
+私有[部分复位协调器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/runtime/reset_coordinator.py)绑定实际lifecycle、所选source hash、native克隆次序、controller及当前base COM，只为mask选中行消费TaskDraw和几何/姿态RNG。完整计划合并时，未选中行的root/q/速度/准备动作及命令轨迹六个字段、任务时限/请求参数、course SHA和course对象保持原值；这些是旧的**复位计划缓存**，不是复制或重建未选中行的当前物理状态。native reset仍只向选中行写入。
 
 一个draw在几何准备前就封存为提案。同一mask、下一episode ID和当前timestamp再次请求时返回同一计划，不再次采样；前提案尚未真实应用，不能另抽请求。求解/资源拒绝及中途打断都保留原draw、三个RNG状态和pending标记，不以重抽standing补位。数值所有权检查包含CommandTrajectory的端点、duration、kind及频率；不会遍历本来已是不可变数值tuple的完整地形mesh去做tensor version检查。
 
@@ -440,7 +440,7 @@ Kaiser安装的SDK源码核对见[生命周期审查](/home/yukikaze/Documents/w
 
 ### 连续地形的零步编辑与完整对象图交接
 
-私有[地形编辑与安装器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_terrain.py)消费已封存的复位提案，只替换mask选中行的实际表面。它在完整策略边界、奖励窗口已清空且没有待消费物理包时执行；同一物理tick已reset的行在消费新draw之前拒绝。命令、准备动作、native布局、单位四元数及每行source course SHA先检查，再触碰USD。只改geometry seed等元数据继续使用前一节的等表面路径；实际高度、网格或摩擦变化才进入编辑。
+私有[地形编辑与安装器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/terrain.py)消费已封存的复位提案，只替换mask选中行的实际表面。它在完整策略边界、奖励窗口已清空且没有待消费物理包时执行；同一物理tick已reset的行在消费新draw之前拒绝。命令、准备动作、native布局、单位四元数及每行source course SHA先检查，再触碰USD。只改geometry seed等元数据继续使用前一节的等表面路径；实际高度、网格或摩擦变化才进入编辑。
 
 编辑器复用初始场景的网格和材料作者化方法，在本行独有的generation路径创建disabled形状，核对Point3f编码、三角形、双面、原始mesh碰撞及独立材料，再禁用旧形状、启用新形状。安装源码确认的`flush_changes`用于处理变更；当前110版cooking接口使用`get_cooking_statistics`的scheduled/finished及GPU兼容、polygon-limit warning计数，不能套用较旧文档中的阻塞cooking方法。等待有显式上限，已有任务未完成、计数回退或新增warning均拒绝；这项源码核对不等于实际运行通过。
 
@@ -542,7 +542,7 @@ validation seeds为44101、44102；held-out seeds为44901、44902，held-out在�
 
 ## 当前实现与验收边界
 
-新增[物理奖励计算器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_control_reward.py)，保持与原奖励统计器分离。native回合接口提供同步的逐物理子步只读observer，奖励端必须消费全部两次200Hz采样或十次1kHz采样后才发布一个100Hz转移；observer失败或改变model/clock后，该物理区间失效且不重放。连续项在每个子区间先按`P-10*tanh(C/10)`计算，再乘真实物理dt积分，不能先平均C再做非线性组合。100Hz已发动作的一阶/二阶差分作为该区间的固定密度，不在每个物理步重复差分或再乘一次策略dt。原始正项、成本、符号误差的一阶/二阶矩及显式gate分别保留；按比例分配的有界成本项之和对应合成密度，日志可与独立事件核对，不以成本非零推断启用率。混合模式的误差必须按对应gate分别统计，不能将未启用的跳跃参考误差充作普通控制指标。
+新增[物理奖励计算器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/reward.py)，保持与原奖励统计器分离。native回合接口提供同步的逐物理子步只读observer，奖励端必须消费全部两次200Hz采样或十次1kHz采样后才发布一个100Hz转移；observer失败或改变model/clock后，该物理区间失效且不重放。连续项在每个子区间先按`P-10*tanh(C/10)`计算，再乘真实物理dt积分，不能先平均C再做非线性组合。100Hz已发动作的一阶/二阶差分作为该区间的固定密度，不在每个物理步重复差分或再乘一次策略dt。原始正项、成本、符号误差的一阶/二阶矩及显式gate分别保留；按比例分配的有界成本项之和对应合成密度，日志可与独立事件核对，不以成本非零推断启用率。混合模式的误差必须按对应gate分别统计，不能将未启用的跳跃参考误差充作普通控制指标。
 
 力矩输入明确是原生显式执行器的六轴输出buffer，不是未限幅PC请求；机械功率为输出力矩与采样关节速度的数值代理，不称为电能或精确连续机械功积分。接触成本使用自己地形的正法向载荷，静止漂移使用世界XY速度，跳跃高度/垂速使用世界Z；普通高度仍是base_link相对声明地面的高度。接触滑移必须提供真实接触点相对地面的切向速度，不能用`轮速*半径-body_vx`顶替。边界成本必须提供具名几何被动膝及四输出目标的shortfall，不能用原生关节角直接冒充膝内角。这两份真实SDK附件尚未实现；集成测试只在fixture中显式提供占位附件，没有将它们注册成生产适配器。机器人质量须由所选资产和原生回读绑定；20kg仅是本组CPU fixture值。
 
@@ -550,7 +550,7 @@ validation seeds为44101、44102；held-out seeds为44901、44902，held-out在�
 
 Kaiser首先通过[27项奖励检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reward-contract-20261019T040122Z-c6dabfad/validation-0001.json)。随后集成检查出现[1项失败、47项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reward-contract-20261019T040122Z-c6dabfad/validation-0002.json)：奖励端反复累加0.01s得到`0.060000000000000005`，与原生12tick的`0.06`不同，导致严格reset检查误拒绝。现已保留最后一次实际producer timestamp，不再自行累加另一套时钟；没有放宽时间容差或reset检查。修正后[49项全部通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reward-contract-20261019T040122Z-c6dabfad/validation-0003.json)，覆盖失败与time-limit的GAE、无重复吸收bootstrap、不同物理率的dt、P上界、逐子步非线性积分、事件去重、脚本mask、完整奖励→reset→collector→PPO及原生回合回归。安全保持和恢复回报超过立即失败的测试验证了所声明奖励代数；不证明近似critic必然学对，也不替代真实困难/不可达轨迹和完整有限时限验收。原失败收据保留，CPU fixture物理调用不计为机器人仿真。
 
-2026年10月19日，已实现独立的[结构化策略](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_policy.py)、[历史与边界合同](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_training_contract.py)及[PPO事务](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_policy_optimization.py)。新增[请求状态机](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_task_protocol.py)、[连续课程与预算](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_task_curriculum.py)、[命令轨迹与准入](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_command_trajectory.py)和[具名标签采样器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_collection.py)，保持职责分离。这些模块仍是私有候选，不加入旧架构枚举，不改变旧PPO、CLI release、配置或checkpoint格式。原测试队列已按用户要求停止，1071更新的可恢复checkpoint和全部既有结果保留，不自动接续剩余48格。
+2026年10月19日，已实现独立的[结构化策略](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/policy.py)、[历史与边界合同](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/learning/contracts.py)及[PPO事务](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/learning/optimization.py)。新增[请求状态机](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/protocol.py)、[连续课程与预算](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/curriculum.py)、[命令轨迹与准入](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/trajectory.py)和[具名标签采样器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/learning/collection.py)，保持职责分离。这些模块仍是私有候选，不加入旧架构枚举，不改变旧PPO、CLI release、配置或checkpoint格式。原测试队列已按用户要求停止，1071更新的可恢复checkpoint和全部既有结果保留，不自动接续剩余48格。
 
 Kaiser上[141项合成检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-task-integration-20261019T004810Z-3f8c7d7f/integration-0002.json)已通过，无失败或跳过；其中保留此前56项策略与优化检查。策略检查覆盖完整宽度的因果性、轮角排除、单一actor梯度、原始Gaussian动作及动态batch的TorchScript/ONNX一致性。优化器合同测试包含每轮64步上限、跨脚本/失败/time-limit边界、同一次actor和Adam回滚、整轮KL兜底、辅助梯度非有限、critic失败原子恢复、诊断不改变更新和RNG消费，以及消费计数不退款。事务代数测试使用较小测试宽度；完整宽度另执行3072端点的三次单minibatch合成优化检查。本轮另通过完整网络的合成采样、PPO更新、再采样闭环。它们没有机器人仿真样本，不能作为物理或训练能力证明。
 
@@ -558,11 +558,11 @@ Kaiser上[141项合成检查](/home/yukikaze/Documents/workspace/transformer_rl/
 
 采样器以具名PRE-reset附件绑定base_link原点/body坐标线速度、策略顺序六轴速度、接触、时刻及控制epoch；拒绝用reset后的状态代替物理终点，脚本接管不获得actor、辅助或critic学习信用。命令流保留原始请求及其分母，轮速必要边界与连续限速后的交付目标分别记录；共同插值比例保持轮速可行菱形，不把独立分量限速误当联合约束。该菱形仅为轮目标速度的必要条件，不证明力矩、牵引、全高度或硬件能力；几何和变化率均须显式绑定证据。
 
-[具名物理观测层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_physical_observation.py)和[native读数桥接层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_observation.py)已实现。Kaiser上新增49项物理参考点、字段、native缓冲生命周期和接触时钟合成检查，以及16项已有采样回归，共[65项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-physical-interface-20261019T013031Z-6ba3954f/validation-0004.json)。覆盖native轴序变化、COM到link速度变换、xyzw旋转、干净critic前缀、未来传感器拒绝、物理标签与epoch绑定、机械改写后失效/刷新、缓冲所有权和200Hz/1kHz接触窗口。首次测试有4个预期张量的int/float类型断言错误，修正测试后通过，原失败收据保留；不是训练或机器人模型失败。
+[具名物理观测层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/control/observation.py)和[native读数桥接层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/observation.py)已实现。Kaiser上新增49项物理参考点、字段、native缓冲生命周期和接触时钟合成检查，以及16项已有采样回归，共[65项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-physical-interface-20261019T013031Z-6ba3954f/validation-0004.json)。覆盖native轴序变化、COM到link速度变换、xyzw旋转、干净critic前缀、未来传感器拒绝、物理标签与epoch绑定、机械改写后失效/刷新、缓冲所有权和200Hz/1kHz接触窗口。首次测试有4个预期张量的int/float类型断言错误，修正测试后通过，原失败收据保留；不是训练或机器人模型失败。
 
 在Kaiser重新核对了107°完整包65文件及其名义主动轴值，并只读核对本机安装的SDK源码：`root_link_pose_w`为xyzw的7列视图，`root_com_vel_w`为世界系线速度和角速度6列视图，joint_pos/joint_vel为float32原生关节视图。[元数据与SDK源码记录](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-physical-interface-20261019T013031Z-6ba3954f/metadata-0001.json)没有导入或启动SDK。这证明拟接线API与安装源码相符，不证明已经创建真实articulation、验收native接触视图或通过物理资格。当前桥接层测试使用合成native缓冲，实际107°物理场景仍待接入。
 
-新增[输出轴控制与响应](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_output_actuation.py)、[气簧压力](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_passive_pressure.py)、[原生effort写入](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_actuation.py)、[自身地形接触视图](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_contacts.py)、[场景构建](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_scene.py)与[物理步执行链](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_plant.py)。控制层对同侧两根主动输出轴采用共同整圈分支，轮支路仅生成速度目标；原始目标、成对投影、PC原始/限幅力矩、驱动端点力矩与区间平均力矩分别记录。200Hz候选每个100Hz策略步只有两次新反馈，1kHz参考有十次；解析积分不创造额外反馈或仿真子步。
+新增[输出轴控制与响应](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/control/actuation.py)、[气簧压力](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/control/pressure.py)、[原生effort写入](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/actuation.py)、[自身地形接触视图](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/contacts.py)、[场景构建](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/scene.py)与[物理步执行链](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/plant.py)。控制层对同侧两根主动输出轴采用共同整圈分支，轮支路仅生成速度目标；原始目标、成对投影、PC原始/限幅力矩、驱动端点力矩与区间平均力矩分别记录。200Hz候选每个100Hz策略步只有两次新反馈，1kHz参考有十次；解析积分不创造额外反馈或仿真子步。
 
 场景构建入口接收已经完成准入的独占SDK上下文，不自行启动AppLauncher或宣称获得GPU资源。它按完整manifest校验依赖，使用显式三角网格、各环境独立碰撞组、实际clone顺序和具名body/关节绑定，检查六个排除在树外的点闭链、12/6求解器设置及完整质量。出生高度显式取所选manifest的0.32m，不把它静默改为零，也不改变资产文件。构建代码已实现，不等于它已在真实SDK中执行；完整课程的地形生成与重置、实际碰撞和出生稳定仍须验收。
 
@@ -572,7 +572,7 @@ Kaiser上[141项合成检查](/home/yukikaze/Documents/workspace/transformer_rl/
 
 Kaiser上分组通过[96项执行链与场景接口检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/validation-0003.json)及[20项耦合物理步/读数桥接检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/validation-0004.json)，场景出生参数修订后又通过[27项定向回归](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/validation-0005.json)。这些均为GPU关闭的CPU合成检查，机器人仿真步0，不能相加冒充一次原生仿真验收。另在Kaiser对真实107°完整65文件及左右完整腿/新轮拟合包作[参数接线核验](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/profile-0003.json)：保留输出端15.62已换算结果，不继承旧50Hz时序。当前执行链只允许明确声明的有效响应probe，没有额外USB/CAN延迟；通信与有效响应的整链闭合尚未完成，不据此开放正式PPO。
 
-新增[地形几何与批量查询](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_terrain_geometry.py)、[连续课程地形生成](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_terrain_tasks.py)及[native地面参考](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_ground.py)。碰撞点先统一到float32，查询使用同一网格的同一条对角线和三角形重心插值，不用双线性插值制造另一份地面。台阶竖面真实作者化，边缘高度选择最高顶面；等高材料接缝确定性选择一块实际材料，不平均出仿真中不存在的材料。分组缓存不同网格尺寸，每物理步只作批量查询，不重新生成网格。输入范围外明确返回invalid，native适配器保留带位置/时刻的TerrainCoverageError，当前probe失效退出，不填无限平地或把越界算作健康；正式批量环境的逐行越界/终止归属仍须接入。
+新增[地形几何与批量查询](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/geometry.py)、[连续课程地形生成](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/tasks/terrain.py)及[native地面参考](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/ground.py)。碰撞点先统一到float32，查询使用同一网格的同一条对角线和三角形重心插值，不用双线性插值制造另一份地面。台阶竖面真实作者化，边缘高度选择最高顶面；等高材料接缝确定性选择一块实际材料，不平均出仿真中不存在的材料。分组缓存不同网格尺寸，每物理步只作批量查询，不重新生成网格。输入范围外明确返回invalid，native适配器保留带位置/时刻的TerrainCoverageError，当前probe失效退出，不填无限平地或把越界算作健康；正式批量环境的逐行越界/终止归属仍须接入。
 
 地面参考取base_link原点和实际轮碰撞体中心的世界XY。轮中心从所选URDF的具名collision cylinder origin读取，偏移精确为两侧`±0.020350000821053982m`，随原生轮link的xyzw姿态旋转后查询，不取视觉几何、轮joint原点或未旋转偏移。地形与材料先按实际clone次序重排，查询前检查native view、body参考点、环境原点和post-physics/model epoch；reset后的旧缓存拒绝读取。地形与接触仍为训练用特权量，不进入actor。
 
@@ -580,7 +580,7 @@ Kaiser分别通过[60项地形/课程检查](/home/yukikaze/Documents/workspace/
 
 地形生成器独立保存RNG，按课程TaskDraw构造连续参数与原始请求记录；几何构造发生在受控场景准备边界。不能在live reset只换TaskDraw而继续使用旧碰撞体，也不假设编辑USD会自动正确重建PhysX形状。后续私有编辑器已补齐显式作者化、cooking计数同步、native路径探针及完整scene/query交接；真实重烘焙可用性、未选中轨迹等价、独立越界和技能验收仍须在准入后验证。这些准备结果不把144案例标为可运行或已通过。
 
-新增[原生回合边界](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_episode.py)，绑定当前scene、实际clone顺序、地面query和每行完整course SHA。固定几何上的逐行reset会同时更新episode/control epoch、请求中止与去重状态、驱动/接触历史；未选择行的状态与命令保留，物理时钟不清零。同一物理边界不能重复生成空回合。机械模型epoch改变后必须整批重新建立回合，不能让未reset行继续沿用旧模型标签。未安装新表面时仍在native reset写入前返回带行号及实际/请求身份的`TerrainRebuildRequired`；正确的变化课程须先经过私有编辑器和全对象图交接，再应用选中行reset，不用有限静态地形替换完整课程分布。
+新增[原生回合边界](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/simulation/episode.py)，绑定当前scene、实际clone顺序、地面query和每行完整course SHA。固定几何上的逐行reset会同时更新episode/control epoch、请求中止与去重状态、驱动/接触历史；未选择行的状态与命令保留，物理时钟不清零。同一物理边界不能重复生成空回合。机械模型epoch改变后必须整批重新建立回合，不能让未reset行继续沿用旧模型标签。未安装新表面时仍在native reset写入前返回带行号及实际/请求身份的`TerrainRebuildRequired`；正确的变化课程须先经过私有编辑器和全对象图交接，再应用选中行reset，不用有限静态地形替换完整课程分布。
 
 reset发生在已经发布的100Hz边界。旧回合的PRE-reset帧、critic和监督独立保留；新回合即时返回同一timestamp的脚本控制投影，有限actor占位值显式不称为传感器测量，critic/辅助标签无效且不参与PPO。它不读失效的native缓存，不补一次假物理步。随后严格执行200Hz两步或1kHz十步，再读实际传感器；五个新的100Hz传感器帧及完整15ms接触窗口建立后才切回策略。传感器允许有已声明延迟，但采样时刻必须严格晚于该次reset且逐帧前进；时间戳恰好等于reset缺少先后顺序证明，不能计为新帧，重复旧时间戳也不能完成准备。旧投影不会跨新的control epoch进入有效历史。新增`step_requests`入口在物理区间完成后、发布新观测前消费上一帧估计，准备期同时关闭估计valid与新请求准入；NOT_READY请求仍消费ID，不能等准备结束后重放同一ID起跳。后续新增的NativeTaskEnvironment已经使用该入口接线，继续同时屏蔽准备期估计和新请求准入；真实场景、传感器时序及动态课程仍须单独验收，不能仅关闭PPO mask却另行让FSM消费占位估计。
 
@@ -588,7 +588,7 @@ Kaiser上[45项回合、地面与物理链检查](/home/yukikaze/Documents/works
 
 [CPU成本记录](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/structured-policy-implementation-20261019T002043Z-4a9e4aa3/performance-0001.json)使用Kaiser单线程和随机初始化模型，单batch推理各测1000次：PyTorch中位0.541ms、P95为0.604ms，ONNX中位0.144ms、P95为0.157ms，ONNX样本最大0.392ms。仅包括网络推理，不含观测打包、控制环、传输和物理响应。完整宽度的单3072端点actor/critic事务含KL与回滚准备，CPU三次为2.179、1.941、1.918秒，进程峰值RSS约1.96GB；不是64minibatch正式整轮耗时，不能外推GPU训练速度。原型ONNX仅为随机权重性能产物，不是可上机策略。
 
-新增私有[消费日志](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_learning_accounting.py)、[完整学习快照](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_checkpoint.py)和[更新边界控制](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_learning.py)。每轮先将完整采样预约写入有排他写锁的fsync哈希链，再执行采样与PPO；完整预约、实际提交/返回转移、PPO fresh、两个优化器的执行次数及端点使用分别记录。部分采样或更新失败后，原预约不退款；日志含pending、failed或与快照边界不一致时拒绝自动恢复。该机制处理正常持久化与中断，不承诺抵抗人工同时回滚日志和快照。
+新增私有[消费日志](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/learning/accounting.py)、[完整学习快照](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/learning/checkpoint.py)和[更新边界控制](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/learning/loop.py)。每轮先将完整采样预约写入有排他写锁的fsync哈希链，再执行采样与PPO；完整预约、实际提交/返回转移、PPO fresh、两个优化器的执行次数及端点使用分别记录。部分采样或更新失败后，原预约不退款；日志含pending、failed或与快照边界不一致时拒绝自动恢复。该机制处理正常持久化与中断，不承诺抵抗人工同时回滚日志和快照。
 
 快照包含单一actor与critic、两个Adam及参数组、完整全局RNG、课程阶段/累计预算/晋级记录、任务配额与采样RNG、地形RNG、请求去重及已消费ID、收集器累计计数和源/资产/初始模型绑定。加载先校验大小、SHA和完成标记，再以weights-only方式构建独立对象图核对张量、固定mask和优化器状态；不提前改变调用者的全局RNG。冷恢复中止未完成的物理技能、保留已消费ID，重新建立物理回合和原始历史，完成该准备后才显式恢复策略采样RNG。它不序列化接触现场、闭链求解器、执行器暂态或旧latent，也不宣称断电后的物理轨迹逐bit连续。
 
@@ -626,7 +626,7 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 用户已明确要求检查通过后直接启动正式PPO，并固定闭链位置12次、速度6次，不再等待这项设置的重复确认。连续课程、手动评价和既有训练预算保持不变。以下真实SDK结果覆盖前述各CPU检查阶段的“SDK为零”状态；它们不改写那些历史收据。
 
-Kaiser已实际创建headless AppLauncher、GPU SimulationContext与所选107°资产。首先修正了空global-path碰撞组回读：已安装cloner只创建各环境自身组，没有共享global_group。随后定位到PhysX加载`libcuda.so`失败，而WSL目录中该库与`libcuda.so.1`均可正常加载；[上游加载实现](https://github.com/NVIDIA-Omniverse/PhysX/blob/b97365c6ddb32fda8469bc788ec18024862b0368/ovphysx/ovruntime/source/omni.physx/plugins/OmniPhysX.cpp#L411)与实际日志一致。新的[私有互操作层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_interop.py)只在子进程环境补充显式驱动库目录，并在该进程内把SDK ProxyArray的原始Warp视图传给内核，保持内存、device与stream，不拷贝到CPU、不修改共享SDK或全局环境。原失败完整保留；SDK关闭曾把失败返回为0，实际结果同时以关闭前写入的结构化状态判断。
+Kaiser已实际创建headless AppLauncher、GPU SimulationContext与所选107°资产。首先修正了空global-path碰撞组回读：已安装cloner只创建各环境自身组，没有共享global_group。随后定位到PhysX加载`libcuda.so`失败，而WSL目录中该库与`libcuda.so.1`均可正常加载；[上游加载实现](https://github.com/NVIDIA-Omniverse/PhysX/blob/b97365c6ddb32fda8469bc788ec18024862b0368/ovphysx/ovruntime/source/omni.physx/plugins/OmniPhysX.cpp#L411)与实际日志一致。新的[私有互操作层](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/formal/runtime/interop.py)只在子进程环境补充显式驱动库目录，并在该进程内把SDK ProxyArray的原始Warp视图传给内核，保持内存、device与stream，不拷贝到CPU、不修改共享SDK或全局环境。原失败完整保留；SDK关闭曾把失败返回为0，实际结果同时以关闭前写入的结构化状态判断。
 
 真实物理回读还发现USD的base_link已含0.32m出生高度，Robot容器的初始化再次叠加高度会造成约0.64m出生位置。现已去掉重复容器平移，并在物理初始化前回读每个base_link的世界位置。[修正后的GPU执行](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-native-bootstrap-20261019T115513Z-02037a1a/scene-0009.json)回读出生位置为`(0,0,0.32)`、整机质量13.886kg、全部18个关节的具名armature/friction、显式执行器、零solver PD、每机器人六个排除在树外的球铰闭环。源码及互操作的[45项Kaiser检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-native-bootstrap-20261019T115513Z-02037a1a/validation-0004.json)，34、44、45项各轮有重叠，不相加为独立实验。
 

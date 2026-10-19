@@ -23,8 +23,8 @@
 - 训练与评估：上述目录下的 `extracted/study/run/jobs/`。
 - 冻结计划／配置：`extracted/study/run/plan.json`、`extracted/study/run/configs/`。
 - 源码、任务、资产和运行环境证据：`extracted/{source,task,runtime,collection,collection-tools}/`。
-- 可复核分析工具：[`tools/analyze_recovered_study.py`](../tools/analyze_recovered_study.py)。
-- 小型证据：[`evidence/training-recovery.json`](evidence/training-recovery.json) 保存验证结果、14 个 checkpoint SHA、全部失败和 28 个架构×场景汇总；[`evidence/training-recovery.csv`](evidence/training-recovery.csv) 保存 84 行训练 seed×场景原始统计派生值，使用 LF 换行。
+- 可复核分析工具：[`tools/analyze_recovered_study.py`](../../../tools/analyze_recovered_study.py)。
+- 小型证据：[`evidence/training-recovery.json`](../../evidence/training-recovery.json) 保存验证结果、14 个 checkpoint SHA、全部失败和 28 个架构×场景汇总；[`evidence/training-recovery.csv`](../../evidence/training-recovery.csv) 保存 84 行训练 seed×场景原始统计派生值，使用 LF 换行。
 
 | 时间／证据 | 含义 |
 |---|---|

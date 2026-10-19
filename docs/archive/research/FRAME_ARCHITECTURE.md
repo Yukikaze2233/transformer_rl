@@ -4,7 +4,7 @@
 
 策略将公共观测映射为六维动作均值。单帧 MLP 直接读取当前观测；历史 MLP 和 Transformer 先将最近的观测编码为隐变量，再与当前观测拼接进入动作头。当前帧直连保留即时状态和命令，历史分支提供动态上下文。Actor 与 Critic 使用独立参数，部署包含完整 Actor、外部历史缓存和动作映射。
 
-![三类 Actor 与独立 Critic](figures/frame-architecture/overview.png)
+![三类 Actor 与独立 Critic](../../figures/frame-architecture/overview.png)
 
 图 1：三类 Actor 的数据路径与层宽。紫色虚线框为部署 Actor，黄色虚线框为独立价值网络；历史 MLP 与 Transformer 均保留当前帧直连。
 
@@ -56,7 +56,7 @@ $$
 
 默认网络将 31 个观测帧分别映射到 128D，加入固定位置编码，再经过两层因果 Pre-LN Transformer。每层使用四头注意力，每头 32D；前馈网络为 128→512→128，激活为 GELU。末端 LayerNorm 后得到历史 token 序列，读出 128D 隐变量，与当前 35D 拼接为 163D，进入 256→128→6 的 ELU 动作头。
 
-![默认 Transformer 编码器与动作头](figures/frame-architecture/encoder.png)
+![默认 Transformer 编码器与动作头](../../figures/frame-architecture/encoder.png)
 
 图 2：默认 Transformer 的逐层尺寸与单层展开。注意力子层和前馈子层均先归一化再计算，并保留残差直连。
 
@@ -112,7 +112,7 @@ $$
 
 这里的 MHA 表示各头加权结果的拼接，W_o 是读出模块的唯一输出投影。Query 只汇聚截至当前时刻已经观测到的窗口。它将历史检索显式条件化于当前状态和命令，改变的是读出方式。
 
-![末帧、Query 与门控残差](figures/frame-architecture/variants.png)
+![末帧、Query 与门控残差](../../figures/frame-architecture/variants.png)
 
 图 3：三种 Transformer 结构变化。末帧与 Query 改变历史读出；门控残差改变编码层内部的特征融合。
 
@@ -158,7 +158,7 @@ $$
 
 完整策略由观测组装、历史缓存、编码器、动作头和动作映射组成。Transformer 的编码器与动作头作为一个 Actor 导出，调用层维护由旧到新的 31×35 历史。初始化或重置时重复首帧填满窗口，每个策略周期加入一帧；网络自身没有跨调用隐状态或可变 KV cache。
 
-![确定性 Actor 部署数据流](figures/frame-architecture/deployment.png)
+![确定性 Actor 部署数据流](../../figures/frame-architecture/deployment.png)
 
 图 4：观测到控制目标的部署数据流。当前帧直连与历史分支在动作头汇合，上一条 issued 动作回填到下一帧公共观测。
 

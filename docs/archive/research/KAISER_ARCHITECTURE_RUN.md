@@ -10,7 +10,7 @@
 
 初始观察约 7 分钟，首两项 last_token_attention 均已超过 100 updates，并各自保存通过
 schema-4 loader 校验的 checkpoint。机器可读收据见
-[architecture-run-start.json](evidence/architecture-run-start.json)。
+[architecture-run-start.json](../../evidence/architecture-run-start.json)。
 
 本次目标是固定任务与预算下比较 Transformer 形式，同时保留 MLP/GRU 对照。
 **16M 是学习曲线首档，不是收敛保证或架构赢家结论；统一优化配方不代表每种模型各自最优超参。**

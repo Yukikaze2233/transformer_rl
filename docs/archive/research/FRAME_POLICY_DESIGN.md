@@ -59,7 +59,7 @@ PPO保存未裁剪动作及其log-prob；执行层再将腿/轮限到±3/±9，�
 - 第200个actor更新后，相关高度采样路径从80%固定九档+20%连续变为50%固定+50%连续。通过固定分支抽到指定一档的概率由0.8/9变为0.5/9，下降37.5%；给定已进入固定分支，各档概率仍为1/9。这不是所有训练样本下降37.5%，时间相邻也不足以证明因果。
 - LR使用adaptive。200/240块末LR为8.779e-4，280为3.902e-4，320为2.601e-4；不能把初始1e-4当实际恒定值，也不能把块末值当期间峰值。
 
-读取时间、原始来源和SHA见相邻工作区的[只读审计报告](../../robot_rl/isaac_wheeled_rl_train/reports/transformer_retention_design_20260929/SUMMARY.md)。原始运行数据不纳入本仓库提交。
+读取时间、原始来源和SHA见相邻工作区的[只读审计报告](../../../../robot_rl/isaac_wheeled_rl_train/reports/transformer_retention_design_20260929/SUMMARY.md)。原始运行数据不纳入本仓库提交。
 
 当前已有旧技能复习配额、累计保护账本和有界回滚。评测门控能阻止退化策略晋级，却不能直接阻止每次梯度更新伤害旧能力。
 
@@ -265,4 +265,4 @@ C(L)=35\cdot96L+2(4L\cdot96^2+2L^2\cdot96+2L\cdot96\cdot192)
 
 能力保持通过累积场景验收、独立 teacher 锚点及学习状态回退组织。锚点使用独立随机种子，留出评测不参与梯度更新。回退恢复权重、优化器与随机数状态，但不返还消费预算；环境与历史重新初始化。最终选择要求跨训练 seed 的任务门限和实测延迟同时通过。
 
-完整命令、配置与接口见 [35D 训练、对比与部署](FRAME_TRAINING.md)。核心配置为 [frame_training.json](../configs/frame_training.json)，入口为 `python -m transformer_rl frame`。历史均为旧到新、reset 重复首帧，35D 特征不追加重复动作或时间字段。独立的默认 30D 时间编码观测仍由自己的合同管理。
+完整命令、配置与接口见 [35D 训练、对比与部署](FRAME_TRAINING.md)。核心配置为 [frame_training.json](../../../configs/frame_training.json)，入口为 `python -m transformer_rl frame`。历史均为旧到新、reset 重复首帧，35D 特征不追加重复动作或时间字段。独立的默认 30D 时间编码观测仍由自己的合同管理。

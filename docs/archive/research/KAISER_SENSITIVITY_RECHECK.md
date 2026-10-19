@@ -9,7 +9,7 @@
 - 新增训练 transitions：**8519680**；实际 optimizer steps：**2250/4160**；评估 transitions：**91200**。
 - A 补验1 train + 1 eval；B复验6 train + 6次h=.30 eval + 12次h=.28/.32 eval。
 - 本次没有新训练/评估错误，也未触发资源保护。所有本次 tmux/worker 已结束。
-- 主数据：[evidence/sensitivity-recheck.json](evidence/sensitivity-recheck.json)；长表：[evidence/sensitivity-recheck.csv](evidence/sensitivity-recheck.csv)，**LF，585条数据行**。
+- 主数据：[evidence/sensitivity-recheck.json](../../evidence/sensitivity-recheck.json)；长表：[evidence/sensitivity-recheck.csv](../../evidence/sensitivity-recheck.csv)，**LF，585条数据行**。
 
 这是 **新source补验与同seed复验**。旧 [KAISER_SENSITIVITY.md](KAISER_SENSITIVITY.md) 和 `sensitivity-summary.json/.csv` 保留原来的11项完成、2项失败事实；A新单项不与旧六项拼接成“旧A通过”，B新六项不混入旧source结果。同seed跨源码重复不增加独立训练seed数，B每配方仍只有3个seed。
 

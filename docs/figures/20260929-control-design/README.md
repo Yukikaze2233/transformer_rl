@@ -1,6 +1,6 @@
 # 35D网络设计图
 
-这些图对应2026-09-29的代码审阅快照，用于[网络架构](../../POLICY_ARCHITECTURE.md)及项目参数、时延记录。图示区分独立网络核心、PPO训练路径和研究机制；不表示新网络已经完成机器人训练。[通用网络比较](../../NETWORK_COMPARISON.md)使用另行维护的[通用配图](../policy-network-overview/README.md)，不沿用这里的项目参数和实测排名图。
+这些图对应2026-09-29的代码审阅快照，用于[网络架构](../../archive/research/POLICY_ARCHITECTURE.md)及项目参数、时延记录。图示区分独立网络核心、PPO训练路径和研究机制；不表示新网络已经完成机器人训练。[通用网络比较](../../archive/research/NETWORK_COMPARISON.md)使用另行维护的[通用配图](../policy-network-overview/README.md)，不沿用这里的项目参数和实测排名图。
 
 | 目录 | 内容 | 数据性质 |
 | --- | --- | --- |
@@ -34,4 +34,4 @@ Reward图使用NumPy和Matplotlib，运行：
 python reward/plot.py
 ```
 
-脚本只计算解析函数，验证零误差处成本为零，生成PNG和SVG，不启动训练或仿真。参数量、短测条件、Reward及课程的代码证据见上层两篇文档以及[结构与能力保持设计](../../FRAME_POLICY_DESIGN.md)。短测未保存逐调用原始时延样本，图中的P99不能当作最坏时延保证。
+脚本只计算解析函数，验证零误差处成本为零，生成PNG和SVG，不启动训练或仿真。参数量、短测条件、Reward及课程的代码证据见上层两篇文档以及[结构与能力保持设计](../../archive/research/FRAME_POLICY_DESIGN.md)。短测未保存逐调用原始时延样本，图中的P99不能当作最坏时延保证。

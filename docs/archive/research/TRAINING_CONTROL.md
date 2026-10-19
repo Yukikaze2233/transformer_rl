@@ -126,5 +126,5 @@ STUDY/control/attempts/GENERATION/STAGE/jobs/VARIANT/seed_SEED/...
   该测试只运行标准库睡眠进程，未启动神经网络、仿真或CUDA。
 - 实际study的`status/check/pause`及SSH终端菜单已验证；真实任务为`stopped / active=false`。
 
-收据：[training-control-deployment.json](evidence/training-control-deployment.json)、
-[estimator-study-stop.json](evidence/estimator-study-stop.json)。
+收据：[training-control-deployment.json](../../evidence/training-control-deployment.json)、
+[estimator-study-stop.json](../../evidence/estimator-study-stop.json)。

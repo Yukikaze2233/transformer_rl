@@ -7,8 +7,8 @@
 456 次实际 optimizer.step、1966080 个训练 transitions。每项独立评估 8 env × 300 steps，
 合计 14400 个评估 transitions。仅一个 training seed=11、evaluation seed=101。
 
-精简可提交报告：[pilot-summary.json](evidence/pilot-summary.json)、
-[pilot-summary.csv](evidence/pilot-summary.csv)。模型、原始日志和 checkpoint 留在 Kaiser。
+精简可提交报告：[pilot-summary.json](../../evidence/pilot-summary.json)、
+[pilot-summary.csv](../../evidence/pilot-summary.csv)。模型、原始日志和 checkpoint 留在 Kaiser。
 JSON 包含冻结 spec/base config、六模型参数配置/参数量、checkpoint SHA、环境 identity、
 所有物理指标的 mean/RMS/min/max/count，以及两次并发配置尝试的审计信息。
 

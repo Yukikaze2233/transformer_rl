@@ -12,7 +12,7 @@ $$
 
 构成为：命令4维＋机体角速度3维＋投影重力3维＋六轴相对角度6维＋六轴速度6维＋上一动作6维＋请求上下文7维。两个轮位置槽为0；缩放和轴顺序由35D观测合同确定。
 
-![网络架构总览](figures/20260929-control-design/network/diagram.png)
+![网络架构总览](../../figures/20260929-control-design/network/diagram.png)
 
 *图1｜网络架构总览。上半部分为部署Actor，下半部分为训练期Critic与参数更新；所有维度对应当前35D方案。*
 
@@ -47,7 +47,7 @@ $$
 | 融合 | 拼接当前35维与历史96维 | [B,131] |
 | 动作头 | Linear128＋ELU → Linear64＋ELU → Linear6 | [B,6] |
 
-![历史编码器展开](figures/20260929-control-design/encoder/diagram.png)
+![历史编码器展开](../../figures/20260929-control-design/encoder/diagram.png)
 
 *图2｜历史编码器展开。每层先归一化再计算注意力/FFN，最后token读取全部过去帧。*
 
@@ -93,7 +93,7 @@ $$
 
 PPO策略损失通过动作均值回传到Actor动作头与历史编码器；价值损失更新独立Critic。Critic通过优势估计影响策略学习，但不是将81维特权向量拼进Actor输入。部署时只需Actor推理及完整观测/执行链。
 
-![Rollout 与 PPO 训练流程](figures/20260929-control-design/training/diagram.png)
+![Rollout 与 PPO 训练流程](../../figures/20260929-control-design/training/diagram.png)
 
 图3｜rollout采样与PPO更新交替进行。图中的仿真器产生转移和reward，策略梯度由log-prob、优势与PPO目标计算；本方案不采用参考截图中的可微仿真预训练。
 
@@ -189,7 +189,7 @@ $$
 
 广域项让大误差仍有区分；局部精核在小误差范围增加分辨率。D在零误差为0，是相对峰值的负成本；理想跟踪峰值另按任务mask加入。它的解析斜率不是PPO对参数的梯度，两者在零误差处导数也为0。
 
-![高度通道奖励密度切片](figures/20260929-control-design/reward/diagram.png)
+![高度通道奖励密度切片](../../figures/20260929-control-design/reward/diagram.png)
 
 *图4｜高度通道 $D(e)$ 的广域成本、局部精核与总成本切片；曲线的解析斜率不是 PPO 对策略参数的梯度。*
 
@@ -253,7 +253,7 @@ $$
 
 ## 附录 B 课程与能力保持
 
-![S1–S6 课程与能力保持闭环](figures/20260929-control-design/curriculum/diagram.png)
+![S1–S6 课程与能力保持闭环](../../figures/20260929-control-design/curriculum/diagram.png)
 
 图5｜阶段预算是上限，不是已完成进度。每阶段通过即可提前结束；未通过不跳阶段。每次rollout含480,000条转移，8500更新上限对应40.8亿转移，包含critic-only更新消费。
 
