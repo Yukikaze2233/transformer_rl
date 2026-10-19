@@ -127,7 +127,7 @@ class PhysicalRewardComposer:
     """
 
     def __init__(self, binding: MechanicalBinding, num_envs, tuning: RewardTuning,
-                 *, device='cpu', physics_dt_s=.005, retired_request_ids=None):
+                 *, device='cpu', physics_dt_s=.005, retired_request_ids=None, robot_mass_kg_by_environment=None):
         if (not isinstance(binding, MechanicalBinding) or not isinstance(tuning, RewardTuning)
                 or type(num_envs) is not int or num_envs < 1 or physics_dt_s not in (.005, .001)):
             raise ValueError('reward producer needs named mechanics, mass/discount and the selected physics rate')
@@ -154,12 +154,24 @@ class PhysicalRewardComposer:
                 raise ValueError('retired request IDs cannot be below the explicit-1 sentinel')
             self._success_seen.copy_(retired_request_ids)
         self._window = None
+        self._mass_kg = torch.full((num_envs,), tuning.robot_mass_kg, device=self.device, dtype=torch.float32)
+        if robot_mass_kg_by_environment is not None:
+            self.update_native_mass(robot_mass_kg_by_environment)
 
     def _tensor(self, name, value, width=None, dtype=torch.float32):
         shape = (self.num_envs,) if width is None else (self.num_envs, width)
         if (not isinstance(value, torch.Tensor) or value.shape != shape or value.dtype != dtype
                 or value.device != self.device):
             raise ValueError(name + ' differs from the named reward batch/device/dtype')
+
+    @torch.no_grad()
+    def update_native_mass(self, mass_kg):
+        if self._window is not None:
+            raise RuntimeError('mass readback cannot change an open physical reward interval')
+        self._tensor('native total mass', mass_kg)
+        if (~torch.isfinite(mass_kg) | (mass_kg <= 0)).any():
+            raise ValueError('native per-environment mass must be finite and positive')
+        self._mass_kg = mass_kg.detach().clone()
 
     @torch.no_grad()
     def reset(self, mask, now_s, episode_id, control_epoch):
@@ -290,7 +302,7 @@ class PhysicalRewardComposer:
         wheel_load = sample.body_normal_load_n[:, self._wheels]
         slip = wheel_load > 5
         landing = jump & ((phase == int(RewardPhase.LANDING)) | (phase == int(RewardPhase.SETTLING)))
-        weight_n = self.tuning.robot_mass_kg * self.tuning.gravity_m_s2
+        weight_n = self._mass_kg * self.tuning.gravity_m_s2
         excess_landing = (wheel_load.sum(-1) / weight_n - self.tuning.landing_load_multiple).clamp_min(0)
         cost = {'forward': (~recovery) * h(ev / .5), 'yaw': (~recovery) * h(ew),
                 'height': 2 * height_gate * h(eh / .04),

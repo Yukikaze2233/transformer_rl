@@ -151,7 +151,7 @@ class NativeObservationBridge:
         position = poses[..., :3] + rotated
         if not torch.isfinite(position).all():
             raise ValueError('native body COM position overflowed its physical tensor range')
-        result = RigidBodyMotion(position.detach().clone(), velocity[..., :3].detach().clone(),
+        result = RigidBodyMotion(poses.detach().clone(), position.detach().clone(), velocity[..., :3].detach().clone(),
                                   velocity[..., 3:].detach().clone(), timestamp, self.binding.native_body_names, tick, epoch)
         self.before_state_read()
         if self.model_epoch != epoch or self.physical_tick != tick:

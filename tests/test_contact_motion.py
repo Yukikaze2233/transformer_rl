@@ -23,7 +23,9 @@ def fixture():
         view.get_contact_data = lambda *, dt, view=view: (view.force, view.points, view.normals, None,
                                                           view.counts, view.starts)
     shape = (contacts.num_envs, 19, 3)
-    motion = RigidBodyMotion(torch.zeros(shape), torch.zeros(shape), torch.zeros(shape),
+    poses = torch.zeros(contacts.num_envs, 19, 7)
+    poses[:, :, 6] = 1
+    motion = RigidBodyMotion(poses, torch.zeros(shape), torch.zeros(shape), torch.zeros(shape),
                               torch.full((contacts.num_envs,), .005, dtype=torch.float64),
                               binding.native_body_names, 1, 1)
     return binding, contacts, views, motion

@@ -16,7 +16,7 @@ from ._native_observation import SurfaceSample
 from ._native_scene import NativeSceneState
 from ._output_actuation import DriveInterval, EffectiveDriveResponse, FeedbackEffort, OutputFeedbackController
 from ._passive_pressure import NativeSliderPressure, PressureState
-from ._physical_observation import MeasuredState, WheelContactHistory
+from ._physical_observation import MeasuredState, RigidBodyMotion, WheelContactHistory
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,7 @@ class PhysicalTick:
     measured: MeasuredState
     contact_labels_valid: torch.Tensor
     physical_tick: int
+    body_motion: RigidBodyMotion
 
 
 class NativePhysicsPlant:
@@ -68,6 +69,7 @@ class NativePhysicsPlant:
         self.num_envs, self.device, self.dt = bridge.num_envs, bridge.device, bridge.physics_dt_s
         self._convert, self._ground = native_to_tensor, ground_query
         self._view, self._faulted, self.targets = scene.robot.root_view, False, None
+        self._last_tick_packet = None
         self.contact_history = WheelContactHistory(self.num_envs, self.device, physics_dt_s=self.dt)
         self._springs = [bridge.binding.native_joint_names.index(name) for name in pressure.parameters.joint_names]
         self._active = list(bridge.binding.policy_joint_indices)
@@ -153,8 +155,10 @@ class NativePhysicsPlant:
             self._faulted = True
             bridge.invalidate_state()
             raise
-        return PhysicalTick(feedback, drive, pressure, submitted, explicit, contacts, measured,
-                             valid, bridge.physical_tick)
+        result = PhysicalTick(feedback, drive, pressure, submitted, explicit, contacts, measured,
+                                valid, bridge.physical_tick, motion)
+        self._last_tick_packet = result
+        return result
 
     @torch.no_grad()
     def reset(self, mask, root_pose_xyzw, root_com_velocity, joint_position, joint_velocity):

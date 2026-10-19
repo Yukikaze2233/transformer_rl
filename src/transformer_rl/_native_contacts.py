@@ -87,6 +87,7 @@ class NativeTerrainContacts:
             raise ValueError('terrain filters must belong to their corresponding environment')
         self.binding, self.num_envs, self.device = binding, len(env_paths), torch.device(device)
         self._convert = native_to_tensor
+        self.physics_view = physics_view
         self.terrain_motion_reference = terrain_motion_reference
         self.groups = []
         for size in sorted({len(paths) for paths in terrain_paths_by_env}):
@@ -170,6 +171,11 @@ class NativeTerrainContacts:
             if (not isinstance(value, torch.Tensor) or value.shape != (self.num_envs, 19, 3)
                     or value.device != self.device or value.dtype != torch.float32 or not torch.isfinite(value).all()):
                 raise ValueError('contact body motion needs finite world-SI tensors in native body order')
+        poses = motion.link_pose_world_xyzw
+        if (not isinstance(poses, torch.Tensor) or poses.shape != (self.num_envs, 19, 7)
+                or poses.dtype != torch.float32 or poses.device != self.device or not torch.isfinite(poses).all()
+                or (poses[:, :, 3:].norm(dim=-1) - 1).abs().gt(1e-4).any()):
+            raise ValueError('contact body motion requires its complete finite normalized link poses')
         if (not isinstance(motion.timestamp_s, torch.Tensor) or motion.timestamp_s.shape != timestamp_s.shape
                 or motion.timestamp_s.dtype != torch.float64 or motion.timestamp_s.device != self.device
                 or not torch.equal(motion.timestamp_s, timestamp_s)

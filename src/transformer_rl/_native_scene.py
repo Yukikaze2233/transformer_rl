@@ -75,6 +75,7 @@ class NativeSceneRecipe:
                     or hashlib.sha256(path.read_bytes()).hexdigest() != sha):
                 raise ValueError('selected asset dependency escaped or changed: ' + name)
         self.manifest = manifest
+        self.manifest_sha256 = manifest_sha256
         self.initial_root_position_m = (0., 0., float(manifest['nominal_base_height_m']))
         self.model_spec = json.loads((self.asset / 'model_spec.json').read_text())
         self.response = response
@@ -269,6 +270,9 @@ class NativeSceneRecipe:
             raise RuntimeError('native complete body mass differs from the selected asset')
         readback.update(native_mass_sum_verified=True, six_excluded_point_loops_per_robot=True,
                         collision_groups_verified=len(env_paths), native_clone_order_resolved=True,
+                        selected_asset_manifest_sha256=self.manifest_sha256,
+                        selected_model_spec_sha256=self.manifest['files_sha256']['model_spec.json'],
+                        nominal_source_mass_kg=self.manifest['total_mass_kg'],
                         physics_qualified=False)
         readback.update(self._static_terrain_readback(stage, terrain_paths, UsdPhysics.RigidBodyAPI))
         contacts = NativeTerrainContacts(PhysxManager.get_physics_sim_view(), bridge.binding, native_envs,

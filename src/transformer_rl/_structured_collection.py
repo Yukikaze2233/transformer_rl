@@ -97,6 +97,11 @@ class StructuredCollector:
     def __init__(self, env, model, config=StructuredCollectionConfig()):
         if type(env.num_envs) is not int or env.num_envs < 1:
             raise ValueError('environment requires a positive row count')
+        validator = getattr(env, 'validate_collection_config', None)
+        if validator is not None:
+            if not callable(validator):
+                raise ValueError('environment collection-contract validator must be callable')
+            validator(config)
         self.env, self.model, self.config = env, model, config
         self.num_envs, self.device = env.num_envs, torch.device(env.device)
         self.history_length = model.actor.policy.history_length

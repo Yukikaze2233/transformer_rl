@@ -294,6 +294,22 @@ episode固定的物理量不逐tick跳变。载荷突变、单侧衰减、接地
 
 运动学只展开两轮实际sensor/filter片段范围，没有对最大预分配buffer再构建一份全体owner前缀，也不把每body平均容量64误当单pair上限；有效单pair70片段已作定向检查。动态索引、有限性与归约同步仍有成本，实际GPU与整轮耗时尚未测量，不据代码路径或CPU检查声称加速比。actor轮角槽、轮速度目标及网络参数量保持原样。
 
+### 膝内夹角、目标投影与原生奖励模型绑定
+
+私有[关节边界生产器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_joint_boundaries.py)从所选manifest和model_spec原始字节绑定源SHA、实际native关节/body次序与几何定义。每侧由具名髋输出找到上连杆、被动膝和下连杆轮铰点；将髋销至膝销、轮销至膝销两向量投影到真实铰轴法平面，用atan2求内夹角。它使用当帧完整body link姿态，不以电机角差、轮角或单个原生关节坐标冒充几何内角。原生被动关节的有符号限位距离另行保留，几何角不因它显示“安全”而被覆盖；膝销与下连杆原点的残差也保留。
+
+源码native stop的两端必须重新得到manifest规定的40°和107°，并覆盖相同角度跨度，不能只凭命名认定镜像方向。接近边界的惩罚短缺量为`max(0,0.05rad−signed_clearance)`；0.05rad约2.86°，为本候选明确的保护带设计值，仍须物理验收。超界保留负clearance和相应更大短缺量，不夹回合法范围。其后四槽为四个根输出的原始位置目标相对实际准入目标的修正距离；先去除同侧共同整圈，再比较，不分别解缠掩盖差动修正。奖励的六槽次序固定为“两被动膝几何短缺、四输出目标准入修正”，轮子不增加角位置目标。
+
+所选107°源文件已在Kaiser用完整树FK复核，显式采用manifest的0.32m名义root高度：左右名义内角均约67.85497°，距最近40°边界约0.486161rad；镜像native限位端点分别重现40°、107°。这些是源码几何结果，并非原生机器人测量，也不推翻此前双轮名义支撑高度差1.995mm未通过1mm准备门槛的false记录。输出pair投影是否启用单独报告；本次几何检查使用明确的无投影probe，不授予107°全可达输出域、闭链或硬件资格。
+
+私有[原生奖励桥](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_reward.py)绑定同一个plant、scene、控制器、physics view和所选资产源SHA。它在完整策略边界按model epoch读取全部19个原生body质量、完整DOF limits及原生physics view重力，核对两被动膝的真实限位与选定源一致，并核对配置重力和实际重力都采用世界负Z。参数getter的缓冲立即独立复制，不能让后续getter复用覆盖质量。原生质量和参数读取路径已经实现，但实际SDK尚未启动；目前“调用getter”的通过证据来自合成view。
+
+落地冲击归一化使用每环境实际原生总质量向量，支持不同环境质量，不使用fixture的20kg或一份名义质量覆盖全部环境。manifest名义总质量13.886kg仅作为源绑定元数据；真实回读和允许随机化范围须由场景/课程另外验收。机械改写必须先使观测模型失效，最终刷新后取得新epoch，再在关闭的reward区间显式刷新模型快照；任一步失败使快照不可用，不能沿用旧质量继续学习。打开的区间不允许换质量，刷新也不清issued动作历史、累计预算或已消费ID。
+
+reward的gamma和policy dt直接来自同一份`StructuredCollectionConfig`，并核对action bounds与实际输出控制器一致。新native环境须暴露奖励桥的collection校验hook，私有collector在访问模型、采样前调用它，拒绝折扣或完整采样合同不一致。构造原生奖励桥必须显式提供当前/冷恢复的protocol已消费ID；fresh也需传明确的−1向量，不能遗漏去重历史。真原生重力值供当前reward使用，未来跳跃参考须消费同源值，不另写一份近似g。
+
+每个`PhysicalTick`独立携带同帧完整body姿态与运动包；奖励桥只消费plant刚刚实际发布的那个对象，核对tick、model epoch、接触、反馈、目标、episode/control和当前完整区间时钟。然后从具名测量及真实显式力矩、接触滑移和几何余量构造`RewardPhysics`，无需调用者填零。脚本段仍保留物理记录而学习信用为零。该桥没有创建SDK、完整课程环境或正式训练任务，原生碰撞、可达域、闭链、输出投影资格及完整环境恢复仍独立待验收。
+
 ### 可见时钟参考与独立物理收据
 
 私有[跳跃参考](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_jump_reference.py)仅依赖接受时锁存的可见支撑高度h0、请求增高J和命令时钟，另加恒定的奖励端世界地面锚点；当前真实高度、真正起跳时刻和未来物理状态不反馈进该时钟。该曲线定义任务目标，不输出关节动作，也不替代单一actor。完整环境接线必须在jump模式保持同一份锁存高度同时供actor和参考使用，不能让actor看到另一个持续变化的高度命令。机体和腿的动作仍由同一policy生成。
@@ -469,7 +485,9 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 原生接触运动路径在Kaiser通过[55项接触与运动学合成检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-contact-kinematics-20261019T050136Z-45b63811/validation-0001.json)，另通过[83项native观测、执行、回合、地面、奖励和场景回归](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-contact-kinematics-20261019T050136Z-45b63811/validation-0002.json)。将运动计算改成仅展开实际轮片段后，再通过[51项定向检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-contact-kinematics-20261019T050136Z-45b63811/validation-0003.json)，含新增单pair70片段不截断、纯滚动/空转/反向平移、多片段抵消、斜面法向、世界平移、非根COM修改、缺失接触点和fault不重放。分组有重叠，不累加为独立物理实验。[安装源码核对](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-contact-kinematics-20261019T050136Z-45b63811/native-contact-api.json)确认uint32与六缓冲，[本体数据核对](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-contact-kinematics-20261019T050136Z-45b63811/native-contact-source.json)确认COM世界速度接口，并重新pin了所选107°URDF和model_spec；未启动SDK、创建native机器人或执行正式PPO。真实contact patch的world参考系、native cook及实物滑移仍须在准入后的真实场景验收。
 
-正式PPO仍未启动。下一步须在资源准入后实际执行107°场景构建与native接触/执行器回读，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域、真实碰撞间隙与几何关节余量生产器、当前接触点滑移路径的真实SDK验收、辨识参数及通信整链回放、新候选周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停闭环不能替代新候选在真实环境中的联合恢复验收。
+几何边界和奖励源绑定先在Kaiser通过[35项合成检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-leg-reward-20261019T052828Z-8f8bcb45/validation-0001.json)，增加运行中源身份校验后通过[146项整体回归](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-leg-reward-20261019T052828Z-8f8bcb45/validation-0002.json)。真实资产角度探针随后显式采用source root高度，[单项几何复核通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-leg-reward-20261019T052828Z-8f8bcb45/validation-0003.json)；首版探针的公共世界平移不影响角度，原记录和澄清说明保留，没有把它当出生验收。最终加入显式冷恢复ID及动作边界构造检查后，[21项奖励桥定向检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-leg-reward-20261019T052828Z-8f8bcb45/validation-0004.json)。分组有重叠，不相加为独立实验或宣称146项是最后一个单次运行。检查覆盖三维姿态/原生body次序、超限、几何与关节坐标不一致、共同解缠、逐环境质量、参数缓冲复用、错误限位/重力/源身份、模型epoch失效、重复物理包、折扣及脚本归属；SDK上下文、机器人仿真步和正式PPO仍为零。
+
+正式PPO仍未启动。下一步须在资源准入后实际执行107°场景构建与native接触/执行器回读，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域、真实整轮碰撞间隙生产器、当前滑移/几何余量/质量重力路径的真实SDK验收、辨识参数及通信整链回放、新候选周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停闭环不能替代新候选在真实环境中的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 

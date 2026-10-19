@@ -79,6 +79,7 @@ class NativePhysicalSample:
 class RigidBodyMotion:
     """Owned world-SI COM motion in actual native body order, not actor data."""
 
+    link_pose_world_xyzw: torch.Tensor
     com_position_world_m: torch.Tensor
     com_velocity_world_m_s: torch.Tensor
     angular_velocity_world_rad_s: torch.Tensor
