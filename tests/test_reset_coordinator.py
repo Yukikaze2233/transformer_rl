@@ -61,6 +61,7 @@ def apply(life, plan, mask=None):
     mask = torch.ones(2, dtype=torch.bool) if mask is None else mask
     life.episode_id += mask.long()
     life._course_sha256, life._last = plan.course_sha256, object()
+    life._courses = plan.source_courses
     life._last_reset_tick[mask] = life.plant.scene.observation.physical_tick
 
 

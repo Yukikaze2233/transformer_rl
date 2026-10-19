@@ -157,6 +157,7 @@ class NativeTaskEnvironment:
         self.num_envs, self.device = lifecycle.num_envs, lifecycle.device
         self.reset_source, self.sensor_source = reset_source, sensor_source
         self.trace_sink = trace_sink
+        self.terrain_stream = None
         self.preparation_action = preparation_action.detach().clone()
         self.conditions = NativeTaskConditions(lifecycle.plant, limits)
         self._scene, self._view = lifecycle.plant.scene, lifecycle.plant.scene.robot.root_view
@@ -237,6 +238,8 @@ class NativeTaskEnvironment:
         self.lifecycle._actions(issued_action)
         if self._current is None or self._in_step:
             raise RuntimeError('native task step needs its initialized published observation')
+        if self.terrain_stream is not None:
+            self.terrain_stream()
         life, plant, composer = self.lifecycle, self.lifecycle.plant, self.rewards.composer
         bridge = plant.scene.observation
         inputs = self._pending_requests or RequestInputs.empty(self.num_envs, self.device)

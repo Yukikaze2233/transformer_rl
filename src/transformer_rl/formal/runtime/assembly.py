@@ -24,6 +24,7 @@ from ..simulation.reward import NativeRewardBridge
 from ..simulation.task import NativeTaskEnvironment, NativeTaskLimits
 from ..simulation.dynamics import StartupDynamicsConfig
 from ..simulation.terrain import NativeTerrainEditor, NativeTerrainInstaller, TerrainEditTuning
+from ..simulation.terrain_stream import NativeTerrainStream
 from ..control.actuation import EffectiveDriveResponse, OutputFeedbackController, PairTargetDomain, ResponseParameters
 from ..control.pressure import NativeSliderPressure, PressureParameters
 from ..control.sensors import SensorModel, SensorModelConfig
@@ -135,5 +136,6 @@ class NativeTaskRuntime:
         editor = NativeTerrainEditor.on_admitted_context(sim, scene, tuning.terrain_edit)
         installer = NativeTerrainInstaller(env, source, editor)
         source.bind_native_installer(installer)
+        env.terrain_stream = NativeTerrainStream(installer, collision)
         components.task_source = source
         return cls(env, source, installer)

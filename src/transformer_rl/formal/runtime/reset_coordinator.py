@@ -8,7 +8,7 @@ introduced by this cache.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 
 import torch
 
@@ -170,6 +170,9 @@ class ResetBatchCoordinator:
         controller = self._subcontroller(len(rows))
         draw = self.preparer.tasks.sample(len(rows), stage)
         previous = self._issued.plan if self._issued is not None else None
+        if previous is not None:
+            # 活跃粗糙块可在同一课程中移动；未reset行保留当前真实驻留块。
+            previous = replace(previous, source_courses=life._courses)
         self._sequence += 1
         args = (self._sequence, reset_mask.detach().clone(), next_episode_id.detach().clone(),
                 requested_at_s.detach().clone(), stage, draw)

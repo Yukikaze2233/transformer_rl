@@ -261,7 +261,7 @@ class NativeTerrainEditor:
                                                    else first[k] == last[k] for k in first)
 
     @torch.no_grad()
-    def replace_courses(self, ground, courses, reset_mask):
+    def replace_courses(self, ground, courses, reset_mask, *, protected_xy_m=None):
         started = time.monotonic()
         scene = self.scene
         bridge, contacts = scene.observation, scene.contacts
@@ -287,6 +287,35 @@ class NativeTerrainEditor:
                 or self.simulation.get_attached_stage() != self._stage_id()):
             raise RuntimeError('terrain edit needs a complete published step and the same attached stage')
         before, baseline = self._native_state(), self._statistics()
+        streaming = protected_xy_m is not None
+        retained = {}
+        if streaming:
+            if (not isinstance(protected_xy_m, torch.Tensor) or protected_xy_m.shape != (bridge.num_envs, 2, 2)
+                    or not torch.isfinite(protected_xy_m).all()
+                    or (protected_xy_m[:, :, 0] >= protected_xy_m[:, :, 1]).any()):
+                raise ValueError('live tiles require complete finite protected local XY bounds')
+            bounds = protected_xy_m.detach().cpu().tolist()
+            for row in changed:
+                old, new = ground.courses[row], courses[row]
+                if (old.rough_source is None or new.rough_source is not old.rough_source
+                        or old.sha256 != new.sha256):
+                    raise ValueError('live streaming cannot replace a task or its complete terrain source')
+                required = set(old.rough_source.tile_keys(bounds[row][0], bounds[row][1], cells=8, halo=0))
+                xy = before['get_link_transforms'][row, :, :2] - scene.environment_origins_m[row, :2]
+                limits = xy.new_tensor(bounds[row])
+                if ((xy < limits[:, 0]).any() or (xy > limits[:, 1]).any()):
+                    raise ValueError('protected streaming region omits an actual native body origin')
+                shared = set(old.resident_tiles) & set(new.resident_tiles)
+                if not required <= shared:
+                    raise ValueError('live terrain must retain every protected body-footprint collider')
+                old_mesh = dict(zip(old.resident_tiles, scene.terrain_meshes[row]))
+                paths = dict(zip(old.resident_tiles, contacts.terrain_paths_by_environment[row]))
+                retained[row] = {}
+                for key, mesh in zip(new.resident_tiles, new.surface.meshes):
+                    if key in shared:
+                        if mesh is not old_mesh[key]:
+                            raise ValueError('retained live tiles must keep their original exact source mesh')
+                        retained[row][key] = paths[key]
         if baseline['total_scheduled_tasks'] != baseline['total_finished_tasks']:
             raise RuntimeError('previous cooking tasks are still pending before this owned edit')
         epoch = scene.readback.get('terrain_epoch', 0)
@@ -295,6 +324,8 @@ class NativeTerrainEditor:
                 or any(type(row) is not int or not 0 <= row < bridge.num_envs for row in pending)):
             raise ValueError('native terrain epoch is invalid')
         new_paths = [tuple(v) for v in contacts.terrain_paths_by_environment]
+        added = {row: [] for row in changed}
+        removed = {row: [] for row in changed}
         for row in changed:
             env = scene.environment_paths[row]
             if self.access.exists(env + '/Terrain/generation_' + str(epoch + 1)):
@@ -314,22 +345,33 @@ class NativeTerrainEditor:
         try:
             for row in changed:
                 root = scene.environment_paths[row] + '/Terrain/generation_' + str(epoch + 1)
-                paths = tuple(self.access.author(root + '/surface_' + str(i), mesh)
-                               for i, mesh in enumerate(courses[row].surface.meshes))
-                for path, mesh in zip(paths, courses[row].surface.meshes):
-                    self.access.verify(path, mesh, enabled=False, tolerance=self.tuning.vertex_encoding_tolerance_m)
-                new_paths[row] = paths
+                paths = []
+                for i, mesh in enumerate(courses[row].surface.meshes):
+                    key = courses[row].resident_tiles[i] if streaming else None
+                    path = retained.get(row, {}).get(key)
+                    if path is None:
+                        path = self.access.author(root + '/surface_' + str(i), mesh)
+                        self.access.verify(path, mesh, enabled=False, tolerance=self.tuning.vertex_encoding_tolerance_m)
+                        added[row].append((path, mesh))
+                    paths.append(path)
+                new_paths[row] = tuple(paths)
+                removed[row] = [(path, mesh) for path, mesh in
+                    zip(contacts.terrain_paths_by_environment[row], scene.terrain_meshes[row]) if path not in paths]
             phase = 'switch_and_flush'
             for row in changed:
-                for path in contacts.terrain_paths_by_environment[row]:
+                for path, _ in removed[row]:
                     self.access.enabled(path, False)
-                for path in new_paths[row]:
+                for path, _ in added[row]:
                     self.access.enabled(path, True)
             cooked = self._flush(baseline)
             phase = 'verify_new_native_paths'
-            presence = self._probe(tuple(new_paths[row] for row in changed),
-                                   tuple(courses[row].surface.meshes for row in changed),
-                                   scene.environment_origins_m[list(changed)], required_present=True)
+            def probe(entries, present):
+                rows = [row for row in changed if entries[row]]
+                return (self._probe(tuple(tuple(p for p, _ in entries[row]) for row in rows),
+                    tuple(tuple(m for _, m in entries[row]) for row in rows),
+                    scene.environment_origins_m[rows], required_present=present) if rows else
+                    {'colliders_queried': 0, 'required_present': present})
+            presence = probe(added, True)
             if events[0] or not self._same_state(before, self._native_state()):
                 raise RuntimeError('native editing advanced physics or changed visible dynamic/model state')
             phase = 'create_contact_views'
@@ -337,13 +379,11 @@ class NativeTerrainEditor:
                                            tuple(new_paths), native_to_tensor=self._convert, device=bridge.device,
                                            patches_per_body=contacts.patches_per_body,
                                            terrain_motion_reference='authored_static_own_terrain')
-            retired = tuple(path for row in changed for path in contacts.terrain_paths_by_environment[row])
+            retired = tuple(path for row in changed for path, _ in removed[row])
             phase = 'retire_previous_geometry'
             self.access.retire(retired)
             self._flush(baseline)
-            absence = self._probe(tuple(contacts.terrain_paths_by_environment[row] for row in changed),
-                                  tuple(scene.terrain_meshes[row] for row in changed),
-                                  scene.environment_origins_m[list(changed)], required_present=False)
+            absence = probe(removed, False)
             for row in changed:
                 for path, mesh in zip(new_paths[row], courses[row].surface.meshes):
                     self.access.verify(path, mesh, enabled=True, tolerance=self.tuning.vertex_encoding_tolerance_m)
@@ -353,7 +393,7 @@ class NativeTerrainEditor:
             readback = dict(scene.readback)
             readback.update(self.access.static_readback(tuple(new_paths)))
             readback.update(terrain_epoch=epoch + 1, terrain_binding_invalidated=False,
-                            terrain_reset_required_rows=tuple(sorted(set(pending) | set(changed))),
+                            terrain_reset_required_rows=tuple(sorted(set(pending) | (set() if streaming else set(changed)))),
                             live_terrain_edit_physically_qualified=False, physics_qualified=False)
             fresh = replace(scene, contacts=new_contacts, terrain_meshes=tuple(c.surface.meshes for c in courses),
                             readback=readback)
@@ -367,6 +407,7 @@ class NativeTerrainEditor:
                        'cooking_before': baseline, 'cooking_after': cooked, 'retired_paths': retired,
                        'new_paths': tuple(new_paths), 'editor_walltime_s': time.monotonic() - started,
                        'new_native_path_probe': presence, 'retired_native_path_probe': absence,
+                       'live_tile_stream': streaming, 'retained_collider_count': sum(map(len, retained.values())),
                        'physical_qualification': False}
             self.scene = fresh
             return TerrainEditResult(scene, fresh, ground, new_ground, changed, receipt)
@@ -440,24 +481,29 @@ class NativeTerrainInstaller:
             raise RuntimeError('terrain owner graph changed before installation')
         try:
             result = self.editor.replace_courses(ground, plan.source_courses, reset_mask)
-            self.last_result = result
-            if not result.changed_rows:
-                return
-            fresh = result.scene
-            if (result.old_scene is not old or result.old_ground is not ground or self.editor.scene is not fresh
-                    or fresh.robot is not old.robot or fresh.observation is not old.observation
-                    or fresh.efforts is not old.efforts or fresh.contacts.physics_view is not old.contacts.physics_view
-                    or fresh.environment_paths != old.environment_paths or fresh.clone_indices != old.clone_indices
-                    or not torch.equal(fresh.environment_origins_m, old.environment_origins_m)):
-                raise RuntimeError('new terrain result changed a mechanical owner, clock or clone binding')
-            plant.scene, plant._ground = fresh, result.ground
-            life.ground, life._scene, life._meshes = result.ground, fresh, fresh.terrain_meshes
-            life._courses, life._course_sha256 = result.ground.courses, tuple(plan.course_sha256)
-            env.rewards._scene, env.rewards._physics_view = fresh, fresh.contacts.physics_view
-            env._scene, owner._scene = fresh, fresh
-            env._identity()
-            env.rewards._identity()
-            owner._identity()
+            self.adopt(result)
         except BaseException:
             env._faulted = life._faulted = plant._faulted = True
             raise
+
+    def adopt(self, result):
+        """原生编辑后的同一对象图交接；不reset物理、历史或课程计数。"""
+        self.last_result = result
+        if not result.changed_rows:
+            return
+        env, life, owner = self.environment, self.lifecycle, self.coordinator
+        plant, fresh, old = life.plant, result.scene, life.plant.scene
+        if (result.old_scene is not old or result.old_ground is not life.ground or self.editor.scene is not fresh
+                or fresh.robot is not old.robot or fresh.observation is not old.observation
+                or fresh.efforts is not old.efforts or fresh.contacts.physics_view is not old.contacts.physics_view
+                or fresh.environment_paths != old.environment_paths or fresh.clone_indices != old.clone_indices
+                or not torch.equal(fresh.environment_origins_m, old.environment_origins_m)):
+            raise RuntimeError('new terrain result changed a mechanical owner, clock or clone binding')
+        plant.scene, plant._ground = fresh, result.ground
+        life.ground, life._scene, life._meshes = result.ground, fresh, fresh.terrain_meshes
+        life._courses, life._course_sha256 = result.ground.courses, tuple(c.sha256 for c in result.ground.courses)
+        env.rewards._scene, env.rewards._physics_view = fresh, fresh.contacts.physics_view
+        env._scene, owner._scene = fresh, fresh
+        env._identity()
+        env.rewards._identity()
+        owner._identity()

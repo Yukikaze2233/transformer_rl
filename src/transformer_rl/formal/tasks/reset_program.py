@@ -234,7 +234,11 @@ class TaskResetPreparer:
         extended = (draw.family == int(TaskFamily.REQUEST)) | (draw.family == int(TaskFamily.RECOVERY))
         horizon = torch.where(extended, t.extended_horizon_s, t.ordinary_horizon_s).double()
         speed = max(abs(v) for v in domain.forward_m_s)
-        extents = tuple(TerrainExtent.for_horizon(h, speed, t.terrain_margin_m) for h in horizon.tolist())
+        # 共用最长回合的完整几何域，避免30s/60s平地回合反复拆建同一地面。
+        # 各任务的实际时限仍由horizon保留，既不缩域也不增加训练转移预算。
+        extent = TerrainExtent.for_horizon(max(t.ordinary_horizon_s, t.extended_horizon_s),
+                                           speed, t.terrain_margin_m)
+        extents = (extent,) * n
         courses = self.terrain.from_draw(draw, extents)
         bounds = torch.tensor([[[-t.spawn_patch_half_xy_m[0], t.spawn_patch_half_xy_m[0]],
                                  [-t.spawn_patch_half_xy_m[1], t.spawn_patch_half_xy_m[1]]]],

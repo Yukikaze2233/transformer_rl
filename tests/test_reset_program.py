@@ -67,7 +67,7 @@ def test_six_families_keep_full_requested_draw_and_complete_courses_without_fail
     for f in fields(requested):
         assert torch.equal(getattr(value.draw, f.name), getattr(requested, f.name))
     assert value.commands.task_horizon_s.tolist() == [1., 1., 1., 1., 2., 2., 2.]
-    assert [c.request.extent.x_m for c in value.courses] == [(-7., 7.)] * 4 + [(-12., 12.)] * 3
+    assert [c.request.extent.x_m for c in value.courses] == [(-12., 12.)] * 7
     assert value.courses[3].request.kind == TerrainKind.ROUGH
     assert any(abs(z) > 0 for row in value.courses[3].surface.patches[0].z_m for z in row)
     assert value.commands.trajectory.end[3].tolist() == pytest.approx([0., 0., 0., .305])
