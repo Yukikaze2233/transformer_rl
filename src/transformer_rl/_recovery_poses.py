@@ -12,7 +12,7 @@ import math
 
 import torch
 
-from ._output_actuation import OutputFeedbackController
+from ._output_actuation import OutputFeedbackController, PreparationHold
 from ._reset_kinematics import AssetResetKinematics, PostureClosure, PostureContinuation
 
 
@@ -65,6 +65,7 @@ class RecoveryCandidates:
     decoded_hold_error_rad: torch.Tensor
     pair_projected: torch.Tensor
     posture_path: PostureContinuation
+    preparation_hold: PreparationHold
     tuning: RecoveryTuning
     physical_qualification: bool = False
 
@@ -153,6 +154,8 @@ class RecoveryPoseCompiler:
         solution = path.closure
         held = controller.reset_hold_action(solution.policy_positions.float(),
                                              position_tolerance_rad=self.tuning.output_hold_tolerance_rad)
+        preparation = controller.preparation_hold(solution.policy_positions.float(),
+                                                   position_tolerance_rad=self.tuning.output_hold_tolerance_rad)
         release = (posture_id == 2) | (posture_id == 3)
         clearance = release.double() * self.tuning.release_clearance_m
         orientation = self.quaternion(angles[:, 0], angles[:, 1], yaw_rad)
@@ -167,4 +170,4 @@ class RecoveryPoseCompiler:
         return RecoveryCandidates(posture_id.detach().clone(), orientation,
                                     knee, forward, clearance, velocity, torch.zeros_like(velocity), solution,
                                     held.requested_action, held.admitted, held.target_error_rad, held.pair_projected,
-                                    path, self.tuning)
+                                    path, preparation, self.tuning)

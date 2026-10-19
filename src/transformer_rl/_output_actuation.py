@@ -6,11 +6,12 @@ or native loss is secretly added to an effort calculation.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import math
 
 import torch
 
+from ._control_sources import ControlSource, canonical_coaxial_displacement, validate_issued_control
 from ._structured_collection import ACTION_ORDER
 
 
@@ -75,13 +76,14 @@ class PairTargetDomain:
 
 @dataclass(frozen=True)
 class OutputTargets:
-    clipped_issued_action: torch.Tensor
+    issued_action: torch.Tensor
     raw_leg_position_rad: torch.Tensor
     admitted_leg_position_rad: torch.Tensor
     wheel_velocity_rad_s: torch.Tensor
     pair_projected: torch.Tensor
     common_turns: torch.Tensor
-    policy_issued_at_s: torch.Tensor
+    controller_issued_at_s: torch.Tensor
+    control_source: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -90,8 +92,9 @@ class FeedbackEffort:
     capped_effort: torch.Tensor
     effort_bounds: torch.Tensor
     saturated: torch.Tensor
-    policy_issued_at_s: torch.Tensor
+    controller_issued_at_s: torch.Tensor
     pd_computed_at_s: torch.Tensor
+    control_source: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -100,6 +103,17 @@ class ResetHoldAction:
     admitted: torch.Tensor
     target_error_rad: torch.Tensor
     pair_projected: torch.Tensor
+
+
+@dataclass(frozen=True)
+class PreparationHold:
+    requested_action: torch.Tensor
+    leg_position_rad: torch.Tensor
+    common_turns: torch.Tensor
+    admitted: torch.Tensor
+    target_error_rad: torch.Tensor
+    pair_admitted: torch.Tensor
+    position_tolerance_rad: float
 
 
 class OutputFeedbackController:
@@ -137,10 +151,10 @@ class OutputFeedbackController:
             raise ValueError(f'{name} requires a finite nonnegative float64 clock')
 
     @torch.no_grad()
-    def decode(self, issued_action, feedback_position_rad, policy_issued_at_s):
+    def decode(self, issued_action, feedback_position_rad, controller_issued_at_s):
         self._matrix('issued_action', issued_action, 6)
         self._matrix('feedback_position_rad', feedback_position_rad, 6)
-        self._clock('policy_issued_at_s', policy_issued_at_s)
+        self._clock('controller_issued_at_s', controller_issued_at_s)
         issued = issued_action.clamp(-self.action_bounds, self.action_bounds)
         desired = self.nominal[:4] + .25 * issued[:, :4]
         pairs, feedback = desired.double().unflatten(-1, (2, 2)), feedback_position_rad[:, :4].double().unflatten(-1, (2, 2))
@@ -167,7 +181,56 @@ class OutputFeedbackController:
         if not torch.isfinite(admitted).all():
             raise ValueError('position target winding overflowed its native representation')
         return OutputTargets(issued.clone(), desired.clone(), admitted.flatten(-2),
-                              issued[:, 4:] * 10, projected, turns.clone(), policy_issued_at_s.clone())
+                              issued[:, 4:] * 10, projected, turns.clone(), controller_issued_at_s.clone(),
+                              torch.full((self.num_envs,), int(ControlSource.POLICY), dtype=torch.long, device=self.device))
+
+    @torch.no_grad()
+    def preparation_hold(self, feedback_position_rad, *, position_tolerance_rad):
+        """Describe an exact script-owned hold without expanding policy targets.
+
+        Only a common pair winding is removed from the logged normalized
+        command. No independent wrapping,position clipping or pair projection
+        is allowed to turn a rejected physical pose into an admitted hold.
+        """
+        self._matrix('preparation output coordinates', feedback_position_rad, 6)
+        if (type(position_tolerance_rad) not in (int, float) or not math.isfinite(position_tolerance_rad)
+                or position_tolerance_rad <= 0):
+            raise ValueError('preparation hold needs an explicit finite target comparison tolerance')
+        q = feedback_position_rad[:, :4]
+        difference = (q.double() - self.nominal[:4].double()).unflatten(-1, (2, 2))
+        canonical_position, turns = canonical_coaxial_displacement(q, self.nominal[:4])
+        common = (difference[..., 1] - difference[..., 0]).abs().lt(math.pi).all(-1)
+        common &= turns.abs().lt(2**52).all(-1)
+        action = torch.zeros_like(feedback_position_rad)
+        action[:, :4] = (canonical_position/.25).float()
+        reconstructed = (self.nominal[:4].double() + .25*action[:, :4].double()
+                         + turns.repeat_interleave(2, -1)*(2*math.pi)).float()
+        error = (reconstructed - q).abs()
+        pair = torch.ones(self.num_envs, 2, dtype=torch.bool, device=self.device)
+        if self.pair_domain is not None:
+            positions = q.double().unflatten(-1, (2, 2))
+            actual = self._signs*(positions[..., 1] - positions[..., 0])
+            pair = (actual >= self._difference[:, 0]) & (actual <= self._difference[:, 1])
+        canonical = (torch.isfinite(action).all(-1) & action[:, :4].abs().le(6*math.pi + 1e-6).all(-1))
+        admitted = common & canonical & pair.all(-1) & (error <= position_tolerance_rad).all(-1)
+        return PreparationHold(action, q.clone(), turns, admitted, error, pair, float(position_tolerance_rad))
+
+    def validate_preparation_hold(self, hold, feedback_position_rad, mask):
+        if (not isinstance(hold, PreparationHold) or not isinstance(mask, torch.Tensor)
+                or mask.shape != (self.num_envs,) or mask.dtype != torch.bool or mask.device != self.device):
+            raise ValueError('preparation hold validation needs its exact native row mask')
+        expected = self.preparation_hold(feedback_position_rad, position_tolerance_rad=hold.position_tolerance_rad)
+        for field in fields(expected):
+            actual, wanted = getattr(hold, field.name), getattr(expected, field.name)
+            if isinstance(wanted, torch.Tensor):
+                if (not isinstance(actual, torch.Tensor) or actual.shape != wanted.shape or actual.dtype != wanted.dtype
+                        or actual.device != wanted.device or not torch.equal(actual[mask], wanted[mask])):
+                    raise ValueError('preparation hold differs from the actual encoded reset coordinates or controller')
+            elif actual != wanted:
+                raise ValueError('preparation hold comparison recipe changed')
+        if not expected.admitted[mask].all():
+            raise ValueError('preparation hold violates common winding,pair bounds or encoded target tolerance')
+        return expected
 
     @torch.no_grad()
     def reset_hold_action(self, feedback_position_rad, *, position_tolerance_rad):
@@ -181,10 +244,9 @@ class OutputFeedbackController:
         if (type(position_tolerance_rad) not in (int, float) or not math.isfinite(position_tolerance_rad)
                 or position_tolerance_rad <= 0):
             raise ValueError('reset output hold needs an explicit numeric target comparison tolerance')
-        difference = (feedback_position_rad[:, :4].double() - self.nominal[:4].double()).unflatten(-1, (2, 2))
-        turns = torch.floor(difference.mean(-1) / (2 * math.pi) + .5)
+        difference, _ = canonical_coaxial_displacement(feedback_position_rad[:, :4], self.nominal[:4])
         action = torch.zeros_like(feedback_position_rad)
-        action[:, :4] = ((difference - turns[..., None] * (2 * math.pi)).flatten(-2) / .25).float()
+        action[:, :4] = (difference / .25).float()
         decoded = self.decode(action, feedback_position_rad, torch.zeros(self.num_envs, dtype=torch.float64,
                                                                          device=self.device))
         error = (decoded.admitted_leg_position_rad - feedback_position_rad[:, :4]).abs()
@@ -200,9 +262,11 @@ class OutputFeedbackController:
         self._matrix('feedback_velocity_rad_s', feedback_velocity_rad_s, 6)
         self._matrix('admitted_leg_position_rad', targets.admitted_leg_position_rad, 4)
         self._matrix('wheel_velocity_rad_s', targets.wheel_velocity_rad_s, 2)
-        self._clock('policy_issued_at_s', targets.policy_issued_at_s)
+        validate_issued_control(targets.issued_action, targets.control_source,
+                                num_envs=self.num_envs, device=self.device)
+        self._clock('controller_issued_at_s', targets.controller_issued_at_s)
         self._clock('pd_computed_at_s', pd_computed_at_s)
-        if (targets.policy_issued_at_s > pd_computed_at_s + 1e-9).any():
+        if (targets.controller_issued_at_s > pd_computed_at_s + 1e-9).any():
             raise ValueError('feedback cannot use a policy target issued in the future')
         scale = torch.ones_like(feedback_position_rad) if strength is None else strength
         self._matrix('strength', scale, 6)
@@ -217,7 +281,7 @@ class OutputFeedbackController:
             raise ValueError('feedback effort or its scaled envelope overflowed before saturation')
         capped = requested.clamp(-bounds, bounds)
         return FeedbackEffort(requested, capped, bounds, requested != capped,
-                               targets.policy_issued_at_s.clone(), pd_computed_at_s.clone())
+                               targets.controller_issued_at_s.clone(), pd_computed_at_s.clone(), targets.control_source.clone())
 
 
 @dataclass(frozen=True)

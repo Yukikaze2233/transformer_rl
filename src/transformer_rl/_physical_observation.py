@@ -12,6 +12,7 @@ import math
 
 import torch
 
+from ._control_sources import ControlSource, canonical_coaxial_displacement, validate_issued_control
 from ._structured_collection import ACTION_ORDER, PhysicalLabels
 
 
@@ -125,6 +126,7 @@ class CommandFeatures:
     request_height_m: torch.Tensor
     command_clock_s: torch.Tensor
     previous_issued_action: torch.Tensor
+    previous_control_source: torch.Tensor | None = None  # Deployable provenance,not an extra actor feature.
 
 
 class ObservationAssembler:
@@ -152,7 +154,6 @@ class ObservationAssembler:
         self._tree_indices = torch.tensor(binding.tree_joint_indices, device=self.device)
         self._wheel_indices = torch.tensor(binding.wheel_body_indices, device=self.device)
         self._nominal = torch.tensor(binding.nominal_policy_position_rad, dtype=torch.float32, device=self.device)
-        self._action_bound = torch.tensor((3., 3., 3., 3., 9., 9.), device=self.device)
 
     def _tensor(self, name, value, shape, dtype=torch.float32):
         if (not isinstance(value, torch.Tensor) or value.shape != (self.num_envs, *shape)
@@ -279,12 +280,14 @@ class ObservationAssembler:
         invalid |= (commands.admitted_body_command[:, 1].abs() > 1e-8)
         invalid |= jump & ((commands.request_height_m < .03) | (commands.request_height_m > .30))
         invalid |= ~jump & (commands.request_height_m != 0)
-        invalid |= (commands.previous_issued_action.abs() > self._action_bound + 1e-6).any(-1)
+        source = commands.previous_control_source
+        if source is None:
+            source = torch.full((self.num_envs,), int(ControlSource.POLICY), dtype=torch.long, device=self.device)
+        validate_issued_control(commands.previous_issued_action, source, num_envs=self.num_envs, device=self.device)
         if invalid.any():
             raise ValueError('actor sensor time, modes, request semantics or issued-action provenance is invalid')
-        difference = sensors.policy_position_rad - self._nominal
-        relative = torch.atan2(difference.sin(), difference.cos())
-        relative = torch.cat((relative[:, :4], torch.zeros_like(relative[:, 4:])), -1)
+        relative, _ = canonical_coaxial_displacement(sensors.policy_position_rad[:, :4], self._nominal[:4])
+        relative = torch.cat((relative.float(), torch.zeros_like(sensors.policy_position_rad[:, 4:])), -1)
         modes = torch.nn.functional.one_hot(commands.mode, 5).to(torch.float32)
         command = commands.admitted_body_command
         frame = torch.cat((command[:, :3], command[:, 3:4] * 5,

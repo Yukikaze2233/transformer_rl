@@ -354,7 +354,7 @@ class NativeEvaluationTrace:
             tick.body_motion.link_pose_world_xyzw[:, 0, :3], p.height_above_ground_m,
             p.roll_pitch_rad - reference.target_roll_pitch_rad, p.angular_velocity_body_rad_s,
             p.root_world_z_m - reference.jump_height_world_z_m, p.active_explicit_effort_nm,
-            p.policy_velocity_rad_s, tick.feedback.saturated, plant.targets.clipped_issued_action,
+            p.policy_velocity_rad_s, tick.feedback.saturated, plant.targets.issued_action,
             p.wheel_contact_tangent_speed_m_s, tick.wheel_clearance.geometry.vertical_gap_m,
             p.body_normal_load_n[:, wheels], p.body_normal_load_n[:, harmful].sum(-1),
             boundary.knee_signed_clearance_rad, boundary.knee_pivot_residual_m, projected))

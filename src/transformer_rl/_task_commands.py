@@ -201,7 +201,7 @@ class TaskCommandProgram:
         self.last_admission = self.stream.step(requested)
         self._last_time.copy_(now_s)
 
-    def commands(self, now_s, previous_issued):
+    def commands(self, now_s, previous_issued, previous_control_source=None):
         self._tensor(now_s, dtype=torch.float64)
         self._tensor(previous_issued, 6)
         active = self.protocol.active_id >= 0
@@ -212,7 +212,8 @@ class TaskCommandProgram:
         mode = torch.where(active, int(CommandMode.JUMP), self._base_mode)
         clock = torch.where(active, now_s - self._latched_at, now_s - self._started).float()
         return CommandFeatures(self.stream.current.clone(), mode.clone(), torch.where(active, self._latched_rise, 0),
-                                 clock, previous_issued.clone())
+                                 clock, previous_issued.clone(),
+                                 None if previous_control_source is None else previous_control_source.detach().clone())
 
     def curve(self, commands, now_s, *, reward_ground_anchor_world_z_m):
         """Reward-only adapter; controller advance never needs this truth."""

@@ -147,9 +147,9 @@ def test_native_runner_uses_fixed_means_all_physics_and_first_episodes_without_a
     observed_actions = []
     original = env.lifecycle.plant.accept_issued_action
 
-    def record(action):
+    def record(action, **kwargs):
         observed_actions.append(action.clone())
-        return original(action)
+        return original(action, **kwargs)
 
     env.lifecycle.plant.accept_issued_action = record
     report = evaluate_first_episodes(network, env, max_vector_steps=15)

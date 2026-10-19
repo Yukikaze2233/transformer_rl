@@ -16,6 +16,7 @@ from ._jump_reference import reward_phases, reward_reference
 from ._native_episode import NativeEpisodeLifecycle, TerrainRebuildRequired
 from ._native_reward import NativeRewardBridge, NativeRewardSample
 from ._physical_observation import CommandMode, SensorSample
+from ._output_actuation import PreparationHold
 from ._skill_evidence import PhysicalJumpEvidence
 from ._structured_collection import LabeledStep
 from ._task_commands import RequestInputs, TaskCommandPlan, TaskCommandProgram
@@ -32,6 +33,7 @@ class NativeTaskResetPlan:
     commands: TaskCommandPlan
     preparation_issued_action: torch.Tensor | None = None
     source_courses: tuple | None = None  # Native order, not proof of native replacement.
+    preparation_hold: PreparationHold | None = None
 
 
 class FailureReason(IntFlag):
@@ -198,6 +200,8 @@ class NativeTaskEnvironment:
         plan = self.reset_source(mask.clone(), (life.episode_id + mask.long()).clone(), now.clone())
         if not isinstance(plan, NativeTaskResetPlan):
             raise TypeError('native reset source must return its complete bound plan')
+        if plan.preparation_hold is not None and plan.preparation_issued_action is not None:
+            raise ValueError('reset preparation must have one unambiguous control representation')
         self.commands.validate_plan(plan.commands)
         if plan.preparation_issued_action is not None:
             life._actions(plan.preparation_issued_action)
@@ -208,7 +212,8 @@ class NativeTaskEnvironment:
             if changed and plan.source_courses is None:
                 raise TerrainRebuildRequired(changed, life.course_sha256, tuple(plan.course_sha256))
         result = life.reset(mask, plan.root_pose_xyzw, plan.root_com_velocity, plan.joint_position,
-                             plan.joint_velocity, course_sha256=plan.course_sha256, source_courses=plan.source_courses)
+                             plan.joint_velocity, course_sha256=plan.course_sha256, source_courses=plan.source_courses,
+                             preparation_hold=plan.preparation_hold)
         if plan.preparation_issued_action is not None:
             self.preparation_action[mask] = plan.preparation_issued_action[mask]
         if plant.scene.observation.model_epoch != self.rewards._epoch:
@@ -253,15 +258,15 @@ class NativeTaskEnvironment:
             self._return_allowed[inputs.safety_abort] = False
             now, episode, control, owned = (bridge.timestamp_s(), life.episode_id.clone(),
                                              life.control_epoch.clone(), life.policy_allowed.clone())
-            current_commands = self.commands.commands(now, life.previous_issued)
+            current_commands = self.commands.commands(now, life.previous_issued, life.previous_control_source)
             if ((current_commands.mode == int(CommandMode.JUMP)) & ~self._reward_anchor_valid).any():
                 raise RuntimeError('active jump has no actual accepted-ground reward anchor')
-            actual = torch.where(owned[:, None], issued_action, self.preparation_action)
+            actual, source = life.issued_controls(issued_action, self.preparation_action)
             _, dq = plant._feedback()
             composer.begin(actual, dq[:, list(bridge.binding.policy_joint_indices)], now_s=now,
                              episode_id=episode, control_epoch=control, policy_owned=owned,
                              admitted_body_command=current_commands.admitted_body_command,
-                             command_mode=current_commands.mode)
+                             command_mode=current_commands.mode, control_source=source)
 
             def physical(tick):
                 sample = self.rewards.sample(tick, episode_id=episode, control_epoch=control, policy_owned=owned)
@@ -300,7 +305,7 @@ class NativeTaskEnvironment:
             self._reward_ground_anchor[accepted] = ground[accepted]
             self._reward_anchor_valid[accepted] = True
             skill_receipt = self.skills.accept_protocol_condition(result, self.commands._latched_height)
-            next_commands = self.commands.commands(final_time, life.previous_issued)
+            next_commands = self.commands.commands(final_time, life.previous_issued, life.previous_control_source)
             sensors = self.sensor_source(tick.measured)
             if not isinstance(sensors, SensorSample):
                 raise TypeError('task sensor source must provide explicit deployed sensor fields and timestamps')

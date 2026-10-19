@@ -412,10 +412,16 @@ class NativeTerrainInstaller:
                 or env.rewards.composer._window is not None or plan.source_courses is None):
             raise RuntimeError('terrain installation requires the exact sealed source at a drained policy boundary')
         env.commands.validate_plan(plan.commands)
-        life._actions(plan.preparation_issued_action)
+        if plan.preparation_hold is not None and plan.preparation_issued_action is not None:
+            raise ValueError('terrain reset preparation must have one unambiguous control representation')
+        if plan.preparation_issued_action is not None:
+            life._actions(plan.preparation_issued_action)
         for name, value, width in (('root pose', plan.root_pose_xyzw, 7), ('COM velocity', plan.root_com_velocity, 6),
                                    ('joint position', plan.joint_position, 18), ('joint velocity', plan.joint_velocity, 18)):
             plant._matrix(name, value, width)
+        if plan.preparation_hold is not None:
+            plant.controller.validate_preparation_hold(
+                plan.preparation_hold, plan.joint_position[:, list(bridge.binding.policy_joint_indices)], reset_mask)
         if not torch.allclose(plan.root_pose_xyzw[:, 3:].norm(dim=-1), torch.ones(life.num_envs, device=life.device),
                               atol=1e-5, rtol=0):
             raise ValueError('terrain reset requires encoded normalized native xyzw')

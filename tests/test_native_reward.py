@@ -67,7 +67,7 @@ def begin(reward, ref=None, owned=None):
     owned = torch.ones(2, dtype=torch.bool) if owned is None else owned
     issued = torch.zeros(2, 6)
     plant, composer = reward.plant, reward.composer
-    plant.accept_issued_action(issued)
+    plant.accept_issued_action(issued, control_source=torch.where(owned, 0, 1))
     velocity = plant.scene.robot.data.joint_vel.torch[:, list(plant.scene.observation.binding.policy_joint_indices)]
     composer.begin(issued, velocity, now_s=plant.scene.observation.timestamp_s(), episode_id=composer._episode.clone(),
                      control_epoch=composer._control.clone(), policy_owned=owned,

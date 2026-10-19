@@ -5,6 +5,8 @@ import math
 import pytest
 import torch
 
+from transformer_rl._control_sources import ControlSource, validate_issued_control
+
 from transformer_rl._output_actuation import (
     EffectiveDriveResponse, OutputFeedbackController, PairTargetDomain, ResponseParameters,
 )
@@ -64,7 +66,7 @@ def test_nominal_targets_use_four_output_positions_and_two_wheel_speeds_only():
     assert not targets.wheel_velocity_rad_s.any() and not targets.pair_projected.any()
     raw = torch.tensor([[20., -20., 20., -20., 20., -20.]]).repeat(2, 1)
     decoded = control.decode(raw, q, torch.zeros(2, dtype=torch.float64))
-    torch.testing.assert_close(decoded.clipped_issued_action, torch.tensor([[3., -3., 3., -3., 9., -9.]]).repeat(2, 1))
+    torch.testing.assert_close(decoded.issued_action, torch.tensor([[3., -3., 3., -3., 9., -9.]]).repeat(2, 1))
     torch.testing.assert_close(decoded.wheel_velocity_rad_s, torch.tensor([[90., -90.]]).repeat(2, 1))
 
 
@@ -92,7 +94,7 @@ def test_pair_projection_preserves_center_and_reports_saturation_without_changin
     torch.testing.assert_close(admitted.mean(-1), raw.mean(-1), atol=1e-7, rtol=0)
     delta = torch.tensor([1., -1.]) * (admitted[..., 1] - admitted[..., 0])
     assert (delta >= -.1).all() and (delta <= 1.2).all()
-    torch.testing.assert_close(targets.clipped_issued_action[:, :4], actions)
+    torch.testing.assert_close(targets.issued_action[:, :4], actions)
 
 
 def test_feedback_uses_output_axis_pd_and_keeps_requested_capped_and_derated_effort_separate():
@@ -110,7 +112,7 @@ def test_feedback_uses_output_axis_pd_and_keeps_requested_capped_and_derated_eff
     reduced = control.effort(targets, q, dq, torch.full((2,), .005, dtype=torch.float64), strength=torch.full_like(q, .8))
     torch.testing.assert_close(reduced.capped_effort, effort.capped_effort * .8)
     torch.testing.assert_close(reduced.effort_bounds, effort.effort_bounds * .8)
-    assert reduced.policy_issued_at_s.dtype == torch.float64
+    assert reduced.controller_issued_at_s.dtype == torch.float64
 
 
 def test_feedback_rejects_future_targets_and_cannot_increase_nominal_caps_through_strength():

@@ -231,7 +231,8 @@ def test_preflight_refusal_changes_no_shapes_or_native_binding(fault):
     assert not editor._faulted and sim.steps == 0
 
 
-def test_installer_adopts_the_whole_task_graph_then_resets_only_the_ended_row():
+@pytest.mark.parametrize('direct_hold', [False, True])
+def test_installer_adopts_the_whole_task_graph_then_resets_only_the_ended_row(direct_hold):
     env, _, sim, _, editor, _, _, _, _, _ = fixture()
     env.reset()
     for _ in range(5):advance(env)
@@ -241,6 +242,10 @@ def test_installer_adopts_the_whole_task_graph_then_resets_only_the_ended_row():
     courses = changed(life.ground.courses)
     plan = replace(plan, source_courses=courses, course_sha256=tuple(c.sha256 for c in courses),
                     preparation_issued_action=torch.zeros(2, 6))
+    if direct_hold:
+        active = list(plant.scene.observation.binding.policy_joint_indices)
+        hold = plant.controller.preparation_hold(plan.joint_position[:, active], position_tolerance_rad=1e-6)
+        plan = replace(plan, preparation_issued_action=None, preparation_hold=hold)
     owner = SimpleNamespace(lifecycle=life, _scene=plant.scene, _identity=lambda: life._identity(),
                             _issued=SimpleNamespace(plan=plan, reset_mask=mask, next_episode_id=life.episode_id + mask.long(),
                                                      requested_at_s=plant.scene.observation.timestamp_s()))
@@ -265,6 +270,28 @@ def test_installer_adopts_the_whole_task_graph_then_resets_only_the_ended_row():
     env._identity()
     result = advance(env)
     assert sim.steps == steps + life.substeps and result.observation.episode_id.tolist() == [1, 0]
+    assert plant.targets.control_source[0] == (2 if direct_hold else 1)
+
+
+def test_invalid_hold_is_refused_before_any_USD_edit_or_native_reset():
+    env, _, sim, writes, editor, storage, _, _, _, _ = fixture()
+    env.reset()
+    for _ in range(5):advance(env)
+    life, plant = env.lifecycle, env.lifecycle.plant
+    mask = torch.tensor([True, False]);steps = sim.steps;before_writes = len(writes)
+    plan = env.reset_source(mask, life.episode_id + mask.long(), plant.scene.observation.timestamp_s())
+    courses = changed(life.ground.courses);active = list(plant.scene.observation.binding.policy_joint_indices)
+    hold = plant.controller.preparation_hold(plan.joint_position[:, active], position_tolerance_rad=1e-6)
+    hold.leg_position_rad[0, 0] += .01
+    plan = replace(plan, source_courses=courses, course_sha256=tuple(c.sha256 for c in courses), preparation_hold=hold)
+    owner = SimpleNamespace(lifecycle=life, _scene=plant.scene, _identity=lambda: life._identity(),
+                            _issued=SimpleNamespace(plan=plan, reset_mask=mask, next_episode_id=life.episode_id + mask.long(),
+                                                     requested_at_s=plant.scene.observation.timestamp_s()))
+    installer = NativeTerrainInstaller(env, owner, editor)
+    with pytest.raises(ValueError, match='hold'):
+        installer(plan, mask)
+    assert sim.steps == steps and len(writes) == before_writes and not storage.writes
+    assert not plant.scene.readback.get('terrain_binding_invalidated', False)
 
 
 def test_cached_course_digest_preserves_the_original_canonical_identity_and_changed_sources_get_new_hashes():

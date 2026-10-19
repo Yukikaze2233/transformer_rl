@@ -116,7 +116,7 @@ def test_one_real_step_precedes_native_refresh_and_same_tick_contact_read(period
     assert sim.steps == result.physical_tick == plant.scene.observation.physical_tick == 1
     assert robot.updates == [period]
     torch.testing.assert_close(result.measured.timestamp_s, torch.full((2,), period, dtype=torch.float64))
-    torch.testing.assert_close(result.feedback.policy_issued_at_s, torch.zeros(2, dtype=torch.float64))
+    torch.testing.assert_close(result.feedback.controller_issued_at_s, torch.zeros(2, dtype=torch.float64))
     torch.testing.assert_close(result.feedback.pd_computed_at_s, torch.zeros(2, dtype=torch.float64))
     torch.testing.assert_close(result.drive.impulse, period * result.drive.mean_effort.double(), atol=1e-8, rtol=1e-6)
     assert result.drive.endpoint_drive_effort[:, :4].abs().gt(result.drive.mean_effort[:, :4].abs()).all()
@@ -220,7 +220,7 @@ def test_reset_writes_only_selected_rows_without_a_fake_physics_refresh_or_budge
     torch.testing.assert_close(plant.drive.state[1], retained)
     for f in fields(plant.targets):
         torch.testing.assert_close(getattr(plant.targets, f.name)[1], before[f.name][1])
-    assert not plant.targets.clipped_issued_action[0].any()
+    assert not plant.targets.issued_action[0].any()
     for index in range(3):
         result = plant.step_physics()
         assert result.contact_labels_valid.tolist() == [index == 2, True]

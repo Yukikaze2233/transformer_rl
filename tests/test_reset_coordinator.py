@@ -70,8 +70,11 @@ def test_partial_resets_draw_only_selected_rows_and_keep_every_other_plan_field_
     clock += .1
     second = request(coordinator, life, torch.tensor([False, True]))
     assert sizes == [2, 1] and coordinator.preparer.requested_rows == 3
-    for name in ('root_pose_xyzw', 'root_com_velocity', 'joint_position', 'joint_velocity', 'preparation_issued_action'):
+    for name in ('root_pose_xyzw', 'root_com_velocity', 'joint_position', 'joint_velocity'):
         assert torch.equal(getattr(first, name)[0], getattr(second, name)[0])
+    assert first.preparation_issued_action is None and second.preparation_issued_action is None
+    for name in ('requested_action', 'leg_position_rad', 'common_turns', 'admitted', 'target_error_rad', 'pair_admitted'):
+        assert torch.equal(getattr(first.preparation_hold, name)[0], getattr(second.preparation_hold, name)[0])
     for name in ('start', 'end', 'duration_s', 'kind', 'frequency_start_hz', 'frequency_end_hz'):
         assert torch.equal(getattr(first.commands.trajectory, name)[0], getattr(second.commands.trajectory, name)[0])
     for name in ('base_mode', 'task_horizon_s', 'jump_height_m', 'request_interval_s'):

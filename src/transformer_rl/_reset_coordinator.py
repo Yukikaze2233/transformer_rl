@@ -15,7 +15,7 @@ import torch
 from ._command_trajectory import CommandTrajectory
 from ._native_episode import NativeEpisodeLifecycle
 from ._native_task import NativeTaskResetPlan
-from ._output_actuation import OutputFeedbackController
+from ._output_actuation import OutputFeedbackController, PreparationHold
 from ._reset_program import PreparedTaskReset, TaskResetPreparer, _tensor_versions
 from ._task_commands import TaskCommandPlan
 from ._task_curriculum import STAGE_NAMES, TaskDraw
@@ -116,8 +116,20 @@ class ResetBatchCoordinator:
             courses[row], hashes[row] = course, sha
         values = [tensor(getattr(previous, name), getattr(fresh, name)) for name in
                   ('root_pose_xyzw', 'root_com_velocity', 'joint_position', 'joint_velocity')]
-        hold = tensor(previous.preparation_issued_action, fresh.preparation_issued_action)
-        return NativeTaskResetPlan(*values, tuple(hashes), commands, hold, tuple(courses))
+        if ((previous.preparation_issued_action is None) != (fresh.preparation_issued_action is None)
+                or (previous.preparation_hold is None) != (fresh.preparation_hold is None)):
+            raise ValueError('partial reset cannot silently switch its preparation control representation')
+        action = (None if previous.preparation_issued_action is None
+                  else tensor(previous.preparation_issued_action, fresh.preparation_issued_action))
+        hold = None
+        if previous.preparation_hold is not None:
+            if previous.preparation_hold.position_tolerance_rad != fresh.preparation_hold.position_tolerance_rad:
+                raise ValueError('partial reset cannot change untouched hold comparison semantics')
+            hold = PreparationHold(*(tensor(getattr(previous.preparation_hold, f.name),
+                                            getattr(fresh.preparation_hold, f.name))
+                                     for f in fields(PreparationHold) if f.name != 'position_tolerance_rad'),
+                                     previous.preparation_hold.position_tolerance_rad)
+        return NativeTaskResetPlan(*values, tuple(hashes), commands, action, tuple(courses), hold)
 
     @torch.no_grad()
     def __call__(self, reset_mask, next_episode_id, requested_at_s):

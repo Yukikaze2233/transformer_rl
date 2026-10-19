@@ -124,9 +124,10 @@ def test_native_binding_rechecks_encoded_holds_and_converts_link_origin_to_actua
     expected = torch.cat(((r @ linear[..., None]).squeeze(-1), (r @ omega[..., None]).squeeze(-1)), -1).float()
     torch.testing.assert_close(plan.root_com_velocity, expected, atol=1e-7, rtol=0)
     q = plan.joint_position[:, list(program.geometry.kinematics.binding.policy_joint_indices)]
-    decoded = controller.decode(plan.preparation_issued_action, q, torch.zeros(2, dtype=torch.float64))
-    torch.testing.assert_close(decoded.admitted_leg_position_rad, q[:, :4], atol=1e-6, rtol=0)
-    assert not decoded.wheel_velocity_rad_s.any() and not placement.physical_qualification
+    assert plan.preparation_issued_action is None
+    hold = controller.validate_preparation_hold(plan.preparation_hold, q, torch.ones(2, dtype=torch.bool))
+    torch.testing.assert_close(hold.leg_position_rad, q[:, :4], atol=1e-6, rtol=0)
+    assert not hold.requested_action[:, 4:].any() and not placement.physical_qualification
     with pytest.raises(TerrainRebuildRequired) as changed:
         value.native_plan(program.geometry, controller, actual_course_sha256=('a' * 64, 'b' * 64),
                            actual_base_com_body_m=com)

@@ -138,9 +138,9 @@ class PreparedTaskReset:
             loop_tolerance_m=self.recovery.tuning.loop_tolerance_m,
             wheel_support_tolerance_m=self.tuning.wheel_support_tolerance_m)
         q = plan.joint_position[:, list(kinematics.binding.policy_joint_indices)]
-        hold = controller.reset_hold_action(q, position_tolerance_rad=self.recovery.tuning.output_hold_tolerance_rad)
+        hold = controller.preparation_hold(q, position_tolerance_rad=self.recovery.tuning.output_hold_tolerance_rad)
         if not hold.admitted.all():
-            raise ValueError('encoded native reset pose is outside the actual output hold domain')
+            raise ValueError('encoded native reset pose is outside the actual preparation hold domain')
         # Body origin velocity and PhysX root COM velocity are different when
         # a randomized COM has an angular velocity. Use encoded orientation.
         orientation = plan.root_pose_xyzw[:, 3:].double()
@@ -152,8 +152,7 @@ class PreparedTaskReset:
         velocity = torch.cat((linear + torch.linalg.cross(omega, offset), omega), -1).float()
         if not torch.isfinite(velocity).all():
             raise ValueError('encoded native reset COM velocity is nonfinite')
-        return replace(plan, root_com_velocity=velocity, preparation_issued_action=hold.requested_action,
-                       source_courses=self.courses), placement
+        return replace(plan, root_com_velocity=velocity, preparation_hold=hold, source_courses=self.courses), placement
 
     def _clearance(self):
         return self.recovery.release_clearance_m + self.tuning.standing_clearance_m
@@ -270,7 +269,7 @@ class TaskResetPreparer:
         duration = t.trajectory_duration_s[0] + self._uniform(n) * (t.trajectory_duration_s[1] - t.trajectory_duration_s[0])
         period = t.request_interval_s[0] + self._uniform(n) * (t.request_interval_s[1] - t.request_interval_s[0])
         commands = TaskCommandPlan.from_draw(draw, initial, duration.float(), horizon, period, domain=domain)
-        ready = (candidate.closure.converged & candidate.current_output_hold_admitted & placement.geometry_ready
+        ready = (candidate.closure.converged & candidate.preparation_hold.admitted & placement.geometry_ready
                  & (~two_wheels | placement.bilateral_wheel_support))
         self.completed_batches += 1
         return PreparedTaskReset(draw, courses, patch, commands, candidate, placement, two_wheels,

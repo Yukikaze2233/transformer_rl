@@ -39,6 +39,8 @@
 
 外部35D接口保留；索引14、15为轮位置兼容槽，固定为零且不进入网络。其余33个有效输入各归属一次，不向这些零槽添加噪声或写入累计轮角。轮分支只使用轮速与上一已发轮动作，动作输出为目标轮速。编码器累计角仍可用于驱动层解缠、诊断与独立里程计，不等于actor需要轮角。上一已发动作不是USB到达动作、CAN缓存动作或实际施加力矩；滑移时轮速也不等于机身线速度。
 
+同侧两个输出位置相对各自nominal只移除**共同**整圈，不分别在±π截断，也不作差速坐标变换。这样在一个输出跨过角度分支时，保留同侧真实相对相位；当前轮位置槽继续为零。准备控制的上一已发命令仍使用相同的腿位置偏移除0.25、轮速度目标除10的六维单位，保留真实数值。私有ControlSource元数据区分policy、受限脚本和原位准备保持，供控制/奖励/观测验证使用，不增加actor维数，也不来自仿真真值。策略自身动作仍限于腿±3、轮±9；准备保持的显式来源不扩大这套策略范围。
+
 ### 编码与解码
 
 各类型token使用各自的线性投影，添加6个具名身体位置的可训练标识，区分功能类型及左右。时间位置编码加在融合后的96D序列上，位置索引为负4至0，采样间隔0.01s。左右同类投影和解码器共享权重，左右标识不同；不强行将实测左右阻力变成对称参数，不凭直觉翻转轴符号。
@@ -400,7 +402,21 @@ Kaiser上的[源码延拓探针](/home/yukikaze/Documents/workspace/transformer_
 
 另在Kaiser用[独立4×4齐次矩阵实现](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-recovery-preparation-20261019T103712Z-587d3f9a/independent-source-0002.json)复核全部16个新解，未导入候选kinematics模块。float64与native float32编码后坐标均在原限位内，最大闭链残差分别约`5.71e−9m`和`8.86e−9m`，保持原1µm条件。按实际root方向变换后，第14/15号两轮link原点均高于base原点，保留腹面/背面两种请求的方向语义；轮link原点高度不是整轮碰撞间隙、自碰撞或地面接触证明。该独立计算仍为源码几何，不含native物理步。
 
-当前输出hold检查继续有15行通过、第14行不通过：新闭链解的髋准备动作约±12.566，辅助输出动作约±10.873，不能clip到±3后声称原地保持。TaskResetPreparer的source_ready仍同时要求闭链、实际controller hold与整机碰撞支持，当前没有绕过该拒绝。策略动作目标范围不自动等于全部合法跌倒出生状态；这类状态的脚本准备、真实动作/观测记录、控制权切换和单一策略接管路径仍须明确实现与物理验收，不能用几何通过充作恢复成功。
+当前**策略动作反算**hold检查继续有15行通过、第14行不通过：新闭链解的髋准备动作约±12.566，辅助输出动作约±10.873，不能clip到±3后声称原地保持。策略动作目标范围不自动等于全部合法跌倒出生状态。后续新增的显式脚本保持如下；旧策略hold false继续保留，不把它改成历史成功，也不用几何通过充作恢复成功。
+
+#### 原位准备控制与单一策略交接
+
+私有[控制来源与共同相位](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_control_sources.py)和[输出控制器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_output_actuation.py)区分三类实际命令：policy、沿原策略目标域解码的bounded script，以及只锁存实际出生输出位置的preparation hold。后者仍通过同一个输出端PC反馈、力矩限幅、有效驱动响应和气簧链执行；它不是额外学习policy，不修改原策略动作box，也不改变40Nm/4.5Nm原力矩上限。两轮始终只给零速度目标，不设轮角目标。
+
+PreparationHold保留实际native腿位置、共同整圈、六维规范化命令、比较容差和准入结果。每侧相对nominal的两轴位移只移除共同整圈，相对位移变化须小于π；规范化命令因此有6π的数学表示界限。该界限不是新增机械运动包络。显式pair domain必须满足，原生坐标重建误差不得超过给定容差；不独立wrap、不clip位置、不移动pair投影来伪造hold。TaskResetPreparer现在要求闭链、这个**实际准备控制**准入与整机碰撞/支撑，native float32计划再次计算hold；旧policy-hold false作为独立诊断保留。所选源码16行均通过新增controller/source hold检查，其中第14行的policy-hold仍为false。完整source放置、native接触、出生稳定和恢复能力继续单独验收。
+
+NativeTaskResetPlan可携带这个有界、具名的准备描述。partial coordinator逐字段合并选中行，未选中行保留原控制数值和比较语义；同时给legacy action与direct hold的歧义计划会拒绝。地形安装器在USD编辑之前，lifecycle在任何native reset写入之前，用实际controller和已编码q逐字段复核。准入后lifecycle独立复制并封存选中行目标；外部修改锁存缓冲会在下一物理步前拒绝，不以失效目标继续或自动重放。
+
+每个100Hz边界记录实际命令、来源和controller-issued时刻，200Hz反馈另记PD计算时刻。私有输出/反馈字段改用controller时钟命名，避免将准备脚本的时刻标成policy采样时刻；这些仍不是transport-arrival、controller-applied或物理响应测量。reward bridge核对本次真实tick、目标、命令来源、所有权与open window逐项一致。actor及clean critic保留真实的上一脚本命令，不将超出策略范围的准备命令clip成±3再冒充已发动作；缺失来源时只能使用旧的受限命令语义。
+
+仍须五个新的100Hz传感器帧和完整接触标签窗口后才交回同一actor，reset投影继续是无效监督。准备区间、脚本完成与未实际施加的策略抽样均不获PPO/辅助/技能成功信用；collector保留原始Gaussian采样和原clip动作，实际脚本命令另在物理/观测路径记录，fresh消费不退款。接管后下一控制区间重新采用原策略目标解码，不延长原任务时限。安全接管时锁存**当前**实际姿态，保留未选中行；外部release为false时，即使历史已齐备也不自动交回策略。
+
+Kaiser先通过[221项回归与接口检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-script-preparation-20261019T110017Z-9f7d1edb/validation-0001.json)，补齐同轴观测分支、当前姿态安全锁存和新地形交接检查后，[225项最终检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-script-preparation-20261019T110017Z-9f7d1edb/validation-0002.json)。分组有重叠，不相加。覆盖200Hz与1kHz合成链、五帧与mask、partial reset、准备篡改/来源伪造/pair越界拒绝、无新特征的35D/81D、同一小测试模型的PPO收集/更新、selected107全部16源码控制描述，以及新地形在错误hold下不改USD。全部仍为Kaiser CPU合成/源码检查，pair-domain探针未获正式资格，SDK上下文、真实机器人仿真和新正式PPO均为零。生产CLI、公共API/schema与恢复格式没有修改。
 
 私有[连续reset准备器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_reset_program.py)组合六类TaskDraw、完整连续TerrainCourse、整机source支持与TaskCommandPlan。任务、地形、姿态三个独立RNG和配额状态一起保存；参数或源hash不同拒绝载入，失败不回滚已消费的draw，也不重试。普通30s、请求/恢复60s与完整速度界决定地形extent；本次所选源码16恢复探针每行仍保留±302m两轴范围，没有用出生小平面缩短远处课程。`nominal`只关闭附加出生扰动并采用既有名义命令语义，不移除抽中的恢复ID或粗糙地形。
 
@@ -613,7 +629,9 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 连续地形编辑在Kaiser先通过[117项接口检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-replacement-20261019T094514Z-957fc6b1/validation-0001.json)，加入plant/reset债务和已有评价回归后[150项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-replacement-20261019T094514Z-957fc6b1/validation-0002.json)，最后补齐native路径存在/退休探针及同tick重复reset拒绝后[154项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-replacement-20261019T094514Z-957fc6b1/validation-0003.json)。分组有重叠，不相加为独立实验。检查包含可变形状数、多次不同课程、反向clone映射、完整graph采用、选中行reset及未选中驱动/历史保留，还有步事件、关节/model/view变更、cooking warning/timeout、遗漏新形状及残留旧形状的拒绝。测试明确使用fake USD/PhysX adapters，实际pxr作者化与真实native query都未执行；这些仍是Kaiser CPU合成检查，SDK上下文、机器人仿真与新正式PPO为零。
 
-正式PPO仍未启动。下一步须完成连续地形编辑的真实SDK cooking/contact及未选中轨迹联合验收，补齐全部16恢复候选的准备/接管和物理准入，尤其第14号合法源码姿态与现有hold域的分离，以及扰动/传感/时序来源和实际107°准入/速率/物理条件配方，144案例的原生场景/profile/请求序列与独立技能判据、连续挑战manifest、评价预算的持久预留及正式调度；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
+所选107°资产的[完整出生组包检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-script-preparation-20261019T110017Z-9f7d1edb/selected_birth_binding_result.json)已在Kaiser单独通过：16个原请求均保持60s任务时限与双轴±302m完整课程范围，source闭链、全body对地支持、float32编码及原位准备保持联合通过，使用所选source base COM，未改全局RNG。原策略box的第14项hold仍拒绝；新增准备保持不扩大policy box。此检查只含名义配方和source平面碰撞几何，pair-domain仍显式标为探针，未验证self-contact、随机扰动、真实SDK碰撞或动态准备，不能授予物理或正式开训资格。
+
+正式PPO仍未启动。下一步须完成连续地形编辑的真实SDK cooking/contact及未选中轨迹联合验收，完成全部16恢复候选的真实准备/接管/恢复物理准入，以及扰动/传感/时序来源和实际107°准入/速率/物理条件配方，144案例的原生场景/profile/请求序列与独立技能判据、连续挑战manifest、评价预算的持久预留及正式调度；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 

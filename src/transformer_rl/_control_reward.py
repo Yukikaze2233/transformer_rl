@@ -12,6 +12,8 @@ import math
 
 import torch
 
+from ._control_sources import ControlSource, validate_issued_control
+
 from ._physical_observation import CommandMode, MechanicalBinding
 
 
@@ -193,7 +195,7 @@ class PhysicalRewardComposer:
 
     @torch.no_grad()
     def begin(self, issued_action, initial_policy_velocity_rad_s, *, now_s, episode_id, control_epoch,
-              policy_owned, admitted_body_command, command_mode):
+              policy_owned, admitted_body_command, command_mode, control_source=None):
         if self._window is not None:
             raise RuntimeError('one reward interval is already in progress')
         for name, value in (('issued action', issued_action), ('initial output velocity', initial_policy_velocity_rad_s)):
@@ -203,20 +205,24 @@ class PhysicalRewardComposer:
             self._tensor(name, value, dtype=dtype)
         self._tensor('actor-visible admitted command', admitted_body_command, 4)
         self._tensor('actor-visible mode', command_mode, dtype=torch.long)
+        if control_source is None:
+            control_source = torch.where(policy_owned, int(ControlSource.POLICY), int(ControlSource.BOUNDED_SCRIPT))
+        validate_issued_control(issued_action, control_source, num_envs=self.num_envs,
+                                device=self.device, policy_owned=policy_owned)
         invalid = (self._ended | (episode_id != self._episode) | (control_epoch < self._control)
                    | ~torch.isfinite(now_s) | ((now_s - self._time).abs() > 1e-8)
                    | ~torch.isfinite(issued_action).all(-1) | ~torch.isfinite(initial_policy_velocity_rad_s).all(-1)
                    | (self._dq_valid & (initial_policy_velocity_rad_s - self._last_dq).abs().gt(1e-6).any(-1))
-                   | (issued_action.abs() > issued_action.new_tensor((3, 3, 3, 3, 9, 9)) + 1e-6).any(-1)
                    | ~torch.isfinite(admitted_body_command).all(-1) | admitted_body_command[:, 1].abs().gt(1e-8)
                    | (admitted_body_command[:, 3] <= 0) | (command_mode < 0) | (command_mode > 4))
         if invalid.any():
-            raise ValueError('reward interval needs an initialized same-time PRE-reset episode and clipped issued action')
+            raise ValueError('reward interval needs an initialized same-time PRE-reset episode and validated issued control')
         first = .04 * (issued_action - self._previous).square().sum(-1)
         second = (issued_action - 2 * self._previous + self._previous2).square()
         second = .8 * second[:, :4].sum(-1) + .16 * second[:, 4:].sum(-1)
         self._window = {'start': now_s.clone(), 'episode': episode_id.clone(), 'control': control_epoch.clone(),
                         'issued': issued_action.clone(), 'dq': initial_policy_velocity_rad_s.clone(),
+                        'control_source': control_source.detach().clone(),
                         'owned': policy_owned.clone(), 'steps': 0, 'positive': {}, 'raw_cost': {},
                         'command': admitted_body_command.clone(), 'mode': command_mode.clone(),
                         'components': {}, 'gates': {}, 'errors': {}, 'error_squares': {},

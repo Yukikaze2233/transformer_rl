@@ -6,10 +6,11 @@ use still requires an independently closed timing path and physical evidence.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 
 import torch
 
+from ._control_sources import ControlSource, validate_issued_control
 from ._native_actuation import NativeEffortSubmission
 from ._native_contacts import TerrainContacts
 from ._native_observation import SurfaceSample
@@ -104,10 +105,30 @@ class NativePhysicsPlant:
         return q, dq
 
     @torch.no_grad()
-    def accept_issued_action(self, issued_action):
+    def accept_issued_action(self, issued_action, *, control_source=None, hold_leg_position_rad=None,
+                             hold_position_tolerance_rad=None):
         self._identity()
         q, _ = self._feedback()
-        self.targets = self.controller.decode(issued_action, q[:, self._active], self.scene.observation.timestamp_s())
+        if control_source is None:
+            control_source = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        validate_issued_control(issued_action, control_source, num_envs=self.num_envs, device=self.device)
+        now = self.scene.observation.timestamp_s()
+        targets = self.controller.decode(issued_action, q[:, self._active], now)
+        hold = control_source == int(ControlSource.PREPARATION_HOLD)
+        if hold.any():
+            self._matrix('latched preparation leg positions', hold_leg_position_rad, 4)
+            coordinates = torch.cat((hold_leg_position_rad, torch.zeros(self.num_envs, 2, device=self.device)), -1)
+            prepared = self.controller.preparation_hold(coordinates, position_tolerance_rad=hold_position_tolerance_rad)
+            if (not prepared.admitted[hold].all()
+                    or not torch.equal(prepared.requested_action[hold], issued_action[hold])):
+                raise ValueError('preparation control differs from its exact admitted latched hold')
+            targets.issued_action[hold] = prepared.requested_action[hold]
+            targets.raw_leg_position_rad[hold] = self.controller.nominal[:4] + .25*prepared.requested_action[hold, :4]
+            targets.admitted_leg_position_rad[hold] = prepared.leg_position_rad[hold]
+            targets.wheel_velocity_rad_s[hold] = 0
+            targets.pair_projected[hold] = False
+            targets.common_turns[hold] = prepared.common_turns[hold]
+        self.targets = replace(targets, control_source=control_source.detach().clone())
         return self.targets
 
     @torch.no_grad()
@@ -116,7 +137,7 @@ class NativePhysicsPlant:
         if self.scene.readback.get('terrain_reset_required_rows', ()):
             raise RuntimeError('new native terrain requires its selected physical reset before any step')
         if self.targets is None:
-            raise RuntimeError('an explicit policy or control-probe target is required before physics')
+            raise RuntimeError('an explicit accepted output target is required before physics')
         bridge, robot = self.scene.observation, self.scene.robot
         try:
             bridge.before_physics_step()

@@ -11,6 +11,8 @@ import math
 
 import torch
 
+from ._control_sources import ControlSource
+
 from ._control_reward import PhysicalRewardComposer, RewardPhysics, RewardTuning
 from ._joint_boundaries import JointBoundaryState, LegBoundaryGeometry
 from ._native_plant import NativePhysicsPlant, PhysicalTick
@@ -174,7 +176,11 @@ class NativeRewardBridge:
                 or slip.physical_tick != tick.physical_tick
                 or any(not torch.equal(value, bridge.timestamp_s()) for value in
                        (state.timestamp_s, motion.timestamp_s, tick.contacts.timestamp_s, slip.timestamp_s))
-                or not torch.equal(tick.feedback.policy_issued_at_s, self.plant.targets.policy_issued_at_s)):
+                or not torch.equal(tick.feedback.controller_issued_at_s, self.plant.targets.controller_issued_at_s)
+                or not torch.equal(tick.feedback.control_source, self.plant.targets.control_source)
+                or not torch.equal(tick.feedback.control_source, window['control_source'])
+                or not torch.equal(self.plant.targets.issued_action, window['issued'])
+                or not torch.equal(tick.feedback.control_source == int(ControlSource.POLICY), policy_owned)):
             raise ValueError('native reward motion, contact, feedback or target source identity differs')
         if (not torch.equal(episode_id, window['episode']) or not torch.equal(control_epoch, window['control'])
                 or (state.timestamp_s - window['start'] - (window['steps'] + 1) * self.plant.dt).abs().gt(1e-8).any()):
