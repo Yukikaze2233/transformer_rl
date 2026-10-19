@@ -78,9 +78,11 @@ def test_default_complete_minibatches_have_64_steps_and_no_sample_refund():
     assert metrics['cumulative_consumed']['actor_optimizer_steps'] == 64
 
 
-def test_rejected_actor_step_restores_adam_and_stops_all_auxiliary_updates(monkeypatch):
+@pytest.mark.parametrize('training_chunk', [3072, 3])
+def test_rejected_actor_step_restores_adam_and_stops_all_auxiliary_updates(monkeypatch, training_chunk):
     network = model()
-    config = replace(StructuredPPOConfig(), epochs=1, minibatches=2, learning_rate=1e-6)
+    config = replace(StructuredPPOConfig(), epochs=1, minibatches=2, learning_rate=1e-6,
+                     training_chunk=training_chunk)
     trainer = StructuredPPOTrainer(network, config)
     trainer.update(batch_for(network))
     before = deepcopy(network.actor.state_dict())
@@ -152,9 +154,11 @@ def test_target_kl_stops_without_undoing_an_admitted_transaction(monkeypatch):
     assert any(not torch.equal(value, before[name]) for name, value in network.actor.state_dict().items())
 
 
-def test_auxiliary_nonfinite_gradient_is_covered_by_actor_transaction():
+@pytest.mark.parametrize('training_chunk', [3072, 3])
+def test_auxiliary_nonfinite_gradient_is_covered_by_actor_transaction(training_chunk):
     network = model()
-    trainer = StructuredPPOTrainer(network, replace(StructuredPPOConfig(), epochs=2, minibatches=2))
+    trainer = StructuredPPOTrainer(network, replace(StructuredPPOConfig(), epochs=2, minibatches=2,
+                                                    training_chunk=training_chunk))
     batch = batch_for(network)
     before = deepcopy(network.actor.state_dict())
     hook = network.actor.policy.prediction_head[-1].weight.register_hook(lambda g: torch.full_like(g, float('nan')))
@@ -257,3 +261,36 @@ def test_analytic_kl_is_old_to_new_and_sums_action_dimensions():
         torch.distributions.Normal(old_mean, old_log_std.exp()),
         torch.distributions.Normal(mean, log_std.exp())).sum(-1)
     torch.testing.assert_close(StructuredPPOTrainer.diagonal_kl(old_mean, old_log_std, mean, log_std), expected)
+
+
+def test_accumulated_update_preserves_masked_gradients_adam_steps_and_sample_budget():
+    first = model()
+    second = deepcopy(first)
+    config = replace(StructuredPPOConfig(), epochs=2, minibatches=2, learning_rate=1e-6)
+    left = StructuredPPOTrainer(first, config)
+    right = StructuredPPOTrainer(second, replace(config, training_chunk=3))
+    batch = batch_for(first)
+    indices = torch.arange(len(batch))
+    batch.masks.state_auxiliary.copy_(indices % 7 == 0)
+    batch.masks.next_auxiliary.copy_(indices % 11 == 0)
+    batch.labels.velocity[~batch.masks.state_auxiliary] = float('nan')
+    batch.labels.wheel_contact[~batch.masks.state_auxiliary] = float('nan')
+    batch.labels.velocity_delta[~batch.masks.next_auxiliary] = float('nan')
+    left._actor_backward(batch, indices, batch.advantages)
+    right._actor_backward(batch, indices, batch.advantages)
+    for full, chunked in zip(first.actor.parameters(), second.actor.parameters()):
+        torch.testing.assert_close(full.grad, chunked.grad, atol=2e-6, rtol=2e-5)
+    torch.manual_seed(73)
+    whole = left.update(batch)
+    expected_rng = torch.random.get_rng_state()
+    torch.manual_seed(73)
+    chunked = right.update(batch)
+    assert torch.equal(expected_rng, torch.random.get_rng_state())
+    for key in ('actor_optimizer_steps', 'critic_optimizer_steps', 'actor_endpoint_uses',
+                'critic_endpoint_uses', 'retained_actor_steps', 'rolled_back_actor_steps'):
+        assert whole[key] == chunked[key]
+    assert whole['actor_optimizer_steps'] == 4
+    assert right.consumed == left.consumed
+    torch.testing.assert_close(first.state_dict(), second.state_dict(), atol=2e-6, rtol=2e-5)
+    torch.testing.assert_close(left.actor_optimizer.state_dict(), right.actor_optimizer.state_dict(),
+                               atol=2e-6, rtol=2e-5)

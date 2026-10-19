@@ -1,0 +1,42 @@
+{
+  "training_seeds": [2101, 2102, 2103],
+  "updates_per_seed": 20000,
+  "num_envs": 8192,
+  "rollout_steps": 48,
+  "checkpoint_interval": 100,
+  "policy": {
+    "history_length": 5
+  },
+  "ppo": {
+    "epochs": 4,
+    "minibatches": 16,
+    "training_chunk": 3072,
+    "learning_rate": 0.0001,
+    "clip_ratio": 0.2,
+    "value_clip": 0.2,
+    "entropy_coefficient": 0.005,
+    "value_coefficient": 4.0,
+    "max_gradient_norm": 1.0,
+    "target_kl": 0.01,
+    "reject_kl": 0.02,
+    "probe_endpoints": 1024,
+    "evaluation_chunk": 3072,
+    "diagnostics_interval": 20,
+    "velocity_coefficient": 0.1,
+    "contact_coefficient": 0.02,
+    "prediction_coefficient": 0.05
+  },
+  "collection": {
+    "policy_dt_s": 0.01,
+    "gamma": 0.99498743710662,
+    "gae_lambda": 0.9746794344808963,
+    "action_bounds": [3.0, 3.0, 3.0, 3.0, 9.0, 9.0]
+  },
+  "domain": {},
+  "protocol": {},
+  "terrain": {
+    "nominal_friction": 0.7,
+    "material_friction_bounds": [0.2, 1.1],
+    "rough_grid_spacing_m": 0.25
+  }
+}

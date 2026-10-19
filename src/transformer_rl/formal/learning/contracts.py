@@ -180,7 +180,7 @@ class AuxiliaryLabels:
 
 
 def auxiliary_losses(raw_state, velocity_delta, labels: AuxiliaryLabels, state_valid, next_valid,
-                     *, log_std_min=-4.0, log_std_max=2.0):
+                     *, log_std_min=-4.0, log_std_max=2.0, valid_counts=None):
     """Separate valid-count reductions; ignored NaN labels never enter arithmetic.
 
     Validation belongs to the batch boundary. The trainer combines these terms
@@ -188,20 +188,22 @@ def auxiliary_losses(raw_state, velocity_delta, labels: AuxiliaryLabels, state_v
     """
     # Substitute only semantically absent labels before arithmetic, then apply
     # masks. This avoids NaN*0 and dynamic GPU boolean-index synchronization.
+    state_count, next_count = ((state_valid.sum(), next_valid.sum())
+                              if valid_counts is None else valid_counts)
     target = torch.where(state_valid[:, None], labels.velocity.detach(), raw_state[:, :3].detach())
     log_std = raw_state[:, 3:6].clamp(log_std_min, log_std_max)
     velocity_terms = 0.5 * ((target - raw_state[:, :3]) * (-log_std).exp()).square() + log_std
     velocity = (velocity_terms * state_valid[:, None]).sum()
-    velocity = velocity / (state_valid.sum() * 3).clamp_min(1)
+    velocity = velocity / (state_count * 3).clamp_min(1)
     contact_target = torch.where(state_valid[:, None], labels.wheel_contact.detach(), 0)
     contact_terms = F.binary_cross_entropy_with_logits(raw_state[:, 6:8], contact_target, reduction='none')
     contact = (contact_terms * state_valid[:, None]).sum()
-    contact = contact / (state_valid.sum() * 2).clamp_min(1)
+    contact = contact / (state_count * 2).clamp_min(1)
     scales = velocity_delta.new_tensor([5.0] * 4 + [20.0] * 2)
     target_delta = torch.where(next_valid[:, None], labels.velocity_delta.detach(), velocity_delta.detach())
     following = (F.smooth_l1_loss(velocity_delta / scales, target_delta / scales, reduction='none')
                  * next_valid[:, None]).sum()
-    following = following / (next_valid.sum() * 6).clamp_min(1)
+    following = following / (next_count * 6).clamp_min(1)
     return velocity, contact, following
 
 

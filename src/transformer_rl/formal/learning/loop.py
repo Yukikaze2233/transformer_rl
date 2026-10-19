@@ -89,7 +89,7 @@ class StructuredLearningLoop:
 
     def _automatic_checkpoint(self):
         update = self.components.trainer.update_index
-        if update % 25 == 0:
+        if update % self.recipe.checkpoint_interval == 0:
             sequence = self.control._request()['sequence']
             self._save(f'update_{update:05d}.pt', purpose='periodic_learning_resume', sequence=sequence)
 

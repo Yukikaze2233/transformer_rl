@@ -40,7 +40,7 @@ class StopBudget:
         return self.reason is not None
 
 
-def components(promotion='exposure'):
+def components(promotion='exposure', checkpoint_interval=25):
     network = small_model()
     ppo = replace(StructuredPPOConfig(), epochs=1, minibatches=1, probe_endpoints=16,
                   evaluation_chunk=32, learning_rate=1e-6)
@@ -48,7 +48,7 @@ def components(promotion='exposure'):
     recipe = LearningRecipe('control_fixture', 2101, 2, 16, 'a' * 64, 'b' * 64, 'c' * 64,
                             StructuredCheckpointStore.model_sha256(network), network.config, ppo,
                             StructuredCollectionConfig(), TaskDomain(), RequestProtocolConfig(), terrain,
-                            curriculum_promotion=promotion)
+                            curriculum_promotion=promotion, checkpoint_interval=checkpoint_interval)
     state = LearningComponents(network, StructuredPPOTrainer(network, ppo), CurriculumBudget(promotion=promotion),
                                ContinuousTaskSampler(2101), ContinuousTerrainGenerator(2101, terrain), RequestProtocol(2))
     return recipe, state
@@ -74,12 +74,12 @@ def command(directory, operation, sequence):
 
 
 @contextmanager
-def fixture(tmp_path, promotion='exposure'):
+def fixture(tmp_path, promotion='exposure', checkpoint_interval=25):
     root = tmp_path / 'session'
     root.mkdir()
     descriptor = os.open(root / 'run.lock', os.O_RDWR | os.O_CREAT, 0o600)
     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    recipe, state = components(promotion)
+    recipe, state = components(promotion, checkpoint_interval)
     directory = attempt(root, 'attempt_1', descriptor, target=recipe.journal_spec().target_rollouts)
     control = TrainingControl(directory / 'control')
     with LearningJournal.create(root / 'journal', recipe.journal_spec(), authorized_boot=boot_id()) as journal:
@@ -239,6 +239,19 @@ def test_snapshot_io_failure_preserves_spent_work_and_stops_further_sampling(tmp
         with pytest.raises(RuntimeError, match='faulted'):
             loop.run_update()
         assert env.counter == before
+
+
+def test_selected_checkpoint_interval_is_consumed_by_the_complete_learning_loop(tmp_path):
+    with fixture(tmp_path, checkpoint_interval=3) as (loop, _, _):
+        loop.run_update()
+        loop.run_update()
+        assert not (loop.store.directory / 'latest.json').exists()
+        loop.run_update()
+        marker = read_json(loop.store.directory / 'latest.json')
+        assert marker['update'] == 3 and marker['purpose'] == 'periodic_learning_resume'
+        loaded = loop.store.load('update_00003.pt')
+        assert loaded.recipe.checkpoint_interval == 3
+        assert loaded.components.trainer.update_index == 3
 
 
 def test_exposure_training_crosses_every_stage_and_finishes_without_any_evaluation(tmp_path, monkeypatch):

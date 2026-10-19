@@ -30,18 +30,20 @@ class StructuredPPOConfig:
     reject_kl: float = 0.02
     probe_endpoints: int = 1024
     evaluation_chunk: int = 3072
+    training_chunk: int = 3072
     diagnostics_interval: int = 20
     velocity_coefficient: float = 0.1
     contact_coefficient: float = 0.02
     prediction_coefficient: float = 0.05
 
     def __post_init__(self):
-        for name in ('epochs', 'minibatches', 'probe_endpoints', 'evaluation_chunk', 'diagnostics_interval'):
+        for name in ('epochs', 'minibatches', 'probe_endpoints', 'evaluation_chunk', 'training_chunk',
+                     'diagnostics_interval'):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f'{name} must be a positive integer')
         for field in fields(self):
             if field.name not in ('epochs', 'minibatches', 'probe_endpoints', 'evaluation_chunk',
-                                  'diagnostics_interval'):
+                                  'training_chunk', 'diagnostics_interval'):
                 value = getattr(self, field.name)
                 if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
                     raise ValueError(f'{field.name} must be finite and nonnegative')
@@ -170,7 +172,7 @@ class StructuredPPOTrainer:
                 if not torch.allclose(actual, expected, atol=1e-5, rtol=1e-5):
                     raise ValueError(f'behavior {name} mismatch before any optimizer step')
 
-    def _losses(self, batch, endpoints, advantages):
+    def _losses(self, batch, endpoints, advantages, *, normalization=None):
         actor = self.model.actor
         mean, raw_state, context = actor.policy.outputs(batch.windows.gather(endpoints))
         evaluation = actor._evaluation(mean, actor.log_std, batch.raw_action[endpoints])
@@ -178,17 +180,31 @@ class StructuredPPOTrainer:
         ratio = (evaluation.log_prob - batch.old_log_prob[endpoints]).exp()
         clipped = ratio.clamp(1 - self.config.clip_ratio, 1 + self.config.clip_ratio)
         # 最小化 −E[min(rA, clip(r, 1±ε)A)]；A 已按有效策略样本归一化。
-        objective = -torch.minimum(ratio * advantages[endpoints], clipped * advantages[endpoints]).mean()
-        objective -= self.config.entropy_coefficient * evaluation.entropy.mean()
+        terms = -torch.minimum(ratio * advantages[endpoints], clipped * advantages[endpoints])
+        if normalization is None:
+            objective = terms.mean() - self.config.entropy_coefficient * evaluation.entropy.mean()
+        else:
+            objective = (terms.sum() - self.config.entropy_coefficient * evaluation.entropy.sum()) / normalization[0]
         prediction = actor.policy.predict_velocity_delta(context, batch.issued_action[endpoints])
         auxiliary = auxiliary_losses(raw_state, prediction, batch.labels.index(endpoints),
                                       batch.masks.state_auxiliary[endpoints], batch.masks.next_auxiliary[endpoints],
-                                      log_std_min=actor.policy.log_std_min, log_std_max=actor.policy.log_std_max)
+                                      log_std_min=actor.policy.log_std_min, log_std_max=actor.policy.log_std_max,
+                                      valid_counts=None if normalization is None else normalization[1:])
         components = (objective, *auxiliary)
         loss = (objective + self.config.velocity_coefficient * auxiliary[0]
                 + self.config.contact_coefficient * auxiliary[1]
                 + self.config.prediction_coefficient * auxiliary[2])
         return loss, components
+
+    def _actor_backward(self, batch, endpoints, advantages):
+        """分块累积同一 minibatch 的梯度；每项仍按整批有效样本数归一化。"""
+        if endpoints.numel() <= self.config.training_chunk:
+            self._losses(batch, endpoints, advantages)[0].backward()
+            return
+        normalization = (endpoints.numel(), batch.masks.state_auxiliary[endpoints].sum(),
+                         batch.masks.next_auxiliary[endpoints].sum())
+        for part in endpoints.split(self.config.training_chunk):
+            self._losses(batch, part, advantages, normalization=normalization)[0].backward()
 
     def _gradient_diagnostics(self, batch, endpoints, advantages):
         _, components = self._losses(batch, endpoints, advantages)
@@ -248,8 +264,7 @@ class StructuredPPOTrainer:
                         continue
                     transaction = _ParameterTransaction(self.model.actor, self.actor_optimizer)
                     self.actor_optimizer.zero_grad(set_to_none=True)
-                    loss, _ = self._losses(batch, endpoints, advantages)
-                    loss.backward()
+                    self._actor_backward(batch, endpoints, advantages)
                     norm = nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.config.max_gradient_norm)
                     self.actor_optimizer.step()
                     metrics['actor_optimizer_steps'] += 1

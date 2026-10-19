@@ -56,7 +56,22 @@ transformer_rl/
  → 完整更新边界 checkpoint / 暂停 / 保存退出
 ```
 
-每轮1024环境×48步，共49152个环境转移；PPO为4 epochs×16 minibatches，每批3072个端点。Actor与Critic各自优化，辅助损失包含在Actor更新的KL检查中。
+正式配置集中在 [`configs/formal_training.json`](../configs/formal_training.json)，由 `formal/learning/settings.py` 展开为完整recipe；运行层再绑定资产、源码、初始权重与SDK。修改配置只影响新冻结会话，已有会话的预算和恢复状态不会被改写。
+
+每轮8192环境×48步，共393,216个环境转移，每个环境覆盖0.48秒。PPO为4 epochs×16个逻辑minibatch，每批24,576个端点；Actor按最多3072端点分块累积梯度，再统一裁剪和更新。PPO按整批样本数归一化，各辅助项按整批有效标签数归一化，避免不均匀mask改变权重。Actor与Critic各自最多64次Adam更新，KL回滚包含整个Actor及辅助更新。
+
+采样规模、100Hz和五帧历史对齐复旦[`plane`默认配置](https://github.com/yly-true/fudan_rl_wheel_leg/blob/8204e853dfd2ed06d85a322e1a998c3d20a3be2c/plane/wheel_legged_gym/envs/base/legged_robot_config.py)。其MLP优化参数并非本Transformer的整套配置：
+
+| 设置 | 本正式配置 | 选择依据 |
+|---|---|---|
+| 环境 / rollout / 历史 | 8192 / 48 / 5帧含当前 | 对齐复旦plane，保持0.48秒rollout |
+| epochs / 逻辑minibatches | 4 / 16，前后向分块3072 | 控制激活显存；不增加逻辑Adam步数 |
+| 学习率 / clip / 熵系数 | 固定1e-4 / 0.2 / 0.005 | 保留本优化器设置；与v7初始值一致 |
+| value系数 / 梯度范数上限 | 4 / 1 | 保留v7基准值，Critic独立优化 |
+| gamma / GAE lambda | √0.99 / √0.95 | 保持v7从50Hz换至100Hz后的时间尺度 |
+| 周期checkpoint | 每100更新；暂停/停止另存 | 减少常规写盘，启停仍保存完整状态 |
+
+每seed仍为20,000更新，3个seed合计23,592,960,000条fresh转移；这是8192环境下的新增计划，不能沿用原1024环境的总样本数或工期估计。8192环境的原生地形、显存和吞吐尚需Kaiser实测，不因配置已提交而视为可开训。
 
 - 概率比：`r = exp(logπ_new − logπ_old)`。
 - 策略损失：`−mean(min(rA, clip(r, 1−ε, 1+ε)A))`。

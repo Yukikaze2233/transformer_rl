@@ -29,6 +29,8 @@ Kaiser使用完整路径 `/home/kaiser/.local/bin/trainctl`。以下 `<session>`
 
 正式会话由部署器冻结完整源码、recipe、runtime及资产绑定，再登记控制台。已有 `init`、`adopt`分别服务研究会话与研究队列，不拿旧研究配置冒充正式recipe。`jobs`也只适用于研究队列。
 
+正式采样参数只修改 [`configs/formal_training.json`](../configs/formal_training.json)：8192环境、48步、3个训练seed各20,000更新。部署器调用 `StructuredTrainingSession.create_from_settings(...)`，同时传入已核验的资产、任务、初始权重、runtime和资源绑定；该调用只冻结会话，启动仍走现有CLI。完整展开后的参数写入运行目录的 `recipe.json`，checkpoint每100更新保存一次。修改源码配置不会改变已冻结会话。
+
 资源等待、失败与运行状态以看板和本次运行收据为准；不重复启动第二个控制器。跨boot恢复先核验并取得对应授权，旧PID和旧数值游标不再复用。
 
 ## 正式训练与人工评价

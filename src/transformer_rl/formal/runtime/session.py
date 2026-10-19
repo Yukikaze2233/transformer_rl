@@ -46,6 +46,25 @@ class StructuredTrainingSession(ManagedSession):
         return hashlib.sha256(json.dumps(table, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
     @classmethod
+    def create_from_settings(cls, root, settings, *, run_id, training_seed,
+                             asset_manifest_sha256, task_contract_sha256, initial_model_sha256,
+                             runtime_factory, runtime_configuration, resources, device='cuda:0',
+                             python=sys.executable, learner_source=None, name=None):
+        """把正式配置展开为完整 recipe，再冻结到独立会话；不启动 worker。"""
+        from ..learning.settings import FormalTrainingSettings
+
+        if not isinstance(settings, FormalTrainingSettings):
+            settings = FormalTrainingSettings.load(settings)
+        package = Path(learner_source).resolve(strict=True) if learner_source else Path(__file__).resolve().parents[2]
+        recipe = settings.recipe(
+            run_id, training_seed, asset_manifest_sha256=asset_manifest_sha256,
+            learner_source_sha256=cls.source_sha256(package), task_contract_sha256=task_contract_sha256,
+            initial_model_sha256=initial_model_sha256, device=device)
+        return cls.create(root, recipe, runtime_factory=runtime_factory,
+                          runtime_configuration=runtime_configuration, resources=resources,
+                          python=python, learner_source=package, name=name)
+
+    @classmethod
     def create(cls, root, recipe, *, runtime_factory, runtime_configuration, resources,
                python=sys.executable, learner_source=None, name=None):
         from ..learning.checkpoint import LearningRecipe
