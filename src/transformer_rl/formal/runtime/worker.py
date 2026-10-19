@@ -16,6 +16,7 @@ import torch
 
 from ..tasks.trajectory import CommandRates
 from ..simulation.collision import verify_wheel_cylinders
+from ..simulation.dynamics import StartupDynamicsConfig, apply_startup_dynamics
 from ..simulation.ground import WheelCollisionCentres
 from .interop import native_proxy_launch
 from .assembly import NativeRuntimeTuning, NativeTaskRuntime
@@ -37,7 +38,8 @@ def parse_tuning(value):
     parsed = dict(value)
     for name, config_type in (('reset', ResetProgramTuning), ('recovery', RecoveryTuning),
                               ('limits', NativeTaskLimits), ('command_rates', CommandRates),
-                              ('terrain_edit', TerrainEditTuning), ('sensors', SensorModelConfig)):
+                              ('terrain_edit', TerrainEditTuning), ('sensors', SensorModelConfig),
+                              ('dynamics', StartupDynamicsConfig)):
         raw = dict(parsed[name])
         if name == 'limits':
             raw['forbidden_body_names'] = tuple(raw['forbidden_body_names'])
@@ -120,6 +122,10 @@ def runtime(recipe, components, configuration, *, control):
         scene_recipe = NativeSceneRecipe(configuration['asset_directory'], recipe.asset_manifest_sha256,
                                          response, origins, tuple(c.surface.meshes for c in courses))
         scene = scene_recipe.build_on_admitted_context(sim)
+        dynamics_receipt = apply_startup_dynamics(
+            scene, tuning.dynamics, recipe.training_seed + 15485863, native_to_tensor=wp.to_torch,
+            tensor_to_native=lambda value: wp.from_torch(value, dtype=wp.uint32 if value.dtype == torch.int32
+                                                       else wp.float32))
         _initial_policy_boundary(sim, scene)
         wheels = WheelCollisionCentres.from_urdf(
             (scene_recipe.asset / scene_recipe.manifest['urdf']).read_bytes(), scene.observation.binding)
@@ -144,6 +150,7 @@ def runtime(recipe, components, configuration, *, control):
             'sensor_noise_or_delay_randomization_active': True, 'sensor_configuration': configuration['tuning']['sensors'],
             'sensor_scope': 'actor only; physical-unit uniform noise after past-only observation lag',
             'sensor_delay_scope': 'engineering stress separate from recorded drive response; no extra USB delay',
+            'startup_dynamics': dynamics_receipt,
             'hardware_qualified': False,
             'full_task_health_qualified': False})
         yield value

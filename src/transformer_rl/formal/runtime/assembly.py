@@ -22,6 +22,7 @@ from ..simulation.ground import NativeGroundQuery, WheelCollisionCentres
 from ..simulation.plant import NativePhysicsPlant
 from ..simulation.reward import NativeRewardBridge
 from ..simulation.task import NativeTaskEnvironment, NativeTaskLimits
+from ..simulation.dynamics import StartupDynamicsConfig
 from ..simulation.terrain import NativeTerrainEditor, NativeTerrainInstaller, TerrainEditTuning
 from ..control.actuation import EffectiveDriveResponse, OutputFeedbackController, PairTargetDomain, ResponseParameters
 from ..control.pressure import NativeSliderPressure, PressureParameters
@@ -45,6 +46,7 @@ class NativeRuntimeTuning:
     pair_domain: PairTargetDomain | None
     knee_margin_rad: float = .05
     sensors: SensorModelConfig = field(default_factory=SensorModelConfig)
+    dynamics: StartupDynamicsConfig = field(default_factory=StartupDynamicsConfig)
 
     def __post_init__(self):
         if (any(not isinstance(getattr(self, name), cls) for name, cls in
@@ -52,6 +54,7 @@ class NativeRuntimeTuning:
                  ('command_rates', CommandRates), ('terrain_edit', TerrainEditTuning)))
                 or self.pair_domain is not None and not isinstance(self.pair_domain, PairTargetDomain)
                 or not isinstance(self.sensors, SensorModelConfig)
+                or not isinstance(self.dynamics, StartupDynamicsConfig)
                 or type(self.knee_margin_rad) not in (int, float) or not math.isfinite(self.knee_margin_rad)
                 or self.knee_margin_rad <= 0):
             raise ValueError('native runtime requires parsed physical recipe components and a positive knee margin')
