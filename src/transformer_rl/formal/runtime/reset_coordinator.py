@@ -202,6 +202,8 @@ class ResetBatchCoordinator:
         return {'source_manifest_sha256': self.preparer.geometry.kinematics.manifest_sha256,
                 'source_model_sha256': self.preparer.geometry.kinematics.model_sha256,
                 'num_envs': self.num_envs, 'program': self.preparer.state_dict(), 'sequence': self._sequence,
+                'sensors': (None if self.lifecycle.plant.sensor_model is None
+                            else self.lifecycle.plant.sensor_model.checkpoint_state_dict()),
                 'status': 'pending_not_resumable' if pending else 'ready_for_explicit_cold_setup',
                 'pending_proposal': self._pending_snapshot() if pending else None,
                 'cold_episode_disposition': 'abort active physical episodes;retain consumed requests and sampling RNG'}
@@ -240,5 +242,10 @@ class ResetBatchCoordinator:
                 or self._issued is not None or self.lifecycle._last is not None
                 or not self.lifecycle.episode_id.eq(-1).all()):
             raise ValueError('reset cache restore needs an empty cold lifecycle and a complete nonpending boundary')
+        sensors = self.lifecycle.plant.sensor_model
+        if (sensors is None) != (state['sensors'] is None):
+            raise ValueError('cold source sensor implementation differs from the frozen run')
         self.preparer.load_state_dict(state['program'])
+        if sensors is not None:
+            sensors.load_after_explicit_cold_setup(state['sensors'])
         self._sequence = state['sequence']

@@ -22,6 +22,7 @@ from transformer_rl.formal.tasks.skills import PhysicalJumpEvidence, SkillEviden
 from transformer_rl.formal.learning.collection import StructuredCollector
 from transformer_rl.formal.tasks.commands import RequestInputs, TaskCommandPlan, TaskCommandProgram
 from transformer_rl.formal.tasks.protocol import CompletedEstimate, RequestResponse
+from transformer_rl.formal.control.sensors import SensorModel, SensorModelConfig
 
 
 def fixture(period=.005, *, horizons=(.2, .2), jump=False, trace_sink=None):
@@ -438,3 +439,27 @@ def test_bad_command_plan_is_rejected_without_reseeding_or_physical_progress():
     with pytest.raises(ValueError, match='reseeds'):
         env.reset(seed=88)
     assert sim.steps == 0 and writes == []
+
+
+def test_physics_sensor_history_reaches_the_actor_while_critic_and_labels_stay_clean():
+    env, _, sim, _, _ = fixture(horizons=(1., 1.))
+    plant = env.lifecycle.plant
+    config = SensorModelConfig(nominal_episode_fraction=0., extra_delay_probability=1.,
+                               observation_delays_s=(.015,))
+    sensors = SensorModel(2, 8191, config)
+    plant.sensor_model = env.sensor_source = sensors
+    env.reset()
+    assert sensors.initialized.all() and sensors.count.eq(0).all()
+    for _ in range(8):
+        step = advance(env)
+    assert sim.steps == sensors.physical_tick == 16
+    assert sensors.noise_rows_consumed == 16
+    tick = plant._last_tick_packet
+    clean = plant.scene.observation.assembler.clean_sensors(tick.measured)
+    delayed = sensors(tick.measured)
+    assert (delayed.sampled_at_s < clean.sampled_at_s).all()
+    torch.testing.assert_close(step.observation.critic[:, 4:7], tick.measured.angular_velocity_body_rad_s * .5)
+    assert not torch.equal(step.observation.frame[:, 4:7], step.observation.critic[:, 4:7])
+    torch.testing.assert_close(step.observation.labels.velocity_body_m_s, tick.measured.velocity_origin_body_m_s)
+    assert step.observation.frame[:, 14:16].eq(0).all()
+    assert env.lifecycle.policy_allowed.all()

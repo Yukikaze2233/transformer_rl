@@ -19,6 +19,7 @@ from ..control.actuation import DriveInterval, EffectiveDriveResponse, FeedbackE
 from ..control.pressure import NativeSliderPressure, PressureState
 from ..control.observation import MeasuredState, RigidBodyMotion, WheelContactHistory
 from ..control.wheel_clearance import WheelClearanceSample
+from ..control.sensors import SensorModel
 
 
 @dataclass(frozen=True)
@@ -56,7 +57,7 @@ class NativePhysicsPlant:
 
     def __init__(self, sim, scene: NativeSceneState, controller: OutputFeedbackController,
                  drive: EffectiveDriveResponse, pressure: NativeSliderPressure, *, native_to_tensor,
-                 ground_query, timing_path):
+                 ground_query, timing_path, sensor_model=None):
         if (not isinstance(scene, NativeSceneState) or not isinstance(controller, OutputFeedbackController)
                 or not isinstance(drive, EffectiveDriveResponse) or not isinstance(pressure, NativeSliderPressure)
                 or not callable(native_to_tensor) or not callable(ground_query)
@@ -72,6 +73,11 @@ class NativePhysicsPlant:
             raise ValueError('plant components must share the actual native owner, environment count, device and clock')
         self.sim, self.scene, self.controller, self.drive, self.pressure = sim, scene, controller, drive, pressure
         self.num_envs, self.device, self.dt = bridge.num_envs, bridge.device, bridge.physics_dt_s
+        if (sensor_model is not None and (not isinstance(sensor_model, SensorModel)
+                or sensor_model.num_envs != self.num_envs or sensor_model.device != self.device
+                or sensor_model.config.physics_dt_s != self.dt or sensor_model.physical_tick != bridge.physical_tick)):
+            raise ValueError('sensor model must share the actual plant batch, device and physical clock')
+        self.sensor_model = sensor_model
         self._convert, self._ground = native_to_tensor, ground_query
         self.timing_path = timing_path
         self._view, self._faulted, self.targets = scene.robot.root_view, False, None
@@ -181,6 +187,8 @@ class NativePhysicsPlant:
                                       self.scene.environment_origins_m, ground.wheel_friction, contacts.timestamp_s,
                                       bridge.binding.native_body_names)
             measured = bridge.measure(surfaces)
+            if self.sensor_model is not None:
+                self.sensor_model.push(measured, bridge.physical_tick)
             # Positive normal patch loads are used for contact labels. The
             # critic's diagnostic force vector may legitimately cancel.
             self.contact_history.push(contacts.normal_load_n[:, list(bridge.binding.wheel_body_indices)],
@@ -221,6 +229,8 @@ class NativePhysicsPlant:
             robot.reset(ids)
             self.drive.reset(mask)
             self.contact_history.reset(mask, bridge.timestamp_s())
+            if self.sensor_model is not None:
+                self.sensor_model.reset(mask, bridge.timestamp_s())
             if self.targets is not None:
                 fresh = self.controller.decode(torch.zeros(self.num_envs, 6, device=self.device),
                                                 joint_position[:, self._active], bridge.timestamp_s())

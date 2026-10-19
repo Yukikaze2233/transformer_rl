@@ -23,6 +23,7 @@ from ..simulation.scene import NativeSceneRecipe
 from ..simulation.task import NativeTaskLimits
 from ..simulation.terrain import NativeShapeQueries, TerrainEditTuning
 from ..control.actuation import PairTargetDomain, ResponseParameters
+from ..control.sensors import SensorModel, SensorModelConfig
 from ..tasks.recovery import RecoveryTuning
 from ..tasks.reset_program import ResetProgramTuning
 from ..tasks.geometry import TerrainKind
@@ -36,13 +37,23 @@ def parse_tuning(value):
     parsed = dict(value)
     for name, config_type in (('reset', ResetProgramTuning), ('recovery', RecoveryTuning),
                               ('limits', NativeTaskLimits), ('command_rates', CommandRates),
-                              ('terrain_edit', TerrainEditTuning)):
+                              ('terrain_edit', TerrainEditTuning), ('sensors', SensorModelConfig)):
         raw = dict(parsed[name])
         if name == 'limits':
             raw['forbidden_body_names'] = tuple(raw['forbidden_body_names'])
         parsed[name] = config_type(**raw)
     parsed['pair_domain'] = PairTargetDomain(**parsed['pair_domain']) if parsed['pair_domain'] is not None else None
     return NativeRuntimeTuning(**parsed)
+
+
+def _initial_policy_boundary(sim, scene):
+    """完成一个真实100Hz准备区间，避免在奇数200Hz tick创建生命周期。"""
+    bridge = scene.observation
+    if sim.cfg.dt != .005 or bridge.physical_tick != 0:
+        raise ValueError('initial refresh requires a fresh200Hz scene before its first physical step')
+    for _ in range(2):
+        sim.step(render=False)
+        bridge.after_physics_step(bridge.physical_tick + 1)
 
 
 @contextmanager
@@ -109,10 +120,7 @@ def runtime(recipe, components, configuration, *, control):
         scene_recipe = NativeSceneRecipe(configuration['asset_directory'], recipe.asset_manifest_sha256,
                                          response, origins, tuple(c.surface.meshes for c in courses))
         scene = scene_recipe.build_on_admitted_context(sim)
-        # One actual refresh makes the initial post-physics read boundary
-        # explicit. It is physical preparation, not a PPO/sample reservation.
-        sim.step(render=False)
-        scene.observation.after_physics_step(1)
+        _initial_policy_boundary(sim, scene)
         wheels = WheelCollisionCentres.from_urdf(
             (scene_recipe.asset / scene_recipe.manifest['urdf']).read_bytes(), scene.observation.binding)
         query = omni.physx.get_physx_scene_query_interface()
@@ -122,16 +130,21 @@ def runtime(recipe, components, configuration, *, control):
         terrain_presence = NativeShapeQueries(query, tuning.terrain_edit.native_query_offset_m)(
             scene.contacts.terrain_paths_by_environment, scene.terrain_meshes,
             scene.environment_origins_m, required_present=True)
+        sensors = SensorModel(recipe.num_envs, recipe.training_seed + 1299709, tuning.sensors,
+                              device=recipe.device, initial_physical_tick=scene.observation.physical_tick)
         value = NativeTaskRuntime.on_admitted_scene(
             sim, scene, recipe, components, tuning, asset_directory=scene_recipe.asset, response=response,
             design_courses=courses, native_to_tensor=wp.to_torch,
-            sensor_source=scene.observation.assembler.clean_sensors)
+            sensor_source=sensors)
         write_json(Path(control.binding['attempt']) / 'native_setup.json', {
             'boot': boot_id(), 'scene_readback': scene.readback, 'wheel_probe': wheel_receipt,
             'terrain_presence': terrain_presence, 'solver_position_iterations': 12,
             'solver_velocity_iterations': 6, 'automatic_evaluation': False,
             'timing': 'selected_effective_response_no_additional_USB_transport_delay',
-            'sensor_noise_or_delay_randomization_active': False, 'hardware_qualified': False,
+            'sensor_noise_or_delay_randomization_active': True, 'sensor_configuration': configuration['tuning']['sensors'],
+            'sensor_scope': 'actor only; physical-unit uniform noise after past-only observation lag',
+            'sensor_delay_scope': 'engineering stress separate from recorded drive response; no extra USB delay',
+            'hardware_qualified': False,
             'full_task_health_qualified': False})
         yield value
         control.publish(control.state['phase'], SDK_zero_copy_compatibility=dict(statistics))

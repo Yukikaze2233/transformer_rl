@@ -9,6 +9,7 @@ import torch
 from test_reset_program import fixture as program_fixture, draw
 from transformer_rl.formal.simulation.episode import NativeEpisodeLifecycle
 from transformer_rl.formal.runtime.reset_coordinator import ResetBatchCoordinator, ResetSourceNotReady
+from transformer_rl.formal.control.sensors import SensorModel
 
 
 def controlled_draws(program, sizes):
@@ -41,7 +42,7 @@ def fixture():
     # native writes and same-surface metadata adoption have separate tests.
     life = object.__new__(NativeEpisodeLifecycle)
     life.num_envs, life.device = 2, torch.device('cpu')
-    life.plant = SimpleNamespace(scene=scene, controller=controller)
+    life.plant = SimpleNamespace(scene=scene, controller=controller, sensor_model=None)
     life.episode_id, life._last = torch.full((2,), -1, dtype=torch.long), None
     life._last_reset_tick = torch.full((2,), -1, dtype=torch.long)
     life._course_sha256 = ('0' * 64, '1' * 64)
@@ -187,3 +188,19 @@ def test_changed_controller_or_issued_trajectory_is_not_adopted_as_the_previous_
     with pytest.raises(RuntimeError, match='changed'):
         request(coordinator, life)
     assert sizes == [2]
+
+
+def test_complete_task_source_checkpoint_keeps_sensor_rng_but_not_old_physical_readings():
+    original, life, clock, _ = fixture()
+    sensor = life.plant.sensor_model = SensorModel(2, 661)
+    sensor.reset(torch.ones(2, dtype=torch.bool), clock.clone())
+    plan = request(original, life)
+    apply(life, plan)
+    saved = original.checkpoint_state_dict()
+    cold, cold_life, _, _ = fixture()
+    cold_sensor = cold_life.plant.sensor_model = SensorModel(2, 661)
+    cold.load_after_explicit_cold_setup(saved)
+    assert torch.equal(sensor.generator.get_state(), cold_sensor.generator.get_state())
+    assert cold_sensor.reset_rows_consumed == 2
+    assert cold_sensor.count.eq(0).all() and not cold_sensor.initialized.any()
+    assert cold_life.episode_id.eq(-1).all()

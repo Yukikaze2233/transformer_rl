@@ -6,7 +6,7 @@ sensor implementation, then owns reset, collection and learning boundaries.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import math
@@ -25,6 +25,7 @@ from ..simulation.task import NativeTaskEnvironment, NativeTaskLimits
 from ..simulation.terrain import NativeTerrainEditor, NativeTerrainInstaller, TerrainEditTuning
 from ..control.actuation import EffectiveDriveResponse, OutputFeedbackController, PairTargetDomain, ResponseParameters
 from ..control.pressure import NativeSliderPressure, PressureParameters
+from ..control.sensors import SensorModel, SensorModelConfig
 from ..tasks.recovery import RecoveryPoseCompiler, RecoveryTuning
 from ..tasks.reset_collision import AssetCollisionGeometry
 from .reset_coordinator import ResetBatchCoordinator
@@ -43,12 +44,14 @@ class NativeRuntimeTuning:
     terrain_edit: TerrainEditTuning
     pair_domain: PairTargetDomain | None
     knee_margin_rad: float = .05
+    sensors: SensorModelConfig = field(default_factory=SensorModelConfig)
 
     def __post_init__(self):
         if (any(not isinstance(getattr(self, name), cls) for name, cls in
                 (('reset', ResetProgramTuning), ('recovery', RecoveryTuning), ('limits', NativeTaskLimits),
                  ('command_rates', CommandRates), ('terrain_edit', TerrainEditTuning)))
                 or self.pair_domain is not None and not isinstance(self.pair_domain, PairTargetDomain)
+                or not isinstance(self.sensors, SensorModelConfig)
                 or type(self.knee_margin_rad) not in (int, float) or not math.isfinite(self.knee_margin_rad)
                 or self.knee_margin_rad <= 0):
             raise ValueError('native runtime requires parsed physical recipe components and a positive knee margin')
@@ -103,7 +106,8 @@ class NativeTaskRuntime:
         pressure = NativeSliderPressure(PressureParameters.from_asset(manifest, model,
             json.loads((asset / 'fit_10mpa.json').read_text())), recipe.num_envs, bridge.device)
         plant = NativePhysicsPlant(sim, scene, controller, drive, pressure, native_to_tensor=native_to_tensor,
-                                    ground_query=ground, timing_path='selected_effective_response_no_extra_transport')
+                                    ground_query=ground, timing_path='selected_effective_response_no_extra_transport',
+                                    sensor_model=sensor_source if isinstance(sensor_source, SensorModel) else None)
         life = NativeEpisodeLifecycle(plant, ground, components.protocol)
         reward = NativeRewardBridge(plant, pins, recipe.collection, knee_margin_rad=tuning.knee_margin_rad,
                                      retired_request_ids=components.protocol.max_seen_id.clone())

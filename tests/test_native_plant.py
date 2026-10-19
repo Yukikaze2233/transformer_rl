@@ -15,6 +15,7 @@ from transformer_rl.formal.simulation.observation import NativeObservationBridge
 from transformer_rl.formal.simulation.plant import GroundReference, NativePhysicsPlant
 from transformer_rl.formal.simulation.scene import NativeSceneState
 from transformer_rl.formal.control.actuation import EffectiveDriveResponse, OutputFeedbackController
+from transformer_rl.formal.control.sensors import SensorModel, SensorModelConfig
 
 
 def fixture(period=.005):
@@ -271,3 +272,23 @@ def test_probe_does_not_allow_an_undeclared_or_duplicate_transport_path():
         NativePhysicsPlant(sim, plant.scene, plant.controller, plant.drive, plant.pressure,
                            native_to_tensor=lambda x: x, ground_query=lambda *_: None,
                            timing_path='add_usb_rtt_and_can_to_effective_tau')
+
+
+def test_actor_sensor_stress_does_not_delay_feedback_or_change_the_native_effort_path():
+    clean, _, _, _ = fixture()
+    noisy, _, _, _ = fixture()
+    sensor = SensorModel(2, 771, SensorModelConfig(nominal_episode_fraction=0., extra_delay_probability=1.))
+    sensor.reset(torch.ones(2, dtype=torch.bool), torch.zeros(2, dtype=torch.float64))
+    noisy.sensor_model = sensor
+    actions = torch.full((2, 6), .1)
+    clean.accept_issued_action(actions)
+    noisy.accept_issued_action(actions)
+    for _ in range(4):
+        first, second = clean.step_physics(), noisy.step_physics()
+        torch.testing.assert_close(first.feedback.capped_effort, second.feedback.capped_effort)
+        torch.testing.assert_close(first.drive.mean_effort, second.drive.mean_effort)
+        torch.testing.assert_close(first.measured.policy_velocity_rad_s, second.measured.policy_velocity_rad_s)
+        torch.testing.assert_close(first.measured.angular_velocity_body_rad_s, second.measured.angular_velocity_body_rad_s)
+    assert sensor.physical_tick == 4
+    observed = sensor(second.measured)
+    assert not torch.equal(observed.angular_velocity_body_rad_s, second.measured.angular_velocity_body_rad_s)
