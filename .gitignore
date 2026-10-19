@@ -4,9 +4,15 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
 .coverage
 .coverage.*
 htmlcov/
+coverage.xml
+junit.xml
 *.egg-info/
 build/
 dist/
@@ -21,8 +27,8 @@ venv/
 /.secrets/
 
 # Experiment outputs and model weights
-runs/
-logs/
+/runs/
+/logs/
 /outputs/
 /artifacts/
 /checkpoints/
@@ -34,6 +40,8 @@ logs/
 *.pth
 *.ckpt
 *.safetensors
+*.npy
+*.npz
 *.onnx
 *.onnx.json
 *.onnx.data
@@ -41,13 +49,22 @@ logs/
 *.tfevents.*
 events.out.tfevents.*
 *.log
+*.prof
+*.lprof
+*.trace.json
 
 # Generated simulator assets and recordings
-usd_cache/
-.usd_cache/
-sim_cache/
+/usd_cache/
+/.usd_cache/
+/sim_cache/
 /.cache/
 /recordings/
+*.bag
+*.bag.active
+*.mcap
+*.db3
+*.db3-shm
+*.db3-wal
 *.mp4
 *.webm
 *.mkv
@@ -59,3 +76,8 @@ Thumbs.db
 *.swp
 *.swo
 *~
+/.idea/
+/.vscode/
+/.local/
+/.tmp/
+/tmp/

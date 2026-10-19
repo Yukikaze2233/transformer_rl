@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "transformer-rl"
-version = "0.1.0"
-description = "Time-aware causal Transformer control with an independent PyTorch PPO trainer"
+version = "0.2.0.dev0"
+description = "Structured Transformer control with independent PPO training and managed learning recovery"
 authors = [{name = "yukikaze2233", email = "yingziyuw@gmail.com"}]
 requires-python = ">=3.11"
 dependencies = ["torch>=2.7,<3", "numpy>=1.26"]

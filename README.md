@@ -1,14 +1,20 @@
 # transformer_rl
 
-这个项目研究的是：**在机器人的控制任务里，什么形式的 Transformer 更合适？**
+这个项目实现轻量 Transformer 运动控制策略、独立 PPO 和可恢复的训练运行管理，同时保留 MLP、历史编码器与 Transformer 的研究对照。
 
 我们关心机器人能否完成任务、站立时是否漂移、不同高度能否保持、动作是否平稳，以及这些表现需要多少训练和推理开销。对照集中于单帧 MLP、历史 MLP 编码器与当前帧直连，以及多种 Transformer。
 
-代码使用 PyTorch，实现独立 PPO、历史管理、学习状态恢复、课程验收、网络选型与 ONNX/TorchScript 部署，没有依赖 RSL-RL。35D 策略以 100 Hz 更新，31 帧覆盖 0.30 s 历史；物理与 PC 反馈控制以 1000 Hz 更新。
+代码使用 PyTorch，不依赖 RSL-RL。`main` 上的正式训练接入采用单一结构化策略：100 Hz 策略、200 Hz 物理、包含当前帧的 5 帧输入（40 ms 跨度）、35D Actor、独立 81D Critic 和 6 维动作；轮支路输出速度目标。课程按连续训练曝光推进，人工评估独立执行。原生仿真接入仍在验证中，代码存在不代表正式训练或实机验收已经完成。
 
-[网络架构](#网络架构) · [使用方法](#使用方法) · [文档](#文档)
+旧研究路径的 31 帧窗口、1 kHz 物理参考、自动评估与选型流程各自保留，不作为上述正式路径的默认设置。
+
+[网络架构](#网络架构) · [使用方法](#使用方法) · [开发与版本管理](docs/DEVELOPMENT.md) · [变更记录](CHANGELOG.md) · [文档](#文档)
 
 ## 网络架构
+
+正式路径采用身体语义编码、短时因果 Transformer、动作 Query 和当前帧直连；状态估计作为训练辅助，特权观测仅进入 Critic 或监督标签。策略、PPO、任务与原生仿真分别管理，不在网络中启动 SDK、安排评价或处理进程控制。
+
+### 保留的研究对照
 
 35D 路径使用 `FramePolicy`，独立 81D Critic 仅用于训练。10 个预设涵盖两个单帧 MLP、两个历史 MLP，以及末帧读出、当前帧 Query、门控残差与容量扩展 Transformer。默认 Transformer 均值网络有 477,062 参数，另有约 18 万、102 万和 227 万参数档位。参数量按结构需要选择；先比较架构收益，再检查容量变化。
 
@@ -52,21 +58,19 @@ Transformer默认使用64维、2层、4个注意力头。辅助监督单独分�
 
 ## 使用方法
 
-### 安装与检查
+### 安装与静态检查
 
 需要 Python 3.11 或更新版本，建议使用独立环境：
 
 ```bash
-python -m pip install -e '.[test,train,export]'
-python -m transformer_rl inspect --config configs/control.json
-python -m pytest -q
+python tools/check_repository.py
 ```
 
-`inspect`只显示网络配置和参数量，不创建仿真环境。
+该命令只分析文件、配置和版本元数据，不导入模型。模型、单元、接口、性能和仿真验证在 Kaiser 上执行；在其已配置环境中按需安装 `.[test,train,export]` 并运行对应检查。`inspect` 会创建模型以显示配置和参数量，也在 Kaiser 执行。
 
-### 35D 网络训练与选型
+### 旧 35D 研究训练与选型
 
-离线检查默认 100 Hz 模型：
+在 Kaiser 检查研究路径的 100 Hz 模型：
 
 ```bash
 python -m transformer_rl frame inspect --config configs/frame_training.json
@@ -125,6 +129,8 @@ python -m transformer_rl.experiment_cli summarize \
 
 ## 文档
 
+- [开发流程、源码与运行产物边界、版本管理](docs/DEVELOPMENT.md)
+- [变更记录](CHANGELOG.md)
 - [35D 策略网络架构与部署数据流](docs/FRAME_ARCHITECTURE.md)
 - [35D 训练、课程保持、选型与部署](docs/FRAME_TRAINING.md)
 

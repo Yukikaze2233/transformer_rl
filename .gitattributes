@@ -1,0 +1,23 @@
+* text=auto
+
+*.py text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.csv text eol=lf
+*.svg text eol=lf
+*.urdf text eol=lf
+*.usda text eol=lf
+*.obj text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.pdf binary
+*.stl binary
+*.usd binary
+*.usdc binary
+*.glb binary

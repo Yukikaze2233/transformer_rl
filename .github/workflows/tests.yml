@@ -1,31 +1,22 @@
-name: tests
-on: [push, pull_request]
+name: Repository checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  cpu:
+  repository:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      OMP_NUM_THREADS: "2"
-      MKL_NUM_THREADS: "2"
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Checkpoint migration tests compare against the actual historical model.
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install verified CPU test stack
-        run: |
-          python -m pip install "torch==2.11.0+cpu" --index-url https://download.pytorch.org/whl/cpu
-          python -m pip install "numpy==2.4.6" "pytest==9.1.1" "onnx==1.23.0rc1" "onnxruntime==1.30.0"
-          python -m pip install "tensorboard==2.21.0"
-          python -m pip install --no-deps -e .
-          python -m pip check
-      - name: Inspect architecture
-        run: |
-          python -m transformer_rl inspect --config configs/control.json
-          python -m transformer_rl frame inspect --config configs/frame_training.json
-      - name: Unit and interface checks
-        run: python -m pytest -q -ra
+      - name: Check tracked source and version metadata
+        run: python tools/check_repository.py
