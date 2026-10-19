@@ -8,7 +8,7 @@ import torch
 from test_native_terrain import fixture
 from transformer_rl.formal.simulation.terrain import NativeTerrainInstaller
 from transformer_rl.formal.simulation.terrain_stream import NativeTerrainStream
-from transformer_rl.formal.tasks.geometry import TerrainKind, TerrainQueryBatch
+from transformer_rl.formal.tasks.geometry import TerrainKind, TerrainQueryBatch, TerrainSurface
 from transformer_rl.formal.tasks.terrain import ContinuousTerrainGenerator, TerrainExtent, TerrainRequest, TerrainTuning
 
 
@@ -68,6 +68,27 @@ def test_full_flat_domain_uses_small_exact_plane_tiles_and_one_shared_source():
     query = TerrainQueryBatch((moved.surface,)).at(points)
     assert query.valid.all() and query.height_m.eq(0).all()
     assert moved.sha256 == first.sha256
+
+
+def test_metadata_only_reset_preserves_the_authored_tile_objects_before_live_streaming():
+    env, _, _, _, editor, _, installer = admitted_rough(flat())
+    ground = env.lifecycle.ground
+    old = ground.courses
+    fresh_surface = TerrainSurface(tuple(replace(p) for p in old[0].surface.patches))
+    fresh = replace(old[0], geometry_seed=old[0].geometry_seed + 1, surface=fresh_surface)
+    assert fresh.surface.meshes[0] is not old[0].surface.meshes[0]
+    ground.replace_same_surface_courses((fresh, old[1]), torch.tensor([True, False]))
+    bound = ground.courses[0]
+    assert bound.sha256 == fresh.sha256 and bound.geometry_seed == fresh.geometry_seed
+    assert bound.surface is old[0].surface
+    keys = set(bound.resident_tiles)
+    last = max(j for _, j in keys)
+    moved = bound.with_tiles(keys | {(i, last + 1) for i, _ in keys})
+    result = editor.replace_courses(ground, (moved, old[1]), torch.tensor([True, False]),
+                                    protected_xy_m=torch.tensor([[[-1., 1.], [-1., 1.]]] * 2))
+    installer.adopt(result)
+    assert result.receipt['retained_collider_count'] == len(keys)
+    assert result.scene.readback['terrain_reset_required_rows'] == ()
 
 
 @pytest.mark.parametrize('kind', ['rough', 'flat'])

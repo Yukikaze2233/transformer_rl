@@ -1,7 +1,7 @@
 """Private privileged ground query at root and actual wheel collider centres."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import math
 import xml.etree.ElementTree as ET
@@ -155,7 +155,10 @@ class NativeGroundQuery:
         return courses
 
     def replace_same_surface_courses(self, courses, reset_mask):
-        self.courses = self.validate_same_surface_courses(courses, reset_mask)
+        courses = self.validate_same_surface_courses(courses, reset_mask)
+        # 元数据更新沿用真实碰撞体绑定的patch，后续铺块仍可保留原prim。
+        self.courses = tuple(replace(new, surface=old.surface) if new.surface is not old.surface else new
+                             for old, new in zip(self.courses, courses))
         self.last_sample = None
 
     @torch.no_grad()
