@@ -86,6 +86,7 @@ class NativeGroundQuery:
         if tuple(binding.native_body_names[i] for i in binding.wheel_body_indices) != wheels.body_names:
             raise ValueError('wheel geometry does not match the native named body order')
         self.scene, self._view = scene, scene.robot.root_view
+        self.courses = courses  # Native order, bound to exactly the authored meshes.
         self.device, self.num_envs = scene.observation.device, count
         self.batch = TerrainQueryBatch(tuple(c.surface for c in courses), device=self.device)
         self._origins = scene.environment_origins_m.detach().clone()
