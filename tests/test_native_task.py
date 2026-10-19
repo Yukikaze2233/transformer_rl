@@ -99,6 +99,36 @@ def test_composed_native_task_advances_exact_physics_then_one_reward_and_five_fr
     assert torch.equal(result.observation.frame[:, 22:28], torch.ones(2, 6))
 
 
+def test_reset_preparation_action_holds_the_requested_birth_pose_without_counting_actor_samples():
+    env, _, _, _, _ = fixture()
+    source = env.reset_source
+    hold = torch.tensor([[.2, -.3, .4, -.5, 0., 0.], [-.2, .3, -.4, .5, 0., 0.]])
+    env.reset_source = lambda *args: replace(source(*args), preparation_issued_action=hold.clone())
+    env.reset()
+    for _ in range(5):
+        result = advance(env)
+        assert not result.fully_policy_owned.any() and not result.reward.any()
+        assert torch.equal(result.observation.frame[:, 22:28], hold)
+    assert result.observation.policy_allowed.all()
+    original = env.preparation_action.clone()
+    next_hold = hold + .1
+    env.reset_source = lambda *args: replace(source(*args), preparation_issued_action=next_hold.clone())
+    env._reset_rows(torch.tensor([True, False]))
+    assert torch.equal(env.preparation_action[0], next_hold[0])
+    assert torch.equal(env.preparation_action[1], original[1])
+
+
+def test_invalid_preparation_action_is_rejected_before_any_native_reset_write():
+    env, _, _, writes, _ = fixture()
+    source = env.reset_source
+    hold = torch.zeros(2, 6)
+    hold[1, 0] = float('nan')
+    env.reset_source = lambda *args: replace(source(*args), preparation_issued_action=hold)
+    with pytest.raises(ValueError, match='action'):
+        env.reset()
+    assert not writes and not env.preparation_action.any()
+
+
 def test_time_limit_uses_full_policy_owned_horizon_and_preserves_pre_reset_critic_and_labels():
     env, _, sim, _, resets = fixture(horizons=(.04, .2))
     env.reset()

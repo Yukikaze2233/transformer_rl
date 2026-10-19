@@ -94,6 +94,14 @@ class FeedbackEffort:
     pd_computed_at_s: torch.Tensor
 
 
+@dataclass(frozen=True)
+class ResetHoldAction:
+    requested_action: torch.Tensor
+    admitted: torch.Tensor
+    target_error_rad: torch.Tensor
+    pair_projected: torch.Tensor
+
+
 class OutputFeedbackController:
     """Position PD on four root output axes; wheel output speed feedback on two.
 
@@ -160,6 +168,28 @@ class OutputFeedbackController:
             raise ValueError('position target winding overflowed its native representation')
         return OutputTargets(issued.clone(), desired.clone(), admitted.flatten(-2),
                               issued[:, 4:] * 10, projected, turns.clone(), policy_issued_at_s.clone())
+
+    @torch.no_grad()
+    def reset_hold_action(self, feedback_position_rad, *, position_tolerance_rad):
+        """Describe a zero-wheel-speed hold;never silently clip a recovery pose.
+
+        Common pair winding is the inverse of decode. Independent axis wrapping
+        would accept an impossible knee geometry or change a chain's branch.
+        The returned admission includes the actual pair-domain projection.
+        """
+        self._matrix('reset output coordinates', feedback_position_rad, 6)
+        if (type(position_tolerance_rad) not in (int, float) or not math.isfinite(position_tolerance_rad)
+                or position_tolerance_rad <= 0):
+            raise ValueError('reset output hold needs an explicit numeric target comparison tolerance')
+        difference = (feedback_position_rad[:, :4].double() - self.nominal[:4].double()).unflatten(-1, (2, 2))
+        turns = torch.floor(difference.mean(-1) / (2 * math.pi) + .5)
+        action = torch.zeros_like(feedback_position_rad)
+        action[:, :4] = ((difference - turns[..., None] * (2 * math.pi)).flatten(-2) / .25).float()
+        decoded = self.decode(action, feedback_position_rad, torch.zeros(self.num_envs, dtype=torch.float64,
+                                                                         device=self.device))
+        error = (decoded.admitted_leg_position_rad - feedback_position_rad[:, :4]).abs()
+        admitted = (action.abs() <= self.action_bounds).all(-1) & (error <= position_tolerance_rad).all(-1)
+        return ResetHoldAction(action, admitted, error, decoded.pair_projected)
 
     @torch.no_grad()
     def effort(self, targets: OutputTargets, feedback_position_rad, feedback_velocity_rad_s,

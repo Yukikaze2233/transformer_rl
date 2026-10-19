@@ -238,9 +238,17 @@ class AssetCollisionGeometry:
             if (not isinstance(value, torch.Tensor) or value.shape != shape or value.dtype != torch.float64
                     or value.device != self.device or not torch.isfinite(value).all()):
                 raise ValueError('source birth positions,orientations and patch require finite float64 native rows')
+        if type(clearance_m) in (int, float):
+            clearance = torch.full((n,), clearance_m, dtype=torch.float64, device=self.device)
+        elif (isinstance(clearance_m, torch.Tensor) and clearance_m.shape == (n,)
+              and clearance_m.dtype == torch.float64 and clearance_m.device == self.device):
+            clearance = clearance_m.detach().clone()
+        else:
+            raise ValueError('birth clearance requires an explicit scalar or float64 per-row metres')
         if ((root_orientation_xyzw.norm(dim=-1) - 1).abs().gt(1e-8).any()
+                or not torch.isfinite(clearance).all() or clearance.lt(0).any()
                 or any(type(v) not in (int, float) or not math.isfinite(v) or v < 0
-                       for v in (clearance_m, loop_tolerance_m, wheel_support_tolerance_m))
+                       for v in (loop_tolerance_m, wheel_support_tolerance_m))
                 or loop_tolerance_m == 0 or wheel_support_tolerance_m == 0 or len(patch.course_sha256) != n):
             raise ValueError('source birth needs unit xyzw and explicit plane/closure/support tolerances')
         state = self.kinematics.forward(tree_position)
@@ -264,7 +272,7 @@ class AssetCollisionGeometry:
             high[:, body] = torch.maximum(high[:, body], centre + extent)
         if not torch.isfinite(low).all() or not torch.isfinite(high).all():
             raise ValueError('every body must contribute finite complete collision support')
-        height = patch.height_world_z_m + clearance_m - low[:, :, 2].amin(-1)
+        height = patch.height_world_z_m + clearance - low[:, :, 2].amin(-1)
         gaps = low[:, :, 2] + height[:, None] - patch.height_world_z_m[:, None]
         footprint = torch.stack((low[:, :, :2].amin(1), high[:, :, :2].amax(1)), -1)
         covers = ((footprint[:, :, 0] >= patch.bounds_world_xy_m[:, :, 0] - 1e-9)
@@ -285,14 +293,21 @@ class AssetCollisionGeometry:
         from ._native_task import NativeTaskResetPlan
         from ._task_commands import TaskCommandPlan
 
-        if not isinstance(commands, TaskCommandPlan) or required_support not in ('two_wheels', 'any_collider'):
+        if not isinstance(commands, TaskCommandPlan):
             raise ValueError('native reset preparation requires explicit commands and standing/recovery support semantics')
+        if isinstance(required_support, str) and required_support in ('two_wheels', 'any_collider'):
+            two_wheels = torch.full((len(tree_position),), required_support == 'two_wheels',
+                                    dtype=torch.bool, device=self.device)
+        elif (isinstance(required_support, torch.Tensor) and required_support.shape == (len(tree_position),)
+              and required_support.dtype == torch.bool and required_support.device == self.device):
+            two_wheels = required_support.detach().clone()
+        else:
+            raise ValueError('required support needs its explicit standing/recovery row mask')
         placement = self.place(tree_position, root_orientation_xyzw, root_world_xy_m, patch,
                                clearance_m=clearance_m, loop_tolerance_m=loop_tolerance_m,
                                wheel_support_tolerance_m=wheel_support_tolerance_m)
         ready = placement.geometry_ready.clone()
-        if required_support == 'two_wheels':
-            ready &= placement.bilateral_wheel_support
+        ready &= ~two_wheels | placement.bilateral_wheel_support
         if not ready.all():
             raise ValueError('source reset candidate has unresolved closure,limits,footprint or required support')
         if commands.task_horizon_s.shape != (len(tree_position),) or commands.task_horizon_s.device != self.device:
@@ -319,7 +334,7 @@ class AssetCollisionGeometry:
         wheel_gap = encoded.wheel_gap_m + upward[:, None]
         supported = ((wheel_gap >= 0) & (wheel_gap <= wheel_support_tolerance_m)).all(-1)
         if (not encoded.geometry_ready.all() or not torch.isfinite(native_pose).all()
-                or required_support == 'two_wheels' and not supported.all()):
+                or (two_wheels & ~supported).any()):
             raise ValueError('float32 reset encoding lost source closure,limits,footprint or required wheel support')
         encoded_pose = encoded.root_pose_xyzw.clone()
         encoded_pose[:, 2] = native_height.double()

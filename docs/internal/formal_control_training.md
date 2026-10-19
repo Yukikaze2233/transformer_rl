@@ -382,6 +382,18 @@ TensorBoard统一记录奖励每秒、每步贡献、事件数、mask启用率�
 
 源码实际引用28个碰撞OBJ、合计115656B。完整支持法对八组明确root方向生成了不穿该平面的候选，但没有把它们等同完整16恢复配方或物理可恢复状态。保持原直立姿态贴地时，两轮gap仍约`0/1.994859mm`，原1mm准备false保留；与此前f32 FK的约1.994856mm差别是本次f64树计算口径，旧数值和false没有被替换。另一个**新出生候选**在明确±0.02rad区间内求得roll修正`0.004561738rad`（约0.261368°）、root Z约0.318636858m，两轮source平面gap约`5.90e−13/0m`。该候选保持全部joint坐标、连杆和锚点不变，也没有把传感器roll归零或修改任务姿态参考；仅通过同一1mm源码支撑几何条件，不是实际接触/出生稳定或部署验收。
 
+### 连续任务与恢复出生候选
+
+私有[恢复请求编译器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_recovery_poses.py)将原16个名称解析成明确的root方向、左右几何膝角、腿前摆和释放高度/速度。物理前摆符号由所选左右髋轴及轮端杠杆推导，不把镜像电机坐标当同一正方向。复位IK固定两个髋输出、两个指定几何膝角和两个轮坐标，求其余12个坐标（包括两个辅助输出）；这是出生准备，actor仍只控制四个同轴输出位置与两个轮速。几何膝角按原40°..107°止挡映射到两侧不同native坐标，不把非线性辅助输出直接叫作膝电机。
+
+这些16个请求的具体关节配方是工程候选，并未获得物理恢复资格。所选源码检查中15个候选满足该次闭链与当前输出hold检查。第14号（从零编号，腹面着地、双腿朝上）用π前摆解析后未收敛，最大闭链残差约0.240792m，所需髋准备动作约±12.566，而既有腿动作上限为±3。原请求、求解失败和动作值都保留，没有扩大动作box、移动连杆或以站立重抽。这里拒绝的是**当前解和hold准备路径**，不是证明该名称的所有可能姿态不可达，也不是证明一个合法但输出目标域外的跌倒状态无法被策略恢复。其物理语义、闭链解及适当的准备/接管方式仍须解析和验收，不据此删除恢复功能或淘汰网络。
+
+私有[连续reset准备器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_reset_program.py)组合六类TaskDraw、完整连续TerrainCourse、整机source支持与TaskCommandPlan。任务、地形、姿态三个独立RNG和配额状态一起保存；参数或源hash不同拒绝载入，失败不回滚已消费的draw，也不重试。普通30s、请求/恢复60s与完整速度界决定地形extent；本次所选源码16恢复探针每行仍保留±302m两轴范围，没有用出生小平面缩短远处课程。`nominal`只关闭附加出生扰动并采用既有名义命令语义，不移除抽中的恢复ID或粗糙地形。
+
+出生平面只从该行完整课程的entry证明。准备器保留每行闭链、当前输出hold、整机footprint和支撑的不同状态；名义直立/蹲姿才采用显式有界双轮roll修正，其余方向和连续roll/pitch扰动不被投影回站立。浮点编码后的native计划再次检查实际controller的pair投影和输出范围。释放速度定义为世界向下，再换算到body；native COM速度另使用实际逐环境base COM以及`vCOM=vOrigin+ω×offset`，不能把source名义COM偷偷用在随机化实体上。
+
+准备动作由实际出生输出位置反算：两侧共同整圈解缠、四腿位置hold、两轮零速度。不能用独立wrap改变闭链相对位置，也不能把越界位置clip后宣称hold成功。NativeTaskEnvironment在任何native reset写入前验证动作，并只更新被reset的行；前五帧继续作为脚本准备，actor采样不计PPO收益。数据计划仍要求当前实际course SHA，改变course先抛TerrainRebuildRequired，不能以新的任务标签覆盖旧碰撞。该实现完成批次的source准备与native数据组包，尚未完成任意连续地形的native重建、部分环境新旧批次协调、真实扰动/传感/时序注入及物理恢复准入。
+
 ## 正式优化与预算
 
 新训练seed为2101、2102、2103，各自独立初始化，同一配置和课程。每seed1024环境，rollout48，每次采集49152个fresh转移。新正式默认4个epoch、16个minibatch，每批3072个endpoint、一次完整前后向，不作默认梯度累积；每轮最多64次actor Adam步和196608次优化端点使用。相对旧草案5×32和六次微批累积，优化端点使用减少20%，Adam步从160降为64，前后向微批调用从960降为64；这些是次数比较，不能宣称实际加速15倍。
@@ -555,7 +567,9 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 闭链reset准备先在Kaiser通过[10项运动学及所选源码检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-geometry-20261019T080317Z-b56897af/validation-0001.json)。接入全body碰撞支持、own flat patch与native reset数据组包后，[73项检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-geometry-20261019T080317Z-b56897af/validation-0002.json)；加入明确有界的出生roll候选并保留原准备false后，[74项检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-geometry-20261019T080317Z-b56897af/validation-0003.json)。最后检查float32写入坐标，加入whole-turn相位在float32丢失后必须拒绝的对照，[75项最终回归通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-geometry-20261019T080317Z-b56897af/validation-0004.json)。分组重叠，不相加。包括独立FK/Jacobian、被动求解不改六个指定输出、不可达行不影响可达行、源限位、整机body支持、完整圆柱、点chunk等价、最高共享边/空洞/斜面拒绝、数值proof变更、错误mesh hash、轮native次序、极小支持区拒绝和bounded correction不越界。所有检查仍为Kaiser CPU合成/源码几何；SDK、真实机器人仿真和正式PPO均未执行。
 
-正式PPO仍未启动。下一步须完成任意连续课程的native碰撞重建，将当前reset几何接到完整任务sampler、16恢复关节姿态、扰动/传感/时序来源及实际107°准入/速率/物理条件配方，144案例的原生场景/profile/请求序列与独立技能判据、连续挑战manifest、评价预算的持久预留及正式调度；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
+连续reset及恢复配方先在Kaiser通过[54项检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-program-20261019T084225Z-ed10b3e9/validation-0002.json)，接入三RNG、六任务族、整机出生与准备动作后[71项检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-program-20261019T084225Z-ed10b3e9/validation-0003.json)，增加请求域/身份/dtype的前置拒绝后[76项最终检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reset-program-20261019T084225Z-ed10b3e9/validation-0004.json)。分组重叠，不相加。包括镜像膝角映射、16配方不合并、动作box/pair投影拒绝、连续扰动保留、完整extent与粗糙课程保留、三RNG/配额接续且不改变global RNG、失败尝试不回滚、COM速度独立公式、course变更拒绝、数值proof变更拒绝，以及准备动作只影响reset行、前五帧不计actor收益和非法动作先于native写入拒绝。所有结果仍为Kaiser CPU合成/源码几何检查；SDK、真实机器人仿真与新正式PPO均为零。
+
+正式PPO仍未启动。下一步须完成任意连续课程的native碰撞重建与部分环境新旧批次协调，补齐16恢复候选中未解和未准入的请求，以及扰动/传感/时序来源和实际107°准入/速率/物理条件配方，144案例的原生场景/profile/请求序列与独立技能判据、连续挑战manifest、评价预算的持久预留及正式调度；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 

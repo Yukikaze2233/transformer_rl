@@ -30,6 +30,7 @@ class NativeTaskResetPlan:
     joint_velocity: torch.Tensor
     course_sha256: tuple[str, ...]
     commands: TaskCommandPlan
+    preparation_issued_action: torch.Tensor | None = None
 
 
 class FailureReason(IntFlag):
@@ -197,6 +198,8 @@ class NativeTaskEnvironment:
         if not isinstance(plan, NativeTaskResetPlan):
             raise TypeError('native reset source must return its complete bound plan')
         self.commands.validate_plan(plan.commands)
+        if plan.preparation_issued_action is not None:
+            life._actions(plan.preparation_issued_action)
         if len(plan.course_sha256) != self.num_envs:
             raise ValueError('reset plan requires every actual native course identity')
         if tuple(plan.course_sha256) != life.course_sha256:
@@ -205,6 +208,8 @@ class NativeTaskEnvironment:
                 raise TerrainRebuildRequired(changed, life.course_sha256, tuple(plan.course_sha256))
         result = life.reset(mask, plan.root_pose_xyzw, plan.root_com_velocity, plan.joint_position,
                              plan.joint_velocity, course_sha256=plan.course_sha256)
+        if plan.preparation_issued_action is not None:
+            self.preparation_action[mask] = plan.preparation_issued_action[mask]
         if plant.scene.observation.model_epoch != self.rewards._epoch:
             self.rewards.refresh_model()
         self.commands.reset(mask, plan.commands, now)

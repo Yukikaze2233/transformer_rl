@@ -40,6 +40,22 @@ class PassiveClosure:
     physical_qualification: bool = False
 
 
+@dataclass(frozen=True)
+class PostureClosure:
+    tree_position: torch.Tensor
+    residual_by_constraint_m: torch.Tensor
+    maximum_residual_m: torch.Tensor
+    within_native_limits: torch.Tensor
+    converged: torch.Tensor
+    iterations: int
+    requested_inner_knee_angle_rad: torch.Tensor
+    prescribed_hip_positions: torch.Tensor
+    policy_positions: torch.Tensor
+    source_manifest_sha256: str
+    source_model_sha256: str
+    physical_qualification: bool = False
+
+
 class AssetResetKinematics:
     """Batched full-3D tree/Jacobian, with bounded damped passive-only updates.
 
@@ -135,6 +151,13 @@ class AssetResetKinematics:
                                                    dtype=torch.float64, device=self.device)
         if not torch.isfinite(self.nominal_tree_position).all():
             raise ValueError('selected nominal reset coordinates must be finite')
+        self.knee_tree_indices = tuple(binding.tree_joint_names.index(side.knee_joint) for side in geometry.sides)
+        endpoints = self.nominal_tree_position[None].repeat(2, 1)
+        for column, index in enumerate(self.knee_tree_indices):
+            endpoints[:, index] = endpoints.new_tensor(geometry.sides[column].native_limits_rad)
+        self._knee_endpoint_angles = self.inner_knee_angles(endpoints)
+        if (self._knee_endpoint_angles[1] - self._knee_endpoint_angles[0]).abs().lt(.1).any():
+            raise ValueError('selected geometric knee mapping is not invertible over its source stops')
 
     def _positions(self, value):
         if (not isinstance(value, torch.Tensor) or value.ndim != 2 or value.shape[1] != 18
@@ -190,24 +213,56 @@ class AssetResetKinematics:
         return residual, jac.reshape(len(tree_position), 18, 18)
 
     @torch.no_grad()
-    def solve_passive(self, seed_tree_position, prescribed_policy_positions, *, closure_tolerance_m,
-                      maximum_iterations=48, angular_step_rad=.25, slider_step_m=.01,
-                      slider_scale_m=.05, initial_damping_m2=1e-6):
+    def inner_knee_angles(self, tree_position):
+        state = self.forward(tree_position)
+        names, result = self.binding.native_body_names, []
+        for side in self.geometry.sides:
+            def point(body, local):
+                i = names.index(body)
+                return state.body_position_m[:, i] + (state.body_rotation[:, i] @ tree_position.new_tensor(local)).squeeze(-1)
+            hip = point(side.hip_parent_body, side.hip_pin_parent_m)
+            knee = point(side.upper_body, side.knee_pin_upper_m)
+            wheel = point(side.lower_body, side.wheel_pin_lower_m)
+            axis = (state.body_rotation[:, names.index(side.upper_body)] @ tree_position.new_tensor(side.axis_upper)).squeeze(-1)
+            u, v = hip - knee, wheel - knee
+            u -= (u * axis).sum(-1, keepdim=True) * axis
+            v -= (v * axis).sum(-1, keepdim=True) * axis
+            result.append(torch.atan2(torch.linalg.cross(u, v).norm(dim=-1), (u * v).sum(-1)))
+        return torch.stack(result, -1)
+
+    def native_knee_positions(self, inner_angle_rad):
+        if (not isinstance(inner_angle_rad, torch.Tensor) or inner_angle_rad.ndim != 2
+                or inner_angle_rad.shape[1] != 2 or inner_angle_rad.dtype != torch.float64
+                or inner_angle_rad.device != self.device or not torch.isfinite(inner_angle_rad).all()
+                or ((inner_angle_rad < self.geometry.inner_limits_rad[0])
+                    | (inner_angle_rad > self.geometry.inner_limits_rad[1])).any()):
+            raise ValueError('reset knee request must stay in the explicit selected geometric angle domain')
+        limits = inner_angle_rad.new_tensor([side.native_limits_rad for side in self.geometry.sides])
+        fraction = ((inner_angle_rad - self._knee_endpoint_angles[0])
+                    / (self._knee_endpoint_angles[1] - self._knee_endpoint_angles[0]))
+        native = limits[:, 0] + fraction * (limits[:, 1] - limits[:, 0])
+        return native.clamp(limits[:, 0], limits[:, 1])
+
+    @torch.no_grad()
+    def _solve_fixed(self, seed_tree_position, fixed_indices, prescribed_positions, *, closure_tolerance_m,
+                     maximum_iterations=48, angular_step_rad=.25, slider_step_m=.01,
+                     slider_scale_m=.05, initial_damping_m2=1e-6):
         self._positions(seed_tree_position)
         count = len(seed_tree_position)
-        if (not isinstance(prescribed_policy_positions, torch.Tensor)
-                or prescribed_policy_positions.shape != (count, 6)
-                or prescribed_policy_positions.dtype != torch.float64
-                or prescribed_policy_positions.device != self.device
-                or not torch.isfinite(prescribed_policy_positions).all()
+        if (not isinstance(fixed_indices, tuple) or len(set(fixed_indices)) != len(fixed_indices)
+                or not 1 <= len(fixed_indices) < 18 or any(type(i) is not int or not 0 <= i < 18 for i in fixed_indices)
+                or not isinstance(prescribed_positions, torch.Tensor)
+                or prescribed_positions.shape != (count, len(fixed_indices))
+                or prescribed_positions.dtype != torch.float64 or prescribed_positions.device != self.device
+                or not torch.isfinite(prescribed_positions).all()
                 or type(maximum_iterations) is not int or not 1 <= maximum_iterations <= 256
                 or any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0
                        for v in (closure_tolerance_m, angular_step_rad, slider_step_m,
                                  slider_scale_m, initial_damping_m2))):
             raise ValueError('passive solve requires complete output targets and explicit finite convergence/scaling bounds')
         q = seed_tree_position.detach().clone()
-        q[:, self.policy_tree_indices] = prescribed_policy_positions
-        passive = list(self.passive_tree_indices)
+        q[:, fixed_indices] = prescribed_positions
+        passive = [i for i in range(18) if i not in fixed_indices]
         low, high = self._lower[passive], self._upper[passive]
         q[:, passive] = q[:, passive].clamp(low, high)
         scale = torch.where(self._prismatic[passive], q.new_tensor(slider_scale_m), q.new_tensor(1.))
@@ -236,8 +291,34 @@ class AssetResetKinematics:
             iterations = iteration + 1
         residual = self.closure(q).norm(dim=-1)
         within = ((q >= self._lower - 1e-12) & (q <= self._upper + 1e-12)).all(-1)
-        if not torch.equal(q[:, self.policy_tree_indices], prescribed_policy_positions):
-            raise RuntimeError('passive solver altered prescribed motor/wheel coordinates')
+        if not torch.equal(q[:, fixed_indices], prescribed_positions):
+            raise RuntimeError('closed-chain solver altered its explicitly prescribed coordinates')
         maximum = residual.amax(-1)
-        return PassiveClosure(q, residual, maximum, within, within & (maximum <= closure_tolerance_m), iterations,
+        return q, residual, maximum, within, within & (maximum <= closure_tolerance_m), iterations
+
+    @torch.no_grad()
+    def solve_passive(self, seed_tree_position, prescribed_policy_positions, **options):
+        q, residual, maximum, within, converged, iterations = self._solve_fixed(
+            seed_tree_position, self.policy_tree_indices, prescribed_policy_positions, **options)
+        return PassiveClosure(q, residual, maximum, within, converged, iterations,
                                prescribed_policy_positions.detach().clone(), self.manifest_sha256, self.model_sha256)
+
+    @torch.no_grad()
+    def solve_posture(self, seed_tree_position, hip_positions, inner_knee_angle_rad, **options):
+        """Geometric reset IK; the actor still controls only coaxial outputs."""
+        self._positions(seed_tree_position)
+        count = len(seed_tree_position)
+        if (not isinstance(hip_positions, torch.Tensor) or hip_positions.shape != (count, 2)
+                or hip_positions.dtype != torch.float64 or hip_positions.device != self.device
+                or not torch.isfinite(hip_positions).all() or not isinstance(inner_knee_angle_rad, torch.Tensor)
+                or inner_knee_angle_rad.shape != (count, 2)):
+            raise ValueError('posture reset needs prescribed left/right output hips and geometric knee angles')
+        hip_indices = (self.policy_tree_indices[0], self.policy_tree_indices[2])
+        wheels = self.policy_tree_indices[4:]
+        fixed = hip_indices + self.knee_tree_indices + wheels
+        values = torch.cat((hip_positions, self.native_knee_positions(inner_knee_angle_rad),
+                             seed_tree_position[:, wheels]), -1)
+        q, residual, maximum, within, converged, iterations = self._solve_fixed(seed_tree_position, fixed, values, **options)
+        return PostureClosure(q, residual, maximum, within, converged, iterations,
+                               inner_knee_angle_rad.detach().clone(), hip_positions.detach().clone(),
+                               q[:, self.policy_tree_indices].clone(), self.manifest_sha256, self.model_sha256)
