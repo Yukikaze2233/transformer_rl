@@ -340,6 +340,63 @@ class PhysicalRewardComposer:
         window['last_timestamp'] = sample.timestamp_s.detach().clone()
 
     @torch.no_grad()
+    def finish_from_evidence(self, evidence, *, terminated, truncated):
+        """Only complete, matching physical receipts may pay skill credit.
+
+        The lower-level finish kernel stays independently testable. Native
+        environment composition uses this bridge, not a request-FSM estimate.
+        Python packet types are ownership contracts, not qualification proof.
+        """
+        from ._skill_evidence import SkillEvidence, SkillOutcome
+
+        window = self._window
+        if window is None or window['steps'] != self.substeps:
+            raise RuntimeError('physical evidence publication requires a complete reward interval')
+        if not isinstance(evidence, SkillEvidence):
+            raise TypeError('skill credit requires independent physical evidence, not protocol completion')
+        for name, dtype in (('timestamp_s', torch.float64), ('episode_id', torch.long),
+                            ('control_epoch', torch.long), ('physical_success_request_id', torch.long),
+                            ('finished_request_id', torch.long), ('finished_at_s', torch.float64),
+                            ('outcome', torch.long), ('entire_skill_policy_owned', torch.bool),
+                            ('entire_skill_healthy', torch.bool), ('supported_start', torch.bool),
+                            ('flight_seen', torch.bool), ('requested_rise_m', torch.float32),
+                            ('apex_rise_m', torch.float32), ('height_tolerance_m', torch.float32),
+                            ('stable_landing_s', torch.float64)):
+            self._tensor('physical evidence.' + name, getattr(evidence, name), dtype=dtype)
+        success = evidence.physical_success_request_id >= 0
+        completed = evidence.outcome == int(SkillOutcome.PHYSICAL_SUCCESS)
+        invalid = (~torch.isfinite(evidence.timestamp_s) | ~torch.isfinite(evidence.finished_at_s)
+                   | (evidence.timestamp_s != window['last_timestamp'])
+                   | (evidence.episode_id != window['episode']) | (evidence.control_epoch != window['control'])
+                   | (evidence.physical_success_request_id < -1) | (evidence.finished_request_id < -1)
+                   | (evidence.outcome < 0) | (evidence.outcome > int(SkillOutcome.SAFETY_ABORT))
+                   | ((evidence.finished_request_id >= 0) != (evidence.outcome != int(SkillOutcome.NONE)))
+                   | ((evidence.finished_request_id >= 0)
+                      & ((evidence.finished_at_s > evidence.timestamp_s) | (evidence.finished_at_s < 0)))
+                   | (success != completed))
+        if (type(evidence.physical_tick) is not int or evidence.physical_tick < 1
+                or evidence.physical_tick % self.substeps):
+            raise ValueError('physical evidence needs its actual positive native tick')
+        invalid |= (evidence.timestamp_s - evidence.physical_tick * self.physics_dt_s).abs().gt(1e-8)
+        invalid |= success & ((evidence.physical_success_request_id != evidence.finished_request_id)
+                              | (evidence.finished_at_s != evidence.timestamp_s)
+                              | ~evidence.entire_skill_policy_owned | ~evidence.entire_skill_healthy
+                              | ~evidence.supported_start | ~evidence.flight_seen
+                              | ~torch.isfinite(evidence.apex_rise_m) | ~torch.isfinite(evidence.requested_rise_m)
+                              | ~torch.isfinite(evidence.height_tolerance_m) | ~torch.isfinite(evidence.stable_landing_s)
+                              | (evidence.requested_rise_m < .03) | (evidence.requested_rise_m > .30)
+                              | (evidence.height_tolerance_m <= 0) | (evidence.height_tolerance_m > .03 + 1e-6)
+                              | (evidence.height_tolerance_m > .5 * evidence.requested_rise_m + 1e-6)
+                              | ((evidence.apex_rise_m - evidence.requested_rise_m).abs()
+                                 > evidence.height_tolerance_m + 1e-6)
+                              | (evidence.stable_landing_s < 2. - 1e-9))
+        if invalid.any():
+            raise ValueError('physical evidence differs from reward identity, endpoint or complete-skill criteria')
+        return self.finish(terminated=terminated, truncated=truncated,
+                            physical_success_request_id=evidence.physical_success_request_id,
+                            entire_skill_policy_owned=evidence.entire_skill_policy_owned)
+
+    @torch.no_grad()
     def finish(self, *, terminated, truncated, physical_success_request_id, entire_skill_policy_owned):
         window = self._window
         if window is None or window['steps'] != self.substeps:
