@@ -31,6 +31,33 @@ def model(*, full_width=False):
                                                        temporal_layers=1, temporal_ffn=32))
 
 
+def test_request_vertical_velocity_projects_predicted_body_velocity_using_current_imu_gravity():
+    env, network = SyntheticLabeledEnv(), model()
+    original = env._observe
+
+    def tilted(previous):
+        value = original(previous)
+        value.frame[:, 7:10] = torch.tensor([[.2, 0., -(1 - .2**2)**.5], [0., -.3, -(1 - .3**2)**.5]])
+        return value
+
+    env._observe = tilted
+    output = network.actor.policy.outputs
+
+    def known(history):
+        mean, estimate, context = output(history)
+        estimate = estimate.clone()
+        estimate[:, :3] = torch.tensor([[1., 2., .1], [1., 2., .1]])
+        return mean, estimate, context
+
+    network.actor.policy.outputs = known
+    collector = StructuredCollector(env, network)
+    initial = collector.reset()
+    collector.collect(1)
+    expected = -(torch.tensor([[1., 2., .1]]).repeat(2, 1) * initial.frame[:, 7:10]).sum(-1)
+    torch.testing.assert_close(env.estimates[0].velocity_z_m_s, expected)
+    assert not torch.allclose(expected, torch.full((2,), .1))
+
+
 class FirstColumnValue(nn.Module):
     def forward(self, state):
         return state[:, 0]

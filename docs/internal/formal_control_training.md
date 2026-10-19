@@ -224,7 +224,7 @@ episode固定的物理量不逐tick跳变。载荷突变、单侧衰减、接地
 | 落地并连续稳定2s | 消费该ID，解除跳跃任务，切回普通任务 |
 | 失败或安全接管 | 消费或标记失败中止，记录控制权边界；不重复执行原ID |
 
-训练与部署使用同一套由可部署观测和历史估计驱动的协议检测器，不把仿真接触真值或真实飞行相位用于训练FSM而部署时换成另一套检测。物理真值只用于辅助监督、奖励与独立评价。第t步FSM使用此前已完成tick的估计输出，当前actor的新估计供下一tick使用，禁止同tick循环依赖或未来信息。协议状态可以比神经窗口长，actor本身没有跨时间递归状态。
+训练与部署使用同一套由可部署观测和历史估计驱动的协议检测器，不把仿真接触真值或真实飞行相位用于训练FSM而部署时换成另一套检测。物理真值只用于辅助监督、奖励与独立评价。第t步FSM使用此前已完成tick的估计输出，当前actor的新估计供下一tick使用，禁止同tick循环依赖或未来信息。估计头的线速度是base_link机身坐标；向协议提供世界垂向速度时，用当帧可部署IMU重力方向计算`v_world_z=−dot(v_body,g_body/||g_body||)`，不能在机身俯仰时直接拷贝body-z速度。协议状态可以比神经窗口长，actor本身没有跨时间递归状态。
 
 正式验收枚举重复、新请求、起跳前取消、腾空取消、落地再请求等序列，检查“相同actor输入历史却要求不同动作”的协议别名；若发现，修订可见任务语义并重新审查接口，不能靠增大网络或把真相位偷偷加进输入解决。冷恢复重建物理回合时，进行中的物理技能明确记为中止，已消费ID不退款、不再次触发。
 
@@ -337,6 +337,22 @@ reward的gamma和policy dt直接来自同一份`StructuredCollectionConfig`，�
 [奖励桥接](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_control_reward.py)仅接受同tick、同episode、同control epoch及同一实际末帧时间的完整物理收据，并复核2s、双侧顶点容差与全程控制归属；请求FSM结果不能当作该收据。成功ID只计一次，reset和冷恢复都不退款旧ID。触地后的奖励恢复高度采用当前地面，不能继续引用接受时另一个地面的绝对高度。所有接触、间隙与能力阈值仍须经107°物理验收；新私有模块没有启动requests课程或新增正式PPO。
 
 TensorBoard统一记录奖励每秒、每步贡献、事件数、mask启用率、按功能分桶的真实损失与梯度范数。高总reward不能覆盖持续高度偏差、自旋错误、缺失稳态或首次回合失败。
+
+### 单一策略的原生任务闭环
+
+私有[任务环境](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_task.py)组合已有native plant、episode lifecycle、具名奖励桥、物理技能证据和共享请求协议，提供collector所需的`reset`与`step`。它不创建SDK或资源租约，也不选择第二个学习policy。调用者必须显式提供已绑定场景的reset计划、传感器来源、准备期脚本目标和具名物理条件；使用clean sensor的合成检查不等于真实噪声、USB和时序链已接入。
+
+私有[命令程序](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_task_commands.py)把原连续TaskDraw映射到轨迹、外部任务模式及请求计划。六个课程阶段及完整目标域沿用原配额生成器；名义body命令单独处理，HOLD明确保持抽中的目标，不能始终停在通用起点而丢掉该样本。原请求、轮速必要包络投影与slew后的实际命令保留，actor和奖励共用实际命令。几何/速率仍需所选107°和执行器的真实证据，必要包络不等于完整可达域。
+
+一个100Hz区间先锁定当前命令与实际控制权，再开始奖励窗口；完整执行2个200Hz或10个1kHz物理子步。每个子步用实际奖励包更新健康/失败、独立技能真值和奖励参考，随后只在完整端点发布奖励与技能证据。然后才消费此前已完成actor的估计推进请求协议，生成下一帧命令和观测。当前奖励不被新请求或下一帧轨迹覆盖。新接受请求的可见支撑高度锁存自当前准入命令；接受时的真实地面锚点仅存于环境的奖励上下文，部署命令程序推进不需要地面真值。
+
+`NativeTaskLimits`没有猜测性的硬件安全默认值，必须显式给出普通与恢复的高度失败界、健康与失败姿态界、禁止接触body及确认时长、被动膝超界、膝销残差和准备超时。当前实现按每个物理子步累计接触确认并锁存失败，不能因末子步又恢复而抹掉前面的真实失败。恢复模式不把正常的机身触地或大倾角直接当普通站立跌倒，但气簧机械行程与几何约束仍保留。拟合曲线外推和机械止挡超行程继续分开；这些条件的实际数值仍须由物理验收冻结，测试fixture的阈值不进入正式配方。
+
+已交付的安全接管输入在提交下一次物理动作前覆盖actor动作，保存真实控制权变化；请求协议在区间末检测出的接管则保留该区间实际属于策略的结果。脚本段不给PPO或辅助目标，不能把未执行的actor采样动作算成控制收益。交回策略需要显式release及新的传感器/接触准备；它不reset物理现场或切换另一套权重。任务时限只在第一次策略接管时锚定，之后包括脚本和交回在内的所有物理时间继续累计，不因辅助控制重新计时或退款。准备超时是数据就绪错误，不伪造策略跌倒或成功回合。
+
+终止与时限首先保留PRE-reset的真实critic、标签及身份，再同一timestamp重置选中行。时限bootstrap使用旧回合完整末帧；脚本投影、新回合占位和旧episode标签不混用。可选trace sink同步获得每个真实物理子步的tick、奖励输入、条件和参考，默认关闭，不在默认路径额外生成逐步JSON。sink或传感器失败使已消耗区间fault，不补步、不重放；控制接管前的真实末帧与接管后的脚本投影分别保留。
+
+该闭环仍绑定一个实际已作者化的场景。reset来源若要求不同course SHA，必须在native写入前抛出`TerrainRebuildRequired`，不能用新的任务标签覆盖旧碰撞几何，也不以有限atlas替代完整连续课程。动态地形重建、完整reset/扰动来源、逐行越界结局、144案例及连续挑战评价器、原生参数和碰撞验收、正式前端与全部资源准入仍须完成。新增模块没有改变网络参数量、100Hz/35D/81D边界、公开checkpoint格式或旧冻结研究release。
 
 ## 正式优化与预算
 
@@ -479,7 +495,7 @@ Kaiser分别通过[60项地形/课程检查](/home/yukikaze/Documents/workspace/
 
 新增[原生回合边界](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_episode.py)，绑定当前scene、实际clone顺序、地面query和每行完整course SHA。固定几何上的逐行reset会同时更新episode/control epoch、请求中止与去重状态、驱动/接触历史；未选择行的状态与命令保留，物理时钟不清零。同一物理边界不能重复生成空回合。机械模型epoch改变后必须整批重新建立回合，不能让未reset行继续沿用旧模型标签。请求不同course时，在任何native写入前返回带行号及实际/请求身份的`TerrainRebuildRequired`；这只是拒绝错误接线，尚未实现任意连续新地形的原生重建，也没有用有限静态地形替换完整课程分布。
 
-reset发生在已经发布的100Hz边界。旧回合的PRE-reset帧、critic和监督独立保留；新回合即时返回同一timestamp的脚本控制投影，有限actor占位值显式不称为传感器测量，critic/辅助标签无效且不参与PPO。它不读失效的native缓存，不补一次假物理步。随后严格执行200Hz两步或1kHz十步，再读实际传感器；五个新的100Hz传感器帧及完整15ms接触窗口建立后才切回策略。传感器允许有已声明延迟，但采样时刻必须严格晚于该次reset且逐帧前进；时间戳恰好等于reset缺少先后顺序证明，不能计为新帧，重复旧时间戳也不能完成准备。旧投影不会跨新的control epoch进入有效历史。新增`step_requests`入口在物理区间完成后、发布新观测前消费上一帧估计，准备期同时关闭估计valid与新请求准入；NOT_READY请求仍消费ID，不能等准备结束后重放同一ID起跳。完整环境仍需使用该入口接线，而不能仅关闭PPO mask却另行让FSM消费占位估计。
+reset发生在已经发布的100Hz边界。旧回合的PRE-reset帧、critic和监督独立保留；新回合即时返回同一timestamp的脚本控制投影，有限actor占位值显式不称为传感器测量，critic/辅助标签无效且不参与PPO。它不读失效的native缓存，不补一次假物理步。随后严格执行200Hz两步或1kHz十步，再读实际传感器；五个新的100Hz传感器帧及完整15ms接触窗口建立后才切回策略。传感器允许有已声明延迟，但采样时刻必须严格晚于该次reset且逐帧前进；时间戳恰好等于reset缺少先后顺序证明，不能计为新帧，重复旧时间戳也不能完成准备。旧投影不会跨新的control epoch进入有效历史。新增`step_requests`入口在物理区间完成后、发布新观测前消费上一帧估计，准备期同时关闭估计valid与新请求准入；NOT_READY请求仍消费ID，不能等准备结束后重放同一ID起跳。后续新增的NativeTaskEnvironment已经使用该入口接线，继续同时屏蔽准备期估计和新请求准入；真实场景、传感器时序及动态课程仍须单独验收，不能仅关闭PPO mask却另行让FSM消费占位估计。
 
 Kaiser上[45项回合、地面与物理链检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-scene-lifecycle-20261019T033939Z-01731ecd/validation-0001.json)通过，覆盖200Hz/1kHz计步、延迟传感器准备、初次完整reset、选择行复位、同一timestamp末帧与新回合分离、重复/错误物理包拒绝、部分物理调用失败不重放，以及collector→合成native物理链→reset→PPO闭环。该闭环12个策略步、24次合成物理调用中，仅9个端点实际属于策略；准备期和reset占位未混入actor/critic目标。新增请求门控后又通过[11项回合定向检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-scene-lifecycle-20261019T033939Z-01731ecd/validation-0002.json)，验证准备期请求被拒绝且ID保留、策略接管后旧ID不重放、新ID才可接受，以及一个物理区间不能重复处理请求。收紧等时戳规则后，同组[11项检查再次通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-scene-lifecycle-20261019T033939Z-01731ecd/validation-0003.json)，明确第一次读到reset等时戳也不能增加准备帧计数。定向检查和此前回归有重叠，不把它们累加为独立物理实验。SDK上下文和机器人仿真步仍为零。
 
@@ -503,7 +519,11 @@ Kaiser上[29项消费与快照检查](/home/yukikaze/Documents/workspace/transfo
 
 补充所有既有连续地形家族的正反向绑定与场景URDF依赖后，[107项课程/场景/回合/地面/技能接口检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-wheel-clearance-20261019T060644Z-8a70dd09/validation-0003.json)。最后再收紧缺失source SHA与组包期间model epoch改变的拒绝规则，[12项技能输入检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-wheel-clearance-20261019T060644Z-8a70dd09/validation-0004.json)。分组有重叠，不相加为实验数；家族接口检查也不等于144案例物理评价或GPU成本校准。SciPy仅用于Kaiser上已有环境中的独立数值对照，没有加入部署依赖。SDK上下文、真实机器人仿真步和新正式PPO仍为零。
 
-正式PPO仍未启动。下一步须在资源准入后实际执行107°场景构建与native接触/执行器回读，接入具名采样器、请求协议、完整课程及场景生成器，完成出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力路径的真实SDK验收、辨识参数及通信整链回放、新候选周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停闭环不能替代新候选在真实环境中的联合恢复验收。
+原生任务组合先在Kaiser通过[40项命令/环境/采样检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-task-environment-20261019T063757Z-d2a0bf32/validation-0001.json)，随后收紧即时安全接管和任务时限语义，[109项环境、采样、回合、奖励与技能回归通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-task-environment-20261019T063757Z-d2a0bf32/validation-0002.json)。分离奖励地面锚点并采用完整task horizon命名后，[28项环境/命令检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-task-environment-20261019T063757Z-d2a0bf32/validation-0003.json)；保留接管前真实末帧后，[两项定向检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-task-environment-20261019T063757Z-d2a0bf32/validation-0004.json)。最后接入可选逐物理步日志与准备超时，[20项完整环境接口检查通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-task-environment-20261019T063757Z-d2a0bf32/validation-0005.json)。
+
+这些分组有重叠，不相加为独立实验。新的collector→native task→reset→PPO检查实际执行了PyTorch更新，但环境是合成SDK buffers、小尺寸同结构测试网络及显式合成碰撞证明；不是机器人训练，也不证明正式网络的整轮GPU成本。另覆盖世界垂向估计投影、六个课程阶段的连续draw、HOLD抽中目标、当前/下一命令隔离、请求高度锁存、200Hz/1kHz计步、末子步恢复仍保留失败、即时接管动作不记PPO收益、辅助控制不延长时限、旧critic/标签bootstrap、变更地形拒绝、日志错误和准备超时不重放。SDK上下文、真实机器人仿真与新正式PPO仍为零。
+
+正式PPO仍未启动。下一步须完成任意连续课程的native碰撞重建、完整reset/扰动来源、实际107°准入/速率/物理条件配方及144案例/连续挑战评价器；资源准入后实际执行场景构建与native接触/执行器回读、出生和闭链物理验收、完整可达域、当前整轮间隙/滑移/几何余量/质量重力/任务链的真实SDK验收、辨识参数及通信整链回放，再完成周期快照/正式CLI接入、Kaiser实际GPU和SDK整轮成本校准，以及既有队列/资源/全剩余存储准入。全部证据齐备前不把私有候选注册成生产队列，也不把单网络延迟通过写成整机100Hz通过。CPU启停或任务闭环不能替代新候选在真实环境中的联合恢复验收。
 
 内部来源文件与逐项hash保存在[证据索引](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/evidence_index.json)，105与107的结构化比较见[资产差异](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-design-20261018T232325Z-73c2b2df/asset_difference.json)。这些是文件与设计核验，不是新模型性能或物理验收。
 

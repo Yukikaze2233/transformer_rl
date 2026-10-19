@@ -16,8 +16,8 @@ from transformer_rl._physical_observation import CommandMode
 from transformer_rl._structured_collection import StructuredCollectionConfig, StructuredCollector
 
 
-def fixture(period=.005):
-    plant, robot, sim, trace = plant_fixture(period)
+def fixture(period=.005, *, native_plant=None, initialize=True):
+    plant, robot, sim, trace = plant_fixture(period) if native_plant is None else native_plant
     binding = plant.scene.observation.binding
     manifest, spec = asset_sources(binding)
     raw, model = encode(manifest, spec)
@@ -56,8 +56,9 @@ def fixture(period=.005):
     config = StructuredCollectionConfig()
     reward = NativeRewardBridge(plant, geometry, config, knee_margin_rad=.05,
                                  retired_request_ids=torch.full((2,), -1, dtype=torch.long))
-    reward.composer.reset(torch.ones(2, dtype=torch.bool), torch.zeros(2, dtype=torch.float64),
-                            torch.zeros(2, dtype=torch.long), torch.zeros(2, dtype=torch.long))
+    if initialize:
+        reward.composer.reset(torch.ones(2, dtype=torch.bool), torch.zeros(2, dtype=torch.float64),
+                                torch.zeros(2, dtype=torch.long), torch.zeros(2, dtype=torch.long))
     return reward, plant, robot, sim, masses, limits, reads, trace
 
 

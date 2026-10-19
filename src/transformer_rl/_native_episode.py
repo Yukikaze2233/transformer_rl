@@ -237,7 +237,7 @@ class NativeEpisodeLifecycle:
         return result
 
     @torch.no_grad()
-    def observe(self, tick: PhysicalTick, sensors: SensorSample, commands: CommandFeatures):
+    def observe(self, tick: PhysicalTick, sensors: SensorSample, commands: CommandFeatures, *, policy_return_allowed=None):
         self._identity()
         bridge = self._scene.observation
         bridge.before_state_read()
@@ -250,13 +250,15 @@ class NativeEpisodeLifecycle:
                 or not torch.equal(commands.previous_issued_action, self.previous_issued)):
             raise ValueError('episode observation needs its one completed physical interval and actual issued actions')
         assembler = bridge.assembler
+        release = (torch.ones_like(self.policy_allowed) if policy_return_allowed is None else policy_return_allowed)
+        self._mask(release)
         frame = assembler.actor(sensors, commands, now_s=tick.measured.timestamp_s)
         critic = assembler.critic(commands, tick.measured)
         labels = assembler.labels(tick.measured, self.plant.contact_history, self.episode_id, self.control_epoch)
         fresh = ((sensors.sampled_at_s > self._reset_at_s[:, None] + 1e-9)
                  & (sensors.sampled_at_s > self._last_sensor_times + 1e-9)).all(-1)
         proposed = torch.where(fresh, self._fresh_frames + 1, torch.zeros_like(self._fresh_frames))
-        handoff = ~self.policy_allowed & (proposed >= 5) & labels.valid
+        handoff = ~self.policy_allowed & release & (proposed >= 5) & labels.valid
         epoch = self.control_epoch + handoff.long()
         allowed = self.policy_allowed | handoff
         # Only commit counters after all assembler validation succeeds. Reads
@@ -269,3 +271,26 @@ class NativeEpisodeLifecycle:
         self._last_tick, self._stepped, self._last = tick.physical_tick, False, result.owned()
         self._pending_tick = None
         return EpisodeObservation(result.owned(), handoff.clone(), tick.physical_tick)
+
+    @torch.no_grad()
+    def enter_script(self, mask):
+        """Transfer at a published boundary without resetting physical state.
+
+        No expert policy is selected. The caller supplies the explicit script
+        target on subsequent intervals and must explicitly allow policy return.
+        """
+        self._identity()
+        self._mask(mask)
+        bridge = self._scene.observation
+        if (self._last is None or self._stepped or bridge.physical_tick != self._last_tick
+                or self._last_tick % self.substeps or (mask & ~self.policy_allowed).any()):
+            raise RuntimeError('script transfer requires currently policy-owned rows at a published boundary')
+        now = bridge.timestamp_s()
+        self.control_epoch[mask] += 1
+        self.policy_allowed[mask] = False
+        self._fresh_frames[mask] = 0
+        self._reset_at_s[mask] = now[mask]
+        self._last_sensor_times[mask] = -float('inf')
+        self.plant.contact_history.reset(mask, now)
+        self._last = self._projection(mask, now)
+        return EpisodeObservation(self._last.owned(), mask.clone(), self._last_tick)

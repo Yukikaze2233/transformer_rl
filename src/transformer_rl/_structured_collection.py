@@ -251,7 +251,8 @@ class StructuredCollector:
                 gravity = current.frame[:, 7:10]
                 norm = gravity.norm(dim=-1)
                 estimate = CompletedEstimate(
-                    raw_state[:, 2].clone(), raw_state[:, 6:8].sigmoid().clone(),
+                    (-(raw_state[:, :3] * gravity).sum(-1) / norm.clamp_min(1e-8)).clone(),
+                    raw_state[:, 6:8].sigmoid().clone(),
                     (-gravity[:, 2] / norm.clamp_min(1e-8)).clamp(-1, 1).acos(),
                     (current.frame[:, 4:7] * 2).norm(dim=-1), current.timestamp_s.clone(),
                     torch.isfinite(raw_state).all(-1) & (norm > 1e-6),

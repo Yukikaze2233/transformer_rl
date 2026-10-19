@@ -66,7 +66,7 @@ class RequestProtocolConfig:
 
 @dataclass(frozen=True)
 class CompletedEstimate:
-    """Only the previously completed policy tick may supply these SI values."""
+    """Prior-tick SI estimates; vertical speed uses gravity-aligned WORLD-Z."""
 
     velocity_z_m_s: torch.Tensor
     wheel_contact_probability: torch.Tensor
