@@ -327,3 +327,18 @@ def test_training_config_rejects_rate_change_and_invalid_bounds():
         StructuredCollectionConfig(policy_dt_s=0.02)
     with pytest.raises(ValueError):
         StructuredCollectionConfig(action_bounds=(3, 3, 3, 3, 9, 0))
+
+
+def test_rollout_storage_remains_owned_across_the_next_collection():
+    collector = StructuredCollector(SyntheticLabeledEnv(), model())
+    collector.reset()
+    first = collector.collect(4)
+    indices = torch.arange(len(first))
+    frames, actions = first.windows.gather(indices).clone(), first.raw_action.clone()
+    critic, masks = first.critic.clone(), first.masks.actor.clone()
+    second = collector.collect(3)
+    assert first.raw_action.data_ptr() != second.raw_action.data_ptr()
+    assert torch.equal(first.windows.gather(indices), frames)
+    assert torch.equal(first.raw_action, actions)
+    assert torch.equal(first.critic, critic) and torch.equal(first.masks.actor, masks)
+    assert collector.last_metrics['sampled_transitions'] == 6

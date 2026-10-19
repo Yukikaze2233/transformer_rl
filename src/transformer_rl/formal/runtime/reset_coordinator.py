@@ -64,6 +64,7 @@ class ResetBatchCoordinator:
         self._origins = scene.environment_origins_m.double().detach().clone()
         self._issued, self._sequence = None, 0
         self._native_installer = None
+        self.last_reset_rows = 0
 
     def bind_native_installer(self, installer):
         self._identity()
@@ -160,6 +161,7 @@ class ResetBatchCoordinator:
         if (reset_mask & life._last_reset_tick.eq(self._scene.observation.physical_tick)).any():
             raise RuntimeError('native rows already reset at this same physical boundary; do not draw another task')
         rows = reset_mask.nonzero().flatten()
+        self.last_reset_rows = rows.numel()
         local_com = self._scene.observation._local_com_m
         if (not isinstance(local_com, torch.Tensor) or local_com.shape != (self.num_envs, 3)
                 or not torch.isfinite(local_com).all()):

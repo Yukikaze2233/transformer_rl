@@ -348,7 +348,6 @@ class StructuredCheckpointStore:
         if (not isinstance(payload, dict) or payload.get('boundary') != receipt['boundary']
                 or payload.get('metadata') != receipt['metadata']):
             raise ValueError('structured snapshot and receipt describe different completed states')
-        self._read_receipt = receipt
         return payload
 
     def load(self, name):

@@ -171,6 +171,7 @@ class NativeTaskEnvironment:
         self._reward_anchor_valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.last_outcome = None
         self.last_timing = {}
+        self.last_counts = {}
 
     def validate_collection_config(self, config):
         self.rewards.validate_collection_config(config)
@@ -346,6 +347,10 @@ class NativeTaskEnvironment:
                 'endpoint_protocol_observation_s': reset_started - advanced,
                 'reset_s': reset_finished - reset_started,
                 **{'physical_' + name: value for name, value in physical_timing.items()},
+            }
+            self.last_counts = {
+                'reset_rows': getattr(self.reset_source, 'last_reset_rows', 0) if reset is not None else 0,
+                'terrain_stream_changed_rows': getattr(self.terrain_stream, 'last_changed_rows', 0),
             }
             self.last_outcome = {'reward': reward, 'physical_evidence': evidence, 'skill_receipt': skill_receipt,
                                  'request_condition': result, 'request_input': request.owned(),

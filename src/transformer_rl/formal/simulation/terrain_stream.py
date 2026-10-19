@@ -34,12 +34,15 @@ class NativeTerrainStream:
         self._limits = None
         self._tiled = None
         self.last_result = None
+        self.last_changed_rows = 0
+        self.resident_colliders = 0
 
     def _bind(self):
         scene = self.installer.lifecycle.plant.scene
         if scene is self._scene:
             return
         courses = self.installer.lifecycle.ground.courses
+        self.resident_colliders = sum(len(c.surface.meshes) for c in courses)
         limits = [((-float('inf'), float('inf')),)*2] * len(courses)
         tiled = [c.tile_source is not None for c in courses]
         for row, is_tiled in enumerate(tiled):
@@ -60,6 +63,7 @@ class NativeTerrainStream:
 
     @torch.no_grad()
     def __call__(self):
+        self.last_changed_rows = 0
         env, life = self.environment, self.installer.lifecycle
         env._identity()
         if (life._stepped or life._pending_tick is not None or env._in_step
@@ -82,7 +86,9 @@ class NativeTerrainStream:
         if not changed.any():
             return
         courses = list(life.ground.courses)
-        for row in changed.nonzero().flatten().tolist():
+        rows = changed.nonzero().flatten().tolist()
+        self.last_changed_rows = len(rows)
+        for row in rows:
             c = courses[row]
             bounds = protected[row].cpu().tolist()
             keys = c.tile_source.tile_keys(bounds[0], bounds[1], cells=8, halo=1)

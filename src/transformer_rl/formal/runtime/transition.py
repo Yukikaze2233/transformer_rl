@@ -5,10 +5,12 @@ from contextlib import ExitStack
 from dataclasses import replace
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import stat
+import sys
 
 import torch
 
@@ -89,6 +91,37 @@ class _AcceptedSourceStore(StructuredCheckpointStore):
         return restored
 
 
+def _load_original_endpoint(source, previous, journal, exit_pin, authorized_boot):
+    """执行已pin的旧加载器；只缓存其唯一torch.load结果，不改变验收判断。"""
+    path = source.root / 'source/transformer_rl/formal/learning/checkpoint.py'
+    name = 'transformer_rl.formal.learning._source_' + hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+
+    class CapturedTorch:
+        def __getattr__(self, name):
+            return getattr(torch, name)
+
+        def load(self, stream, *args, **kwargs):
+            if hasattr(self, 'payload'):
+                raise RuntimeError('source checkpoint was deserialized more than once')
+            raw = stream.getbuffer()
+            self.pin = {'path': str(previous / 'train/checkpoints/final.pt'),
+                        'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
+            self.payload = torch.load(stream, *args, **kwargs)
+            return self.payload
+
+    capture = CapturedTorch()
+    module.torch = capture
+    recipe = module.LearningRecipe.from_dict(read_json(source.root / 'recipe.json'))
+    store = module.StructuredCheckpointStore(previous / 'train/checkpoints', recipe, journal)
+    _, spent = load_stopped_attempt(store, previous / 'control', parent_exit_pin=exit_pin,
+                                    authorized_current_boot=authorized_boot)
+    return capture.payload, capture.pin, spent
+
+
 def _hold_resources(session, stack):
     descriptor = _lease(session.root)
     stack.callback(os.close, descriptor)
@@ -136,10 +169,8 @@ def migrate_stopped_session(source_root, target_root, *, learner_source, reviewe
             source.root / 'journal', writable=True, authorized_boot=authorized_boot))
         if old_recipe.device == 'cuda:0':
             torch.cuda.init()  # 准入和四把原lease均已持有，才初始化CUDA。
-        old_store = _AcceptedSourceStore(previous / 'train/checkpoints', old_recipe, old_journal)
-        _, spent = load_stopped_attempt(old_store, previous / 'control', parent_exit_pin=exit_pin,
-                                        authorized_current_boot=authorized_boot)
-        payload = old_store.accepted_payload
+        payload, checkpoint, spent = _load_original_endpoint(
+            source, previous, old_journal, exit_pin, authorized_boot)
         state_hash = learning_state_sha256(payload)
         boundary = old_journal.checkpoint_boundary()
         if boundary['ppo_updates'] < 1:
@@ -164,9 +195,6 @@ def migrate_stopped_session(source_root, target_root, *, learner_source, reviewe
             journal.require_exact_boundary(expected)
             directory = target.root / 'transition/checkpoints'
             directory.mkdir(parents=True)
-            checkpoint = {'path': str(previous / 'train/checkpoints/final.pt'),
-                          'bytes': old_store._read_receipt['bytes'],
-                          'sha256': old_store._read_receipt['sha256']}
             metadata = {
                 'purpose': 'source_transition_bootstrap', 'authorized_boot': authorized_boot,
                 'source_session': str(source.root), 'source_recipe_pin': file_pin(source.root / 'recipe.json'),

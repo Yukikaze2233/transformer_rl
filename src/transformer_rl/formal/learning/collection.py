@@ -174,10 +174,12 @@ class StructuredCollector:
         if self.device.type == 'cuda':
             torch.cuda.synchronize(self.device)
         prefix = self._history[:, :-1].transpose(0, 1).clone()
-        collected = {name: [] for name in ('frame', 'critic', 'raw', 'issued', 'mean', 'log_std', 'logp', 'value',
-                                          'reward', 'next_value', 'reset', 'velocity', 'contact', 'velocity_delta')}
-        all_masks = []
+        names = ('frame', 'critic', 'raw', 'issued', 'mean', 'log_std', 'logp', 'value',
+                 'reward', 'next_value', 'reset', 'velocity', 'contact', 'velocity_delta')
+        records, mask_records = {}, {}
         environment_timing = {}
+        environment_counts = {}
+        outcomes = torch.zeros(2, dtype=torch.long, device=self.device)
         reset_before = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         try:
             for step in range(steps):
@@ -203,6 +205,8 @@ class StructuredCollector:
                 returned = self.env.step(issued.clone(), estimate)
                 for name, elapsed in getattr(self.env, 'last_timing', {}).items():
                     environment_timing[name] = environment_timing.get(name, 0.) + elapsed
+                for name, count in getattr(self.env, 'last_counts', {}).items():
+                    environment_counts[name] = environment_counts.get(name, 0) + count
                 self.returned_vector_steps += 1
                 result = self._step(returned, current, issued)
                 self._check_version(version)
@@ -229,9 +233,18 @@ class StructuredCollector:
                           evaluation.log_prob, old_value, result.reward, next_value, reset_before,
                           current.labels.velocity_body_m_s, current.labels.wheel_contact,
                           final.joint_velocity_rad_s - current.labels.joint_velocity_rad_s)
-                for name, tensor in zip(collected, values):
-                    collected[name].append(tensor.detach().clone())
-                all_masks.append(masks)
+                # 每轮一次分配端点存储；逐步copy，避免clone列表再stack的双份峰值。
+                for name, tensor in zip(names, values):
+                    if name not in records:
+                        records[name] = tensor.new_empty((steps, *tensor.shape))
+                    records[name][step].copy_(tensor)
+                for field in fields(BoundaryMasks):
+                    tensor = getattr(masks, field.name)
+                    if field.name not in mask_records:
+                        mask_records[field.name] = tensor.new_empty((steps, *tensor.shape))
+                    mask_records[field.name][step].copy_(tensor)
+                outcomes += torch.stack((result.terminated.sum(),
+                                         (result.truncated & ~result.terminated).sum()))
                 next_observation = result.observation
                 reset_before = ((next_observation.episode_id != current.episode_id)
                                 | (next_observation.control_epoch != current.control_epoch))
@@ -239,9 +252,7 @@ class StructuredCollector:
                 self._history[:, -1] = next_observation.frame
                 self._history[reset_before] = next_observation.frame[reset_before, None]
                 self._current = next_observation
-            records = {name: torch.stack(values) for name, values in collected.items()}
-            masks = BoundaryMasks(*(torch.stack([getattr(item, field.name) for item in all_masks])
-                                    for field in fields(BoundaryMasks)))
+            masks = BoundaryMasks(*(mask_records[field.name] for field in fields(BoundaryMasks)))
             advantage, returns = masked_gae(records['reward'], records['value'], records['next_value'], masks,
                                             gamma=self.config.gamma, gae_lambda=self.config.gae_lambda)
             windows = ObservationWindows(prefix, records['frame'], records['reset'])
@@ -265,6 +276,13 @@ class StructuredCollector:
                                  'returned_vector_steps_lifetime': self.returned_vector_steps}
             if environment_timing:
                 self.last_metrics['environment_host_wall_s'] = environment_timing
+            if environment_counts:
+                self.last_metrics['environment_counts'] = environment_counts
+            self.last_metrics.update(terminated_rows=int(outcomes[0]), truncated_rows=int(outcomes[1]),
+                                     policy_owned_fraction=self.last_metrics['policy_owned_transitions'] / (steps*self.num_envs))
+            stream = getattr(self.env, 'terrain_stream', None)
+            if stream is not None:
+                self.last_metrics['resident_colliders_end'] = stream.resident_colliders
             return batch
         except BaseException:
             self._current, self._history = None, None
