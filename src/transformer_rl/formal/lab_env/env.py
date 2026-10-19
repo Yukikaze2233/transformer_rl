@@ -22,7 +22,9 @@ from ..control.pressure import NativeSliderPressure, PressureParameters
 from .actuator import WheeledControlCore
 from .cfg import WheeledLabEnvCfg
 from .contract import ACTION_DIM, FlatTaskSpec, flat_reward, flat_termination
+from .formal_curriculum import LabTaskSample
 from .formal_reward import FormalRewardConfig, LabFormalReward
+from .recovery import LabRecoveryReset
 from .observations import LabObservationBuilder
 from .settings import LabEnvSettings, load_asset_description
 
@@ -93,7 +95,13 @@ class WheeledLabEnv(DirectRLEnv):
         self._contact_source, self._contact_target = self._contact_mapping()
         self._command = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self._device)
         self._command[:, 3] = self._task.nominal_height_m
+        self._command_mode = torch.full((self.num_envs,), int(CommandMode.NORMAL),
+                                        dtype=torch.long, device=self._device)
+        self._reward_phase = torch.full((self.num_envs,), 0, dtype=torch.long, device=self._device)
+        self._recovery_posture = torch.zeros(self.num_envs, dtype=torch.long, device=self._device)
         self._command_sampler = None
+        self._task_sampler = None
+        self._recovery_reset = None
         self._issued_action = torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32,
                                           device=self._device)
         self._previous_action = torch.zeros_like(self._issued_action)
@@ -123,6 +131,16 @@ class WheeledLabEnv(DirectRLEnv):
         if sampler is not None and not callable(sampler):
             raise TypeError("command sampler 必须可调用")
         self._command_sampler = sampler
+
+    def set_task_sampler(self, sampler):
+        """安装正式 TaskDraw 采样器，并构建 recovery 出生姿态几何。"""
+        if sampler is not None and not callable(sampler):
+            raise TypeError("task sampler 必须可调用")
+        self._task_sampler = sampler
+        self._recovery_reset = None
+        if sampler is not None:
+            # 资产/碰撞源只读一次；8192 行共享同一 flat source。
+            self._recovery_reset = LabRecoveryReset(self._asset, self.num_envs, device=str(self._device))
 
     def _build_pressure(self):
         asset = self._asset.directory
@@ -217,7 +235,7 @@ class WheeledLabEnv(DirectRLEnv):
     def _commands(self) -> CommandFeatures:
         return CommandFeatures(
             admitted_body_command=self._command,
-            mode=torch.zeros(self.num_envs, dtype=torch.long, device=self._device),
+            mode=self._command_mode.clone(),
             request_height_m=torch.zeros(self.num_envs, dtype=torch.float32, device=self._device),
             command_clock_s=self._clock().to(torch.float32),
             previous_issued_action=self._previous_action,
@@ -236,8 +254,7 @@ class WheeledLabEnv(DirectRLEnv):
             self._formal_reward.begin(
                 self._issued_action, dq, now_s=self._clock(), episode_id=self._episode_id,
                 control_epoch=self._control_epoch, command=self._command,
-                mode=torch.full((self.num_envs,), int(CommandMode.NORMAL), dtype=torch.long,
-                                device=self._device),
+                mode=self._command_mode,
             )
 
     def _apply_action(self) -> None:
@@ -271,6 +288,12 @@ class WheeledLabEnv(DirectRLEnv):
             base_contact_force_n=sample.terrain_contact_force_world_n[:, self._base_body_index].norm(dim=-1),
             spec=self._task,
         )
+        recovery = self._command_mode == int(CommandMode.RECOVERY)
+        terminated = torch.where(
+            recovery,
+            state.height_above_ground_m < self._task.minimum_recovery_height_m,
+            terminated,
+        )
         self._terminated |= terminated
         self._last_sample = sample
         self._last_state = state
@@ -280,8 +303,7 @@ class WheeledLabEnv(DirectRLEnv):
             self._formal_reward.observe(
                 sample, state, effort_nm=self._last_effort, episode_id=self._episode_id,
                 control_epoch=self._control_epoch, command=self._command,
-                mode=torch.full((self.num_envs,), int(CommandMode.NORMAL), dtype=torch.long,
-                                device=self._device),
+                mode=self._command_mode, phase=self._reward_phase,
             )
 
     def _reward_policy_step(self) -> torch.Tensor:
@@ -353,6 +375,29 @@ class WheeledLabEnv(DirectRLEnv):
             return
         super()._reset_idx(ids)
         count = ids.numel()
+        task_sample = None
+        self._command_mode[ids] = int(CommandMode.NORMAL)
+        self._reward_phase[ids] = 0
+        self._recovery_posture[ids] = 0
+        if self._task_sampler is not None:
+            task_sample = self._task_sampler(ids)
+            if (not isinstance(task_sample, LabTaskSample) or task_sample.command.shape != (count, 4)
+                    or task_sample.mode.shape != (count,) or task_sample.phase.shape != (count,)
+                    or task_sample.command.dtype != torch.float32 or task_sample.command.device != self._device
+                    or not torch.isfinite(task_sample.command).all()):
+                raise ValueError("task sampler 必须返回有限 LabTaskSample")
+            self._command[ids] = task_sample.command
+            self._command_mode[ids] = task_sample.mode
+            self._reward_phase[ids] = task_sample.phase
+            self._recovery_posture[ids] = task_sample.draw.recovery_posture
+        elif self._command_sampler is not None:
+            sampled = self._command_sampler(ids)
+            if (not isinstance(sampled, torch.Tensor) or sampled.shape != (count, 4)
+                    or sampled.dtype != torch.float32 or sampled.device != self._device
+                    or not torch.isfinite(sampled).all()):
+                raise ValueError("command sampler 必须返回有限 [M,4] float32")
+            self._command[ids] = sampled
+
         root_pose = torch.zeros(count, 7, dtype=torch.float32, device=self._device)
         root_pose[:, 2] = self._task.nominal_height_m
         root_pose[:, 6] = 1.0
@@ -360,6 +405,21 @@ class WheeledLabEnv(DirectRLEnv):
         root_velocity = torch.zeros(count, 6, dtype=torch.float32, device=self._device)
         joint_position = self._as_torch(self.robot.data.default_joint_pos).index_select(0, ids).clone()
         joint_velocity = torch.zeros_like(joint_position)
+        if task_sample is not None:
+            recovery_rows = task_sample.mode == int(CommandMode.RECOVERY)
+            if recovery_rows.any():
+                if self._recovery_reset is None:
+                    raise RuntimeError("recovery task 需要已安装的 recovery reset")
+                local = recovery_rows.nonzero(as_tuple=False).flatten()
+                recovery_ids = ids.index_select(0, local)
+                origins = self.scene.env_origins.index_select(0, recovery_ids).detach().cpu().to(torch.float64)
+                pose = self._recovery_reset.pose(
+                    recovery_ids.cpu(), task_sample.draw.recovery_posture.index_select(0, local).cpu(),
+                    torch.zeros(local.numel(), dtype=torch.float64), origins)
+                root_pose[local] = pose.root_pose_xyzw
+                joint_position[local] = pose.joint_position
+                root_velocity[local] = pose.root_com_velocity
+                joint_velocity[local] = pose.joint_velocity
         self.robot.write_root_link_pose_to_sim_index(root_pose=root_pose, env_ids=ids)
         self.robot.write_root_com_velocity_to_sim_index(root_velocity=root_velocity, env_ids=ids)
         self.robot.write_joint_position_to_sim_index(position=joint_position, env_ids=ids)
@@ -392,13 +452,6 @@ class WheeledLabEnv(DirectRLEnv):
                     (ids,), torch.ones(ids.numel(), dtype=torch.bool, device=self._device)),
                 self._clock(), self._episode_id, self._control_epoch,
             )
-        if self._command_sampler is not None:
-            sampled = self._command_sampler(ids)
-            if (not isinstance(sampled, torch.Tensor) or sampled.shape != (count, 4)
-                    or sampled.dtype != torch.float32 or sampled.device != self._device
-                    or not torch.isfinite(sampled).all()):
-                raise ValueError("command sampler 必须返回有限 [M,4] float32")
-            self._command[ids] = sampled
         q = self._as_torch(self.robot.data.joint_pos).index_select(1, self._active_indices)
         self._targets = self._control.decode(
             torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32, device=self._device),

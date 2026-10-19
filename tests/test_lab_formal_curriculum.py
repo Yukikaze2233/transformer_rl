@@ -6,8 +6,9 @@ import torch
 
 from transformer_rl.formal.lab_env.formal_curriculum import (
     FormalCurriculumCapabilities, FormalPPOPlan, FormalTaskCurriculum,
-    UnsupportedCurriculumTask,
+    LabTaskDrawSampler, UnsupportedCurriculumTask,
 )
+from transformer_rl.formal.control.observation import CommandMode
 from transformer_rl.formal.tasks.curriculum import (
     STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS, TaskFamily,
 )
@@ -73,6 +74,27 @@ def test_checkpoint_rejects_capability_or_domain_mismatch():
     bad["capabilities"]["terrain"] = False
     with pytest.raises(ValueError, match="身份"):
         curriculum.load_state_dict(bad)
+
+
+def test_task_draw_sampler_maps_recovery_to_mode_and_phase():
+    curriculum = FormalTaskCurriculum(64, capabilities=FormalCurriculumCapabilities(recovery=True), seed=5)
+    sampler = LabTaskDrawSampler(curriculum)
+    sample = sampler(torch.arange(64))
+    recovery = sample.draw.family == 5
+    assert recovery.any()
+    assert (sample.mode[recovery] == int(CommandMode.RECOVERY)).all()
+    assert (sample.mode[~recovery] == int(CommandMode.NORMAL)).all()
+    assert (sample.command[recovery, 0] == 0).all() and (sample.command[recovery, 2] == 0).all()
+
+
+def test_task_draw_sampler_refuses_unimplemented_terrain_and_jump():
+    curriculum = FormalTaskCurriculum(8, capabilities=FormalCurriculumCapabilities(
+        terrain=True, requests=True, recovery=True), seed=5)
+    sampler = LabTaskDrawSampler(curriculum)
+    curriculum.budget.stage = 3
+    with pytest.raises(UnsupportedCurriculumTask, match="terrain/jump"):
+        for _ in range(32):
+            sampler(torch.arange(8))
 
 
 def test_no_silent_capability_shortcut_for_terrain_or_requests():

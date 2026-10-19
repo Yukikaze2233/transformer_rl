@@ -28,6 +28,7 @@ class FlatTaskSpec:
     action_bounds: tuple[float, ...] = (3.0, 3.0, 3.0, 3.0, 9.0, 9.0)
     nominal_height_m: float = 0.305
     minimum_height_m: float = 0.08
+    minimum_recovery_height_m: float = 0.04
     failure_tilt_rad: float = 1.2
     base_contact_force_n: float = 30.0
     forward_sigma_m_s: float = 0.35
@@ -46,15 +47,15 @@ class FlatTaskSpec:
                 or any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0
                        for v in self.action_bounds)):
             raise ValueError("action_bounds 需要 6 个有限正数")
-        for name in ("nominal_height_m", "minimum_height_m", "failure_tilt_rad",
+        for name in ("nominal_height_m", "minimum_height_m", "minimum_recovery_height_m", "failure_tilt_rad",
                      "base_contact_force_n", "forward_sigma_m_s", "yaw_sigma_rad_s",
                      "height_sigma_m", "forward_weight", "yaw_weight", "height_weight",
                      "lateral_cost", "vertical_cost", "action_rate_cost", "effort_cost"):
             value = getattr(self, name)
             if type(value) not in (int, float) or not math.isfinite(value):
                 raise ValueError(f"{name} 必须是有限数值")
-        if not 0 < self.minimum_height_m < self.nominal_height_m:
-            raise ValueError("minimum_height_m 必须小于 nominal_height_m")
+        if not 0 < self.minimum_recovery_height_m <= self.minimum_height_m < self.nominal_height_m:
+            raise ValueError("minimum_recovery_height_m <= minimum_height_m 且都小于 nominal_height_m")
         if not 0 < self.failure_tilt_rad < math.pi:
             raise ValueError("failure_tilt_rad 必须在 (0, pi)")
 

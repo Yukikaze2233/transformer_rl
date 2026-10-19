@@ -3,7 +3,7 @@
 这里只负责三件事：按冻结的 STAGE_WEIGHTS 采样 TaskDraw、维护不可退款的
 CurriculumBudget、把 stage 状态纳入 checkpoint。PPO 数学仍由
 StructuredPPOTrainer 负责，正式 reward 仍由 PhysicalRewardComposer 负责。
-没有 terrain/recovery/request 能力时显式拒绝对应 stage，不用平地任务冒充。
+没有 terrain/request 能力时显式拒绝对应 stage，不用平地任务冒充。
 """
 from __future__ import annotations
 
@@ -12,10 +12,12 @@ import math
 
 import torch
 
+from ..control.observation import CommandMode
 from ..tasks.curriculum import (
     STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS, ContinuousTaskSampler,
     CurriculumBudget, TaskDomain, TaskDraw, TaskFamily,
 )
+from ..tasks.reward import RewardPhase
 
 
 _FAMILY_NAMES = {
@@ -189,6 +191,63 @@ class FormalTaskCurriculum:
 
 
 @dataclass(frozen=True)
+class LabTaskSample:
+    """一次 reset 的完整任务行；env 只消费已声明的字段。"""
+
+    draw: TaskDraw
+    command: torch.Tensor
+    mode: torch.Tensor
+    phase: torch.Tensor
+
+    def __post_init__(self):
+        n = len(self.draw.family)
+        if (self.command.shape != (n, 4) or self.mode.shape != (n,)
+                or self.phase.shape != (n,) or self.mode.dtype != torch.long
+                or self.phase.dtype != torch.long):
+            raise ValueError("LabTaskSample 的 command/mode/phase 布局不一致")
+
+
+class LabTaskDrawSampler:
+    """把正式 TaskDraw 转成 LabEnv 可执行的命令/模式。
+
+    当前 LabEnv 只实现 height/motion/rotation/recovery reset；terrain 和
+    jump/request 仍未接入，遇到这些 family 会显式报错，不降级成平地。
+    """
+
+    def __init__(self, curriculum: FormalTaskCurriculum):
+        if not isinstance(curriculum, FormalTaskCurriculum):
+            raise TypeError("curriculum 必须是 FormalTaskCurriculum")
+        self.curriculum = curriculum
+
+    def __call__(self, env_ids) -> LabTaskSample:
+        draw = self.curriculum.sample(env_ids)
+        family = draw.family
+        if (family == int(TaskFamily.TERRAIN)).any() or (family == int(TaskFamily.REQUEST)).any():
+            raise UnsupportedCurriculumTask("LabEnv 尚未接入 terrain/jump request，不能执行该 TaskDraw")
+        command = draw.requested_command.clone()
+        command[:, 1] = 0
+        recovery = family == int(TaskFamily.RECOVERY)
+        command[recovery, 0] = 0
+        command[recovery, 2] = 0
+        mode = torch.where(recovery, int(CommandMode.RECOVERY), int(CommandMode.NORMAL))
+        phase = torch.where(recovery, int(RewardPhase.RECOVERY), int(RewardPhase.SUPPORT))
+        return LabTaskSample(draw, command, mode, phase)
+
+    def begin_update(self):
+        return self.curriculum.begin_update()
+
+    @property
+    def stage(self):
+        return self.curriculum.stage
+
+    def state_dict(self):
+        return self.curriculum.state_dict()
+
+    def load_state_dict(self, state):
+        self.curriculum.load_state_dict(state)
+
+
+@dataclass(frozen=True)
 class FormalPPOPlan:
     """正式 reward/PPO 课程的超参绑定，不复制 PPO 数学。"""
 
@@ -219,5 +278,6 @@ class FormalPPOPlan:
 
 __all__ = [
     "FormalCurriculumCapabilities", "FormalCurriculumState", "FormalPPOPlan",
-    "FormalTaskCurriculum", "UnsupportedCurriculumTask",
+    "FormalTaskCurriculum", "LabTaskDrawSampler", "LabTaskSample",
+    "UnsupportedCurriculumTask",
 ]

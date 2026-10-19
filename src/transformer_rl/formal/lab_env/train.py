@@ -2,7 +2,8 @@
 
 默认使用 M1 平地 command 课程和 flat_reward；``--formal-reward`` 切换到
 PhysicalRewardComposer。PPO/auxiliary 数学仍复用 StructuredPPOTrainer。
-完整 6-stage 课程需要 recovery/terrain/request 能力，当前入口不会伪造。
+完整 6-stage 课程还需要 terrain/jump request 能力；当前入口只开放
+height/motion/rotation/recovery，未实现项会显式拒绝。
 进程启动必须设置与正式 run 相同的 CUDA/WSL 环境变量。
 """
 from __future__ import annotations
@@ -46,14 +47,16 @@ def _parse_args(argv=None):
     parser.add_argument("--env-spacing", type=float, default=4.0)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--stage", type=int, default=None, choices=range(4),
-                        help="M1 command 课程 stage；缺省沿用 checkpoint 或 0")
+    parser.add_argument("--stage", type=int, default=None, choices=range(6),
+                        help="M1 command stage 0-3；正式课程 fresh run 只能从 0 开始")
     parser.add_argument("--init-checkpoint", type=Path)
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--checkpoint-interval", type=int, default=1)
     parser.add_argument("--asset-directory", type=str)
     parser.add_argument("--formal-reward", action="store_true",
-                        help="使用正式 PhysicalRewardComposer；仍只跑平地 command stage")
+                        help="使用正式 PhysicalRewardComposer")
+    parser.add_argument("--formal-curriculum", action="store_true",
+                        help="使用正式 6-stage TaskDraw 课程；当前只支持 height/motion/rotation/recovery")
     return parser.parse_args(argv)
 
 
@@ -63,6 +66,13 @@ def main(argv=None):
         raise ValueError("updates/num_envs/rollout_steps/checkpoint_interval 必须为正")
     if "cuda" in args.device and "/usr/lib/wsl/lib" not in os.environ.get("LD_LIBRARY_PATH", ""):
         print("WARN: LD_LIBRARY_PATH 不含 /usr/lib/wsl/lib，PhysX 可能回退 CPU", flush=True)
+    if args.formal_curriculum:
+        # 正式课程必须使用正式 reward，不能退回 M1 flat_reward。
+        args.formal_reward = True
+    if not args.formal_curriculum and args.stage is not None and args.stage > 3:
+        raise ValueError("M1 command 课程只有 stage 0-3；完整课程请用 --formal-curriculum")
+    if args.formal_curriculum and args.stage not in (None, 0) and args.resume is None:
+        raise ValueError("正式课程 fresh run 必须从 stage 0 开始；跨 stage 恢复请用 --resume")
 
     from isaaclab.app import AppLauncher
     launcher = AppLauncher(headless=True, device=args.device, enable_cameras=False, livestream=0)
@@ -82,6 +92,9 @@ def main(argv=None):
         from .collector import LabCollector
         from .curriculum import LabCommandCurriculum
         from .env import WheeledLabEnv
+        from .formal_curriculum import (
+            FormalCurriculumCapabilities, FormalTaskCurriculum, LabTaskDrawSampler,
+        )
         from .formal_reward import FormalRewardConfig
         from .settings import load_asset_description
 
@@ -161,17 +174,40 @@ def main(argv=None):
             gpu_total_aggregate_pairs_capacity=2**22,
         )
         env = WheeledLabEnv(cfg)
-        curriculum = LabCommandCurriculum(args.num_envs, device=args.device, stage=stage, seed=args.seed)
-        env.set_command_sampler(curriculum.sample)
+        formal_task_sampler = None
+        if args.formal_curriculum:
+            capabilities = FormalCurriculumCapabilities(recovery=True)
+            formal_curriculum = FormalTaskCurriculum(
+                args.num_envs, device=args.device, seed=args.seed,
+                promotion="exposure", capabilities=capabilities,
+            )
+            if args.resume is not None:
+                state = payload.get("curriculum")
+                if state is None:
+                    raise ValueError("正式课程 resume 缺少 curriculum checkpoint")
+                formal_curriculum.load_state_dict(state)
+            formal_task_sampler = LabTaskDrawSampler(formal_curriculum)
+            env.set_task_sampler(formal_task_sampler)
+            stage = formal_task_sampler.stage
+        else:
+            command_curriculum = LabCommandCurriculum(
+                args.num_envs, device=args.device, stage=stage, seed=args.seed)
+            env.set_command_sampler(command_curriculum.sample)
         collector = LabCollector(LabLabeledEnv(env), model)
         args.output.mkdir(parents=True, exist_ok=True)
         metrics_path = args.output / "metrics.jsonl"
         collector.reset()
-        print(f"LAB PPO start update={trainer.update_index} envs={args.num_envs} steps={args.rollout_steps} stage={stage} formal_reward={args.formal_reward}", flush=True)
+        print(f"LAB PPO start update={trainer.update_index} envs={args.num_envs} steps={args.rollout_steps} stage={stage} formal_reward={args.formal_reward} formal_curriculum={args.formal_curriculum}", flush=True)
+        if args.formal_curriculum:
+            print("FORMAL curriculum", formal_task_sampler.curriculum.snapshot(), flush=True)
         if args.formal_reward:
             print(f"FORMAL reward missing terms={env._formal_reward.missing_terms}", flush=True)
 
         for _ in range(args.updates):
+            if formal_task_sampler is not None:
+                stage = formal_task_sampler.begin_update()
+                print(f"FORMAL stage update={trainer.update_index + 1} stage={stage} "
+                      f"consumed={formal_task_sampler.curriculum.snapshot().consumed}", flush=True)
             collection_started = time.perf_counter()
             batch = collector.collect(args.rollout_steps)
             collected = time.perf_counter()
@@ -215,6 +251,9 @@ def main(argv=None):
                     "update": trainer.update_index,
                     "stage": stage,
                     "formal_reward": args.formal_reward,
+                    "formal_curriculum": args.formal_curriculum,
+                    "curriculum": (None if formal_task_sampler is None
+                                   else _cpu(formal_task_sampler.state_dict())),
                     "formal_reward_available_terms": (
                         None if formal_reward is None else list(formal_reward.available_terms)),
                     "asset_manifest_sha256": cfg.asset_manifest_sha256,
