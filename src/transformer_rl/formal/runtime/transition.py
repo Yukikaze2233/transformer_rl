@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -91,7 +92,7 @@ class _AcceptedSourceStore(StructuredCheckpointStore):
         return restored
 
 
-def _load_original_endpoint(source, previous, journal, exit_pin, authorized_boot):
+def _original_store(source, directory, checkpoint_name, journal):
     """执行已pin的旧加载器；只缓存其唯一torch.load结果，不改变验收判断。"""
     path = source.root / 'source/transformer_rl/formal/learning/checkpoint.py'
     name = 'transformer_rl.formal.learning._source_' + hashlib.sha256(path.read_bytes()).hexdigest()[:16]
@@ -108,7 +109,7 @@ def _load_original_endpoint(source, previous, journal, exit_pin, authorized_boot
             if hasattr(self, 'payload'):
                 raise RuntimeError('source checkpoint was deserialized more than once')
             raw = stream.getbuffer()
-            self.pin = {'path': str(previous / 'train/checkpoints/final.pt'),
+            self.pin = {'path': str(directory / checkpoint_name),
                         'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
             self.payload = torch.load(stream, *args, **kwargs)
             return self.payload
@@ -116,10 +117,54 @@ def _load_original_endpoint(source, previous, journal, exit_pin, authorized_boot
     capture = CapturedTorch()
     module.torch = capture
     recipe = module.LearningRecipe.from_dict(read_json(source.root / 'recipe.json'))
-    store = module.StructuredCheckpointStore(previous / 'train/checkpoints', recipe, journal)
+    store = module.StructuredCheckpointStore(directory, recipe, journal)
+    return store, capture
+
+
+def _load_original_endpoint(source, previous, journal, exit_pin, authorized_boot):
+    store, capture = _original_store(source, previous / 'train/checkpoints', 'final.pt', journal)
     _, spent = load_stopped_attempt(store, previous / 'control', parent_exit_pin=exit_pin,
                                     authorized_current_boot=authorized_boot)
     return capture.payload, capture.pin, spent
+
+
+def _load_unstarted_transition(source, previous, journal, exit_pin, authorized_boot):
+    """只重试未新增reservation的冷启动失败；不接受失败训练事务。"""
+    if not source.spec.get('source_transition_required'):
+        raise ValueError('unstarted retry requires an existing sealed source transition')
+    marker = transition_metadata(source.root)
+    journal.require_exact_boundary(marker['boundary'])
+    receipt = read_json(exit_pin['path'])
+    binding = read_json(previous / 'request.json')
+    status = read_json(previous / 'control/status.json')
+    metrics = previous / 'train/metrics.jsonl'
+    elapsed = status.get('session_active_elapsed_s')
+    if (set(receipt) != {'format', 'token', 'boot', 'attempt', 'identity', 'returncode'}
+            or receipt.get('format') != 'private_structured_child_exit'
+            or type(receipt.get('returncode')) is not int or receipt['returncode'] == 0
+            or receipt.get('attempt') != str(previous) or receipt.get('boot') != authorized_boot
+            or binding.get('boot_id') != authorized_boot or receipt.get('token') != binding.get('token')
+            or receipt.get('identity') != status.get('identity') or status.get('token') != binding.get('token')
+            or status.get('phase') != 'failed' or binding.get('start_update') != marker['update']
+            or status.get('update') != marker['update']
+            or status.get('cumulative_transitions') != marker['returned_transitions']
+            or binding.get('root') != str(source.root) or binding.get('attempt') != str(previous)
+            or binding.get('prior_transitions') != marker['returned_transitions']
+            or binding.get('prior_active_elapsed_s') != marker['active_elapsed_s']
+            or type(elapsed) not in (int, float) or not math.isfinite(elapsed)
+            or elapsed < marker['active_elapsed_s']
+            or (previous / 'control/result.json').exists()
+            or metrics.exists() and metrics.stat().st_size != 0):
+        raise ValueError('unstarted retry lacks its known parent failure and unchanged consumption')
+    verify_pin(marker['sidecar_pin'])
+    store, capture = _original_store(source, source.root / 'transition/checkpoints', 'bootstrap.pt', journal)
+    store.load('bootstrap.pt')
+    if (capture.pin != marker['checkpoint_pin']
+            or capture.payload['metadata'] != marker['source']
+            or learning_state_sha256(capture.payload) != marker['learning_state_sha256']):
+        raise ValueError('unstarted retry differs from its untouched learning baseline')
+    spent = elapsed
+    return capture.payload, capture.pin, spent, file_pin(source.root / 'transition.json')
 
 
 def _hold_resources(session, stack):
@@ -140,7 +185,7 @@ def _hold_resources(session, stack):
 
 
 def migrate_stopped_session(source_root, target_root, *, learner_source, reviewed_changes,
-                            approval_pin, authorized_boot):
+                            approval_pin, authorized_boot, retry_unstarted_transition=False):
     """仅准备新会话，不启动SDK/训练或切换registry；调用者负责明确授权。"""
     from .session import StructuredTrainingSession
 
@@ -169,8 +214,13 @@ def migrate_stopped_session(source_root, target_root, *, learner_source, reviewe
             source.root / 'journal', writable=True, authorized_boot=authorized_boot))
         if old_recipe.device == 'cuda:0':
             torch.cuda.init()  # 准入和四把原lease均已持有，才初始化CUDA。
-        payload, checkpoint, spent = _load_original_endpoint(
-            source, previous, old_journal, exit_pin, authorized_boot)
+        retry_marker = None
+        if retry_unstarted_transition:
+            payload, checkpoint, spent, retry_marker = _load_unstarted_transition(
+                source, previous, old_journal, exit_pin, authorized_boot)
+        else:
+            payload, checkpoint, spent = _load_original_endpoint(
+                source, previous, old_journal, exit_pin, authorized_boot)
         state_hash = learning_state_sha256(payload)
         boundary = old_journal.checkpoint_boundary()
         if boundary['ppo_updates'] < 1:
@@ -202,6 +252,7 @@ def migrate_stopped_session(source_root, target_root, *, learner_source, reviewe
                 'source_boundary': boundary, 'approval_pin': approval_pin,
                 'reviewed_changes': changes, 'learning_state_sha256': state_hash,
                 'physical_state_restored': False,
+                **({'unstarted_transition_retry_pin': retry_marker} if retry_marker else {}),
             }
             migrated = dict(payload, recipe=new_recipe.to_dict(), boundary=journal.checkpoint_boundary(),
                             metadata=metadata)

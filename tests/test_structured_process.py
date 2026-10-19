@@ -75,3 +75,28 @@ def test_fresh_worker_refuses_a_different_frozen_initialization():
     recipe, _ = components()
     with pytest.raises(ValueError, match='frozen initial model'):
         fresh_components(replace(recipe, initial_model_sha256='f' * 64))
+
+
+def test_admitted_cuda_context_is_initialized_before_state_construction(tmp_path, monkeypatch):
+    from transformer_rl.formal.runtime import process
+
+    root = tmp_path / 'session'
+    root.mkdir()
+    descriptor = os.open(root / 'run.lock', os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    recipe, _ = components()
+    directory = attempt(root, 'attempt_1', descriptor)
+    events = []
+    monkeypatch.setattr(torch.cuda, 'init', lambda: events.append('admitted_cuda'))
+
+    def construct(parsed):
+        assert events == ['admitted_cuda']
+        raise RuntimeError('end before any device allocation')
+
+    monkeypatch.setattr(process, 'fresh_components', construct)
+    try:
+        with pytest.raises(RuntimeError, match='end before'):
+            run_worker(replace(recipe, device='cuda:0'), directory / 'control', lambda *args: None, {})
+        assert events == ['admitted_cuda']
+    finally:
+        os.close(descriptor)

@@ -67,6 +67,9 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
         raise ValueError('worker budget, boot or explicit cold-resume receipt differs')
     restored = None
     try:
+        if recipe.device == 'cuda:0':
+            # parent已准入，TrainingControl已核对继承lease；恢复验收先需要CUDA上下文。
+            torch.cuda.init()
         with ExitStack() as stack:
             if resume_attempt is None:
                 specification = read_json(root / 'structured.json') or {}

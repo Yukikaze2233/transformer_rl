@@ -137,3 +137,60 @@ def test_wrong_boot_approval_refuses_before_creating_target(tmp_path, monkeypatc
                                reviewed_changes=review, approval_pin=approve(tmp_path, boot='0' * 36),
                                authorized_boot=boot_id())
     assert not (tmp_path / 'denied').exists()
+
+
+def test_failed_cold_start_can_retry_only_its_unconsumed_sealed_baseline(tmp_path, monkeypatch):
+    value, _ = session(tmp_path, monkeypatch)
+    value.start()
+    assert wait(value, lambda state: not state['active'])['update'] == 1
+    assert value.submitted_process.wait(timeout=5) == 0
+    package, _ = candidate(value, tmp_path)
+    process_path = package / 'formal/runtime/process.py'
+    original = process_path.read_text()
+    process_path.write_text(original.replace('with ExitStack() as stack:',
+                                            "with ExitStack() as stack:\n            raise RuntimeError('cold setup fixture failure')"))
+    before, after = source_table(value.root / 'source/transformer_rl'), source_table(package)
+    review = {name: {'before': before.get(name), 'after': after.get(name)}
+              for name in before.keys() | after.keys() if before.get(name) != after.get(name)}
+    monkeypatch.setattr(StructuredTrainingSession, '_resources', lambda self: (True, {'admitted': True}))
+    approval = approve(tmp_path)
+    failed = migrate_stopped_session(value.root, tmp_path / 'failed', learner_source=package,
+                                    reviewed_changes=review, approval_pin=approval, authorized_boot=boot_id())
+    failed.start()
+    assert wait(failed, lambda state: not state['active'])['phase'] == 'failed'
+    assert failed.submitted_process.wait(timeout=5) == 1
+    marker = transition_metadata(failed.root)
+    assert not (failed.attempt() / 'train/metrics.jsonl').exists()
+    process_path.write_text(original)
+    before, after = source_table(failed.root / 'source/transformer_rl'), source_table(package)
+    review = {name: {'before': before.get(name), 'after': after.get(name)}
+              for name in before.keys() | after.keys() if before.get(name) != after.get(name)}
+    with pytest.raises((ValueError, FileNotFoundError)):
+        migrate_stopped_session(failed.root, tmp_path / 'forbidden', learner_source=package,
+                               reviewed_changes=review, approval_pin=approval, authorized_boot=boot_id())
+    assert not (tmp_path / 'forbidden').exists()
+    status_path = failed.attempt() / 'control/status.json'
+    status = read_json(status_path)
+    write_json(status_path, dict(status, cumulative_transitions=0), replace=True)
+    with pytest.raises(ValueError, match='unchanged consumption'):
+        migrate_stopped_session(failed.root, tmp_path / 'invalid_counters', learner_source=package,
+                               reviewed_changes=review, approval_pin=approval, authorized_boot=boot_id(),
+                               retry_unstarted_transition=True)
+    write_json(status_path, status, replace=True)
+    resumed = migrate_stopped_session(failed.root, tmp_path / 'retried', learner_source=package,
+                                     reviewed_changes=review, approval_pin=approval, authorized_boot=boot_id(),
+                                     retry_unstarted_transition=True)
+    retry = transition_metadata(resumed.root)
+    assert retry['update'] == 1 and retry['learning_state_sha256'] == marker['learning_state_sha256']
+    assert retry['source']['unstarted_transition_retry_pin']['path'] == str(failed.root / 'transition.json')
+    resumed.start()
+    final = wait(resumed, lambda state: not state['active'])
+    assert resumed.submitted_process.wait(timeout=5) == 0
+    assert final['update'] == 2 and final['cumulative_transitions'] == 64
+    # 原失败记录仍是失败；新增reservation之后不能借本入口回退。
+    with LearningJournal(failed.root / 'journal', writable=True, authorized_boot=boot_id()) as journal:
+        journal.reserve(0, active_elapsed_s=marker['active_elapsed_s'] + 1)
+    with pytest.raises(RuntimeError, match='pending'):
+        migrate_stopped_session(failed.root, tmp_path / 'refused', learner_source=package,
+                               reviewed_changes=review, approval_pin=approval, authorized_boot=boot_id(),
+                               retry_unstarted_transition=True)
