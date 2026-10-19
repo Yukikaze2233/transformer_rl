@@ -298,6 +298,10 @@ class TaskResetPreparer:
         tasks.load_state_dict(state['tasks'])
         terrain.load_state_dict(state['terrain'])
         generator.set_state(state['pose_rng'].detach().cpu().clone())
-        self.tasks, self.terrain, self.generator = tasks, terrain, generator
+        # Learner checkpoints and the reset source share these sampler objects.
+        # Keep their identity after validating the complete candidate state.
+        self.tasks.load_state_dict(tasks.state_dict())
+        self.terrain.load_state_dict(terrain.state_dict())
+        self.generator = generator
         self.attempted_batches, self.requested_rows, self.completed_batches = (
             state[k] for k in ('attempted_batches', 'requested_rows', 'completed_batches'))

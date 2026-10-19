@@ -63,6 +63,17 @@ def apply(life, plan, mask=None):
     life._last_reset_tick[mask] = life.plant.scene.observation.physical_tick
 
 
+def test_checkpoint_source_requires_the_reset_proposal_to_be_applied():
+    coordinator, life, _, _ = fixture()
+    plan = request(coordinator, life)
+    with pytest.raises(RuntimeError, match='unapplied reset proposal'):
+        coordinator.checkpoint_state_dict()
+    apply(life, plan)
+    state = coordinator.checkpoint_state_dict()
+    assert state['status'] == 'ready_for_explicit_cold_setup'
+    assert state['pending_proposal'] is None
+
+
 def test_partial_resets_draw_only_selected_rows_and_keep_every_other_plan_field_and_course_identity():
     coordinator, life, clock, sizes = fixture()
     first = request(coordinator, life)

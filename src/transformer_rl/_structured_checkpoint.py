@@ -111,6 +111,8 @@ class LearningComponents:
     protocol: RequestProtocol
     attempted_vector_steps: int = 0
     returned_vector_steps: int = 0
+    task_source: object | None = None
+    deferred_task_source_state: dict | None = None
 
     def observed_consumption(self, num_envs):
         return {'attempted_transitions': self.attempted_vector_steps * num_envs,
@@ -150,6 +152,16 @@ class RestoredLearning:
     checkpoint_boundary: dict
     _rng_restored: bool = False
 
+    def restore_task_source(self, source):
+        """Restore source RNG into an empty native lifecycle before cold setup."""
+        state = self.components.deferred_task_source_state
+        if (state is None or self.components.task_source is not None or self._rng_restored
+                or not callable(getattr(source, 'load_after_explicit_cold_setup', None))):
+            raise ValueError('task source restore requires its deferred state and an empty cold source')
+        source.load_after_explicit_cold_setup(_cpu_snapshot(state))
+        self.components.task_source = source
+        self.components.deferred_task_source_state = None
+
     def restore_global_rng_after_cold_setup(self):
         """Invoke after the separately certified physical reset/warmup, once.
 
@@ -158,6 +170,8 @@ class RestoredLearning:
         """
         if self._rng_restored:
             raise RuntimeError('checkpoint sampling RNG was already restored')
+        if self.components.deferred_task_source_state is not None:
+            raise RuntimeError('restore the task source before completing cold physical setup')
         restore_rng(self.global_rng)
         self._rng_restored = True
 
@@ -215,6 +229,14 @@ class StructuredCheckpointStore:
     def save(self, name, components: LearningComponents, *, metadata=None):
         path = self._path(name)
         components.validate_binding(self.recipe, self.journal)
+        if components.deferred_task_source_state is not None:
+            raise ValueError('cannot save before the deferred task source has been restored')
+        task_source = None
+        if components.task_source is not None:
+            task_source = components.task_source.checkpoint_state_dict()
+            if not isinstance(task_source, dict):
+                raise ValueError('task source snapshots must be a state dictionary')
+            task_source = _cpu_snapshot(task_source)
         if (self.journal.summary()['rollouts_reserved'] == 0
                 and self.model_sha256(components.model) != self.recipe.initial_model_sha256):
             raise ValueError('fresh structured model differs from its frozen initialization')
@@ -225,7 +247,8 @@ class StructuredCheckpointStore:
                    'critic_adam': _cpu_snapshot(components.trainer.critic_optimizer.state_dict()),
                    'trainer': {'update_index': components.trainer.update_index, 'consumed': dict(components.trainer.consumed)},
                    'collection': {'attempted_vector_steps': components.attempted_vector_steps,
-                                  'returned_vector_steps': components.returned_vector_steps},
+                                  'returned_vector_steps': components.returned_vector_steps,
+                                  'task_source': task_source},
                    'curriculum': components.curriculum.state_dict(), 'sampler': _cpu_snapshot(components.sampler.state_dict()),
                    'terrain': _cpu_snapshot(components.terrain.state_dict()), 'protocol': _cpu_snapshot(components.protocol.state_dict()),
                    'global_rng': rng, 'normalization': 'fixed_manual35_81_no_running_statistics',
@@ -285,9 +308,13 @@ class StructuredCheckpointStore:
         aborted = protocol.restore_after_physical_reset(payload['protocol'], torch.zeros(
             self.recipe.num_envs, dtype=torch.float64, device=self.recipe.device))
         collection = payload['collection']
-        if not isinstance(collection, dict) or collection.keys() != {'attempted_vector_steps', 'returned_vector_steps'}:
+        counters = {'attempted_vector_steps', 'returned_vector_steps'}
+        if (not isinstance(collection, dict) or set(collection) not in (counters, counters | {'task_source'})
+                or collection.get('task_source') is not None and not isinstance(collection['task_source'], dict)):
             raise ValueError('structured collection counters are invalid')
-        components = LearningComponents(model, trainer, budget, sampler, terrain, protocol, **collection)
+        components = LearningComponents(model, trainer, budget, sampler, terrain, protocol,
+                                         **{name: collection[name] for name in counters},
+                                         deferred_task_source_state=_cpu_snapshot(collection.get('task_source')))
         components.validate_binding(self.recipe, self.journal)
         return RestoredLearning(self.recipe, components, _cpu_snapshot(payload['global_rng']), aborted,
                                 _document(payload['boundary']))

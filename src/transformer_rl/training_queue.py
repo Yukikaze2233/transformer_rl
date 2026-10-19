@@ -39,6 +39,9 @@ def open_session(value):
         if str(value) not in registry:
             raise ValueError(f"unknown managed session or queue: {value}")
         root = Path(registry[str(value)])
+    if (root / 'structured.json').is_file():
+        from ._structured_session import StructuredTrainingSession
+        return StructuredTrainingSession(root)
     return TrainingQueue(root) if (root / "queue.json").is_file() else TrainingSession(root)
 
 

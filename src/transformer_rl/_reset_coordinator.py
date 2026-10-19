@@ -206,6 +206,12 @@ class ResetBatchCoordinator:
                 'pending_proposal': self._pending_snapshot() if pending else None,
                 'cold_episode_disposition': 'abort active physical episodes;retain consumed requests and sampling RNG'}
 
+    def checkpoint_state_dict(self):
+        state = self.state_dict()
+        if state['status'] != 'ready_for_explicit_cold_setup':
+            raise RuntimeError('an unapplied reset proposal cannot become a resumable learning snapshot')
+        return state
+
     def _pending_snapshot(self):
         p = self._issued
         snapshot = {'sequence': p.sequence, 'reset_mask': p.reset_mask.clone(),

@@ -60,8 +60,9 @@ class NativePhysicsPlant:
         if (not isinstance(scene, NativeSceneState) or not isinstance(controller, OutputFeedbackController)
                 or not isinstance(drive, EffectiveDriveResponse) or not isinstance(pressure, NativeSliderPressure)
                 or not callable(native_to_tensor) or not callable(ground_query)
-                or timing_path != 'effective_response_probe_no_extra_transport'):
-            raise ValueError('plant requires bound components, ground geometry query and an explicit probe timing path')
+                or timing_path not in ('effective_response_probe_no_extra_transport',
+                                       'selected_effective_response_no_extra_transport')):
+            raise ValueError('plant requires bound components, ground geometry query and an explicit effective-response timing path')
         bridge = scene.observation
         if (scene.robot is not bridge.robot or scene.efforts.robot is not scene.robot
                 or any(value.num_envs != bridge.num_envs or value.device != bridge.device
@@ -72,6 +73,7 @@ class NativePhysicsPlant:
         self.sim, self.scene, self.controller, self.drive, self.pressure = sim, scene, controller, drive, pressure
         self.num_envs, self.device, self.dt = bridge.num_envs, bridge.device, bridge.physics_dt_s
         self._convert, self._ground = native_to_tensor, ground_query
+        self.timing_path = timing_path
         self._view, self._faulted, self.targets = scene.robot.root_view, False, None
         self._last_tick_packet = None
         self.contact_history = WheelContactHistory(self.num_envs, self.device, physics_dt_s=self.dt)

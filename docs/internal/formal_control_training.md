@@ -642,3 +642,16 @@ Kaiser已实际创建headless AppLauncher、GPU SimulationContext与所选107°�
 - [轮腿开源课程](https://github.com/scutrobotlab/wheeled-legged_RL/tree/1a26356d6f591734d4f6f666f5cead1a6925da67)：课程、高度、地形、起跳落地状态与奖励组织；4个已读源码文件与该main提交的git blob逐项匹配。来源名称不进入新增实现命名。
 - [当前正式MLP源码基准](https://github.com/Yukikaze2233/isaac_wheeled_rl_train/tree/cdd6339548ef2d86ff850f04305b3a1343e47eae)：实际选择的reward、107°资产与执行器证据。50Hz、78D critic和其他聊天的运行状态不迁入本方案。
 - [轮辨识交接](/home/yukikaze/Documents/workspace/robot_rl/datasets/wheel_identification/wheels-r15p62-20261010T231541Z/README.md)、[原生留出摘要](/home/yukikaze/Documents/workspace/robot_rl/datasets/wheel_identification/wheels-r15p62-20261010T231541Z/training_parameters/wheel_response_validation.json)、[USB证据口径](/home/yukikaze/Documents/workspace/robot_rl/isaac_wheeled_rl_train/contracts/v5_usb_latency_prior_v1.json)：复用小报告和参数，本轮未重读bag或NPZ。
+
+
+## 原生 worker 与受控会话接入进展（2026-10-19）
+
+用户指定的 PhysX 位置/速度迭代次数固定为 **12/6**，不再反复询问。新增私有 `StructuredTrainingSession → 实际父进程 waitpid → run_worker → NativeTaskRuntime` 路径，复用现有终端面板和文件控制握手。旧 packed 会话、旧研究队列及远端生产 CLI release 不改写。新路径只调度连续 exposure 课程，保留每25更新完整 checkpoint，没有周期自动评价或评价晋级等待。
+
+学习恢复点现在包含 reset 任务源的独立 pose RNG/配额和状态；恢复加载保留任务/地形采样器原对象引用，避免 learner 后续保存旧对象。未应用的 reset 提案不能成为恢复点。冷恢复先重建物理回合与历史，再恢复动作采样 RNG；不宣称恢复隐藏物理状态。新会话支持后台父进程、同进程暂停/继续、保存退出、真实 parent-exit 收据及原消费计数接续。资源不足时不创建新的 attempt，也不退款或回滚旧学习工作。
+
+Kaiser 私有 CPU 检查验证了以上恢复/控制路径；新增 worker 的一次完整合成 PPO 更新后 stop，以及真实子进程 pause/stop/冷恢复和资源等待均已通过。单轮检查数量有重叠，不能相加为独立机器人实验。日志、原始失败及逐文件 source pins 保存在 `outputs/audits/formal-native-worker-20261019T141211Z-7d45c5ad`。本机只做 AST、文件、日志和 Git 操作。
+
+原生 factory 显式打开顶层 `SimulationCfg.enable_scene_query_support`，避免其默认 false 覆盖 nested PhysX 设置。轮体几何从所选 URDF 和实际 native body 顺序绑定，新增启动期径向/端盖场景查询检查；这不是每轮 PPO 的额外评估，也不等于全任务健康或实机资格。零步地形替换、真实 reset/采样/update、完整课程内存和实际成本、传感器/动力学随机化的最终连接仍需完成；当前 factory 的传感器入口明确为 clean sensors，不将其称为完整 Sim2Real 随机化配方。
+
+14:42:18 UTC 的一次有界 admission 检查仍为已授权 boot `f165a503-97f5-49d5-a1d8-c0f274c7f524`：MemAvailable 1913073664B、GPU free11624MiB，低于原 RAM7GiB/GPU14336MiB 门槛，未启动 SDK 子进程。此点不说明负载来源、OOM 或其他任务状态。**正式机器人 PPO 尚未启动**；不能以 CPU 接口通过或私有入口代码完成宣称已经开训。资源恢复后先完成必要真实联调及成本/存储确认，再冻结新 release 并开始原三seed正式预算，不接续已停止的旧测试队列。

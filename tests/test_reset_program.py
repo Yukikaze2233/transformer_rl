@@ -86,7 +86,9 @@ def test_sampler_geometry_pose_rng_and_fair_quotas_resume_without_touching_globa
     expected = first.sample(8, 5, origins, controller)
     assert torch.equal(torch.random.get_rng_state(), global_rng)
     second, other_controller, other_origins = fixture(8)
+    bound_tasks, bound_terrain = second.tasks, second.terrain
     second.load_state_dict(state)
+    assert second.tasks is bound_tasks and second.terrain is bound_terrain
     actual = second.sample(8, 5, other_origins, other_controller)
     assert actual.patch.course_sha256 == expected.patch.course_sha256
     for f in fields(actual.draw):

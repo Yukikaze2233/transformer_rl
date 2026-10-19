@@ -192,7 +192,8 @@ def _read_pinned_receipt(path, pin):
     return json.loads(raw)
 
 
-def load_stopped_attempt(store: StructuredCheckpointStore, control_directory, *, parent_exit_pin):
+def load_stopped_attempt(store: StructuredCheckpointStore, control_directory, *, parent_exit_pin,
+                         authorized_current_boot=None):
     """Validate a known parent's waitpid receipt before a private cold load.
 
     The parent pins its fresh own-child receipt after waitpid; no terminal PID
@@ -203,12 +204,15 @@ def load_stopped_attempt(store: StructuredCheckpointStore, control_directory, *,
     binding = read_json(directory.parent / 'request.json')
     result = read_json(directory / 'result.json')
     receipt = _read_pinned_receipt(directory.parent / 'exit.json', parent_exit_pin)
+    current_authorized = (isinstance(binding, dict) and
+                          (binding.get('boot_id') == boot_id() if authorized_current_boot is None
+                           else authorized_current_boot == boot_id() == store.journal.authorized_boot))
     if (not isinstance(binding, dict) or not isinstance(result, dict)
             or receipt.keys() != {'format', 'token', 'boot', 'attempt', 'identity', 'returncode'}
             or receipt['format'] != 'private_structured_child_exit' or type(receipt['returncode']) is not int
             or receipt['returncode'] != 0 or receipt['token'] != binding['token']
             or receipt['boot'] != binding['boot_id'] or receipt['attempt'] != str(directory.parent)
-            or binding['boot_id'] != boot_id() or result.get('token') != binding['token']
+            or not current_authorized or result.get('token') != binding['token']
             or result.get('summary', {}).get('identity') != receipt['identity']
             or not isinstance(receipt['identity'], dict)
             or receipt['identity'].get('boot_id') != binding['boot_id']

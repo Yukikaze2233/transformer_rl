@@ -72,6 +72,9 @@ def render(state, *, width=84, color=False, message=""):
     lines = ["TRAINING / 训练控制", "", f"{state['name']}   ·   {label}",
              f"{state['architecture']}    seed {state['seed']}    {state['device']}", "",
              f"{bar}  {ratio:6.1%}", f"更新  {update:,} / {target:,}"]
+    if state.get('structured'):
+        lines += [f"{state['num_envs']} 环境 · {state['history_length']} 帧含当前 · 策略 100Hz / 物理 200Hz",
+                  "闭链 12 / 6 · 每 25 更新保存 · 评估由人手动发起"]
     if state.get("queue_counts"):
         counts = state["queue_counts"]
         lines[6] = f"{'评估步' if state.get('stage') == 'evaluating' else '当前更新'}  {update:,} / {target:,}"
@@ -90,7 +93,8 @@ def render(state, *, width=84, color=False, message=""):
         resources = state["resources"]
         lines += [f"可用 RAM  {resources['MemAvailable'] / 1024**3:.2f} / 所需 {resources['minimum_ram_available_bytes'] / 1024**3:.1f} GiB",
                   f"可用 VRAM {resources['gpu_free_mib'] / 1024:.2f} / 所需 {resources['minimum_gpu_free_mib'] / 1024:.1f} GiB",
-                  "达到原任务资源门槛后自动继续。"]
+                  ("达到原任务资源门槛后自动继续。" if state.get('resources_resume_automatic', True)
+                   else "尚未创建训练 attempt；资源恢复后使用 start / resume。")]
     lines += ["", f"最近保存  update {state['checkpoint_update']}" if state.get("checkpoint_update") is not None else "最近保存  尚无检查点"]
     if phase == "paused":
         lines.append("状态保留在原进程内；暂停期间仍占用内存和显存。")
@@ -250,7 +254,7 @@ def main(argv=None):
             states = []
             if args.directory.is_dir():
                 for child in sorted(args.directory.iterdir()):
-                    if child.is_dir() and any((child / item).is_file() for item in ("session.json", "queue.json")):
+                    if child.is_dir() and any((child / item).is_file() for item in ("session.json", "queue.json", "structured.json")):
                         states.append(open_session(child).status())
             if args.json:
                 print(json.dumps(states, ensure_ascii=False, indent=2))

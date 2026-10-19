@@ -76,6 +76,49 @@ def test_complete_state_preserves_both_adams_quota_rng_and_nonrefundable_counts(
         assert receipt['boundary']['reserved_transitions'] == 32 and not receipt['cold_physical_state_restored']
 
 
+def test_extra_task_rng_survives_snapshot_and_must_restore_before_cold_sampling(tmp_path):
+    class TaskSource:
+        def __init__(self, seed):
+            self.generator = torch.Generator().manual_seed(seed)
+            self.draws = 0
+
+        def draw(self):
+            self.draws += 1
+            return torch.rand(7, generator=self.generator)
+
+        def checkpoint_state_dict(self):
+            return {'pose_rng': self.generator.get_state(), 'draws': self.draws}
+
+        def load_after_explicit_cold_setup(self, state):
+            self.generator.set_state(state['pose_rng'])
+            self.draws = state['draws']
+
+    _, original, journal, store = fixture(tmp_path)
+    original.task_source = TaskSource(9081)
+    original.task_source.draw()
+    with journal:
+        update(original, journal)
+        before = capture_rng()
+        store.save('with_task.pt', original)
+        loaded = store.load('with_task.pt')
+        assert_identical(capture_rng(), before)
+        with pytest.raises(RuntimeError, match='task source'):
+            loaded.restore_global_rng_after_cold_setup()
+        with pytest.raises(ValueError, match='deferred task source'):
+            store.save('not_ready.pt', loaded.components)
+        assert not (store.directory / 'not_ready.pt').exists()
+        expected = original.task_source.draw()
+        cold = TaskSource(0)
+        loaded.restore_task_source(cold)
+        assert loaded.components.task_source is cold
+        assert loaded.components.deferred_task_source_state is None
+        assert torch.equal(cold.draw(), expected)
+        assert cold.draws == original.task_source.draws
+        with pytest.raises(ValueError, match='deferred state'):
+            loaded.restore_task_source(cold)
+        loaded.restore_global_rng_after_cold_setup()
+
+
 def test_restored_next_update_matches_weights_adam_and_rng_after_explicit_rng_restore(tmp_path):
     _, original, journal, store = fixture(tmp_path)
     with journal:
