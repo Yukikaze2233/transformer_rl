@@ -20,35 +20,7 @@ from ._native_observation import NativeObservationBridge
 from ._output_actuation import ResponseParameters
 from ._physical_observation import MechanicalBinding
 from ._structured_collection import ACTION_ORDER
-
-
-@dataclass(frozen=True)
-class TerrainMesh:
-    """Explicit static SI geometry in its environment's local coordinates."""
-
-    vertices_m: tuple[tuple[float, float, float], ...]
-    triangles: tuple[tuple[int, int, int], ...]
-    friction: float
-
-    def __post_init__(self):
-        if (len(self.vertices_m) < 3 or not self.triangles
-                or type(self.friction) not in (int, float) or not math.isfinite(self.friction)
-                or self.friction < 0):
-            raise ValueError('terrain requires finite explicit vertices, faces and nonnegative friction')
-        for vertex in self.vertices_m:
-            if (len(vertex) != 3 or any(type(v) not in (int, float) or not math.isfinite(v) for v in vertex)):
-                raise ValueError('terrain vertex coordinates must be finite SI triples')
-        for face in self.triangles:
-            if (len(face) != 3 or len(set(face)) != 3
-                    or any(type(i) is not int or not 0 <= i < len(self.vertices_m) for i in face)):
-                raise ValueError('terrain faces must name three distinct valid vertices')
-            a, b, c = (self.vertices_m[i] for i in face)
-            u, v = tuple(y - x for x, y in zip(a, b)), tuple(y - x for x, y in zip(a, c))
-            cross = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
-            if not all(math.isfinite(x) for x in cross) or sum(x * x for x in cross) < 1e-20:
-                raise ValueError('terrain triangles must have finite nonzero area')
-        object.__setattr__(self, 'vertices_m', tuple(tuple(float(v) for v in p) for p in self.vertices_m))
-        object.__setattr__(self, 'triangles', tuple(tuple(face) for face in self.triangles))
+from ._terrain_geometry import TerrainMesh
 
 
 @dataclass(frozen=True)

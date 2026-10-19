@@ -13,6 +13,8 @@ import re
 
 import torch
 
+from ._terrain_geometry import TerrainKind
+
 
 class TaskFamily(IntEnum):
     HEIGHT = 0
@@ -101,7 +103,7 @@ class TaskDraw:
     roughness_m: torch.Tensor
     step_up_m: torch.Tensor
     step_down_m: torch.Tensor
-    terrain_kind: torch.Tensor       # flat, slope, rough, up, down, two-platform stairs, material
+    terrain_kind: torch.Tensor       # TerrainKind; stairs and two absolute platforms remain distinct
     recovery_posture: torch.Tensor   # references the frozen 16-case posture catalogue
     trajectory_kind: torch.Tensor    # hold, ramp, sine, chirp, smoothstep, start/stop, bounded step
     nominal: torch.Tensor
@@ -165,7 +167,7 @@ class ContinuousTaskSampler:
             elif family == TaskFamily.ROTATION:
                 forward = torch.where(self._random(size) < 0.35, 0, forward)
             command = torch.stack((forward, torch.zeros_like(forward), yaw, height), -1)
-            terrain = self._integer(6, size) + 1 if family == TaskFamily.TERRAIN else torch.zeros_like(stratum)
+            terrain = self._integer(len(TerrainKind) - 1, size) + 1 if family == TaskFamily.TERRAIN else torch.zeros_like(stratum)
             block = TaskDraw(
                 family=torch.full_like(stratum, family), stratum=stratum, requested_command=command,
                 jump_height_m=(self._scalar(size, stratum, d.jump_m, d.jump_m[0])

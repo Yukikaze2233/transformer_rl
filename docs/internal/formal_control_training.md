@@ -206,6 +206,8 @@ episode固定的物理量不逐tick跳变。载荷突变、单侧衰减、接地
 
 连续覆盖由混合分布实现：每个已引入功能的70%样本在完整有效区间分层连续采样，15%覆盖端点及端点邻域，15%覆盖零附近、换向与最差组合；精确零指令保留概率质量，不能只用一个没有精确零概率的连续分布表示站立。分桶统计服务于检查缺口，不能用固定几个档位替代连续采样。
 
+正式候选的地形类型明确区分平地、任意坡向的坡面、粗糙、单级上/下台阶、连续楼梯、材料变化和两块绝对平台。前一版私有采样器把连续楼梯与双平台合在一个类别；现已补齐独立类别，训练预算和任务域不变，旧冻结研究和旧checkpoint不因此重跑。连续采样的坡度、粗糙幅值、台阶高度保留原值，不量化为几个档位。坡面包含纵坡、横坡及中间坡向，楼梯包含正负增量；200/250mm双平台保持绝对顶高、第二级50mm增量和0.6m踏面，不能累加成450mm。
+
 动作命令轨迹包括平滑插值、保持、斜坡、正弦、扫频、停启和有界阶跃。斜率与加速度限制按资产、执行器和任务定义；困难度主要增加轨迹变化、组合与扰动，而非长期缩成狭窄目标带。复杂联合域同时安排单因素、成对与联合抽样，报告条件可达域及完整笛卡尔请求域的区别。
 
 ### 可部署请求状态机
@@ -402,6 +404,14 @@ Kaiser上[141项合成检查](/home/yukikaze/Documents/workspace/transformer_rl/
 接触层按真实传感器及各环境地形过滤器数量分组，使用全局共享patch缓冲的starts/counts；未占用的NaN填充不参与算术。接触标签采用正向法向patch载荷，合力向量保留给critic与诊断，二者不能混用；相向接触力抵消后仍可能接触。容量耗尽作为测量不完整错误，不当机器人任务失败。物理步链固定为新反馈→PC/驱动积分→压力→effort写入→实际sim.step→刷新→接触→具名观测，reset不伪造物理步或推进标签，部分执行失败后禁止自动重放该区间。
 
 Kaiser上分组通过[96项执行链与场景接口检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/validation-0003.json)及[20项耦合物理步/读数桥接检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/validation-0004.json)，场景出生参数修订后又通过[27项定向回归](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/validation-0005.json)。这些均为GPU关闭的CPU合成检查，机器人仿真步0，不能相加冒充一次原生仿真验收。另在Kaiser对真实107°完整65文件及左右完整腿/新轮拟合包作[参数接线核验](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-plant-integration-20261019T015402Z-90212078/profile-0003.json)：保留输出端15.62已换算结果，不继承旧50Hz时序。当前执行链只允许明确声明的有效响应probe，没有额外USB/CAN延迟；通信与有效响应的整链闭合尚未完成，不据此开放正式PPO。
+
+新增[地形几何与批量查询](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_terrain_geometry.py)、[连续课程地形生成](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_terrain_tasks.py)及[native地面参考](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_native_ground.py)。碰撞点先统一到float32，查询使用同一网格的同一条对角线和三角形重心插值，不用双线性插值制造另一份地面。台阶竖面真实作者化，边缘高度选择最高顶面；等高材料接缝确定性选择一块实际材料，不平均出仿真中不存在的材料。分组缓存不同网格尺寸，每物理步只作批量查询，不重新生成网格。输入范围外明确返回invalid，native适配器保留带位置/时刻的TerrainCoverageError，当前probe失效退出，不填无限平地或把越界算作健康；正式批量环境的逐行越界/终止归属仍须接入。
+
+地面参考取base_link原点和实际轮碰撞体中心的世界XY。轮中心从所选URDF的具名collision cylinder origin读取，偏移精确为两侧`±0.020350000821053982m`，随原生轮link的xyzw姿态旋转后查询，不取视觉几何、轮joint原点或未旋转偏移。地形与材料先按实际clone次序重排，查询前检查native view、body参考点、环境原点和post-physics/model epoch；reset后的旧缓存拒绝读取。地形与接触仍为训练用特权量，不进入actor。
+
+Kaiser分别通过[60项地形/课程检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-integration-20261019T023844Z-c7367372/validation-0001.json)、[61项native地面查询与既有执行链回归](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-integration-20261019T023844Z-c7367372/validation-0002.json)，补充原始坐标精度检查后[native地面15项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-integration-20261019T023844Z-c7367372/validation-0003.json)。这些是分次CPU检查，不能将重复回归相加为一次全量测试。真实目录的[24个地形案例准备核验](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-integration-20261019T023844Z-c7367372/catalogue-0002.json)保持原30s时长和速度，显式地形范围覆盖其声明的行程，并记录作者化网格buffer哈希；不是实际native cooking、整机表现或完整剩余存储实测。其材料值是明确的工程fixture，不能充作硬件材料标定。第一次准备脚本在末尾用简化小数断言轮中心而失败，已根据[原始URDF只读核对](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-terrain-integration-20261019T023844Z-c7367372/wheel_geometry_source_review.json)改为文件精确值，原失败保留；没有修改资产、几何容差或生产模型。
+
+地形生成器独立保存RNG，按课程TaskDraw构造连续参数与原始请求记录；几何构造发生在受控场景准备边界。当前native地面引用是不可热换的：不能在live reset只换TaskDraw而继续使用旧碰撞体，也不假设编辑USD会自动正确重建PhysX形状。完整课程的逐行地形复位/场景epoch管理、独立越界和技能验收、真正native碰撞查询对照尚未完成。这些准备结果不把144案例标为可运行或已通过。
 
 [CPU成本记录](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/structured-policy-implementation-20261019T002043Z-4a9e4aa3/performance-0001.json)使用Kaiser单线程和随机初始化模型，单batch推理各测1000次：PyTorch中位0.541ms、P95为0.604ms，ONNX中位0.144ms、P95为0.157ms，ONNX样本最大0.392ms。仅包括网络推理，不含观测打包、控制环、传输和物理响应。完整宽度的单3072端点actor/critic事务含KL与回滚准备，CPU三次为2.179、1.941、1.918秒，进程峰值RSS约1.96GB；不是64minibatch正式整轮耗时，不能外推GPU训练速度。原型ONNX仅为随机权重性能产物，不是可上机策略。
 

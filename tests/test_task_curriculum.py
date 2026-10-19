@@ -47,7 +47,7 @@ def test_final_mixture_contains_full_continuous_domains_and_both_endpoints():
     jump = draw.jump_height_m[draw.family == TaskFamily.REQUEST]
     torch.testing.assert_close(jump.min(), torch.tensor(0.03))
     torch.testing.assert_close(jump.max(), torch.tensor(0.30))
-    assert set(draw.terrain_kind[draw.family == TaskFamily.TERRAIN].tolist()) == set(range(1, 7))
+    assert set(draw.terrain_kind[draw.family == TaskFamily.TERRAIN].tolist()) == set(range(1, 8))
     assert set(draw.recovery_posture[draw.family == TaskFamily.RECOVERY].tolist()) == set(range(16))
     assert set(draw.trajectory_kind.tolist()) == set(range(7))
     assert 0.15 < draw.nominal.float().mean() < 0.25

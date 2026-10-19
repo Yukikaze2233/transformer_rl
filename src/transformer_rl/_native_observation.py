@@ -73,6 +73,11 @@ class NativeObservationBridge:
         if not self._model_ready:
             raise RuntimeError('final native model readback is required before advancing physics')
 
+    def before_state_read(self):
+        self._identity()
+        if not self._model_ready or not self._state_ready:
+            raise RuntimeError('model/state write requires final native COM and post-physics refresh before reading')
+
     @torch.no_grad()
     def refresh_model(self):
         self._identity()
@@ -113,9 +118,7 @@ class NativeObservationBridge:
 
     @torch.no_grad()
     def measure(self, surfaces: SurfaceSample):
-        self._identity()
-        if not self._model_ready or not self._state_ready:
-            raise RuntimeError('model/state write requires final native COM and post-physics refresh before reading')
+        self.before_state_read()
         if (not isinstance(surfaces, SurfaceSample)
                 or tuple(surfaces.body_names) != self.binding.native_body_names
                 or not isinstance(surfaces.timestamp_s, torch.Tensor)
