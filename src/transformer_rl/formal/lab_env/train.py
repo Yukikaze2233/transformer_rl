@@ -1,0 +1,232 @@
+"""LabEnv 正式 PPO 入口。
+
+默认使用 M1 平地 command 课程和 flat_reward；``--formal-reward`` 切换到
+PhysicalRewardComposer。PPO/auxiliary 数学仍复用 StructuredPPOTrainer。
+完整 6-stage 课程需要 recovery/terrain/request 能力，当前入口不会伪造。
+进程启动必须设置与正式 run 相同的 CUDA/WSL 环境变量。
+"""
+from __future__ import annotations
+
+import argparse
+from dataclasses import asdict
+import json
+import os
+from pathlib import Path
+import time
+
+
+def _cpu(value):
+    import torch
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu()
+    if isinstance(value, dict):
+        return {key: _cpu(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_cpu(item) for item in value)
+    return value
+
+
+def _jsonable(value):
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="M1 LabEnv PPO")
+    parser.add_argument("--runtime-json", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--updates", type=int, default=1)
+    parser.add_argument("--num-envs", type=int, default=8192)
+    parser.add_argument("--rollout-steps", type=int, default=48)
+    parser.add_argument("--env-spacing", type=float, default=4.0)
+    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--stage", type=int, default=None, choices=range(4),
+                        help="M1 command 课程 stage；缺省沿用 checkpoint 或 0")
+    parser.add_argument("--init-checkpoint", type=Path)
+    parser.add_argument("--resume", type=Path)
+    parser.add_argument("--checkpoint-interval", type=int, default=1)
+    parser.add_argument("--asset-directory", type=str)
+    parser.add_argument("--formal-reward", action="store_true",
+                        help="使用正式 PhysicalRewardComposer；仍只跑平地 command stage")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = _parse_args(argv)
+    if args.updates < 1 or args.num_envs < 1 or args.rollout_steps < 1 or args.checkpoint_interval < 1:
+        raise ValueError("updates/num_envs/rollout_steps/checkpoint_interval 必须为正")
+    if "cuda" in args.device and "/usr/lib/wsl/lib" not in os.environ.get("LD_LIBRARY_PATH", ""):
+        print("WARN: LD_LIBRARY_PATH 不含 /usr/lib/wsl/lib，PhysX 可能回退 CPU", flush=True)
+
+    from isaaclab.app import AppLauncher
+    launcher = AppLauncher(headless=True, device=args.device, enable_cameras=False, livestream=0)
+    try:
+        import torch
+        import omni.kit.app
+        import omni.physx
+        from isaaclab.app.settings_manager import SettingsManager
+        from isaaclab_physx.physics.physx_manager_cfg import PhysxCfg
+
+        from ..control.actuation import PairTargetDomain, ResponseParameters
+        from ...common.training_control import verify_pin
+        from ..learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
+        from ..policy import StructuredActorCritic, StructuredPolicyConfig
+        from .adapter import LabLabeledEnv
+        from .cfg import build_env_cfg
+        from .collector import LabCollector
+        from .curriculum import LabCommandCurriculum
+        from .env import WheeledLabEnv
+        from .formal_reward import FormalRewardConfig
+        from .settings import load_asset_description
+
+        settings = SettingsManager.instance()
+        settings.initialize_carb_settings()
+        if "cuda" in args.device:
+            settings.set_int("/physics/cudaDevice", int(args.device.split(":")[-1]))
+            settings.set_bool("/physics/suppressReadback", True)
+            extensions = omni.kit.app.get_app().get_extension_manager()
+            if not extensions.is_extension_enabled("omni.physx.gpu"):
+                extensions.set_extension_enabled_immediate("omni.physx.gpu", True)
+            torch.cuda.set_device(int(args.device.split(":")[-1]))
+            torch.cuda.init()
+
+        torch.manual_seed(args.seed)
+        runtime = json.loads(args.runtime_json.read_text())
+        response_path = verify_pin(runtime["response_source_pin"])
+        response = ResponseParameters.from_recorded_response(
+            json.loads(response_path.read_text())["actuator_response"])
+        pair_raw = runtime.get("tuning", {}).get("pair_domain")
+        pair = PairTargetDomain(**pair_raw) if pair_raw is not None else None
+        asset = args.asset_directory or runtime["asset_directory"]
+
+        source = args.resume or args.init_checkpoint
+        payload = None
+        if source is not None:
+            payload = torch.load(source, map_location="cpu", weights_only=False)
+        expected_asset = None
+        if payload is not None:
+            expected_asset = payload.get("asset_manifest_sha256")
+            if expected_asset is None:
+                expected_asset = payload.get("recipe", {}).get("asset_manifest_sha256")
+            if (args.resume is not None and payload.get("response_source_sha256") is not None
+                    and payload["response_source_sha256"] != runtime["response_source_pin"]["sha256"]):
+                raise ValueError("resume 的电机响应 bag pin 与当前 runtime 不一致")
+        if payload is None:
+            policy = StructuredPolicyConfig()
+            ppo = StructuredPPOConfig()
+            update_index = 0
+        elif "policy" in payload and "ppo" in payload:
+            policy = StructuredPolicyConfig(**payload["policy"])
+            ppo = StructuredPPOConfig(**payload["ppo"])
+            update_index = int(payload.get("update", 0)) if args.resume else 0
+        else:
+            recipe = payload.get("recipe", {})
+            policy = StructuredPolicyConfig(**recipe["policy"])
+            ppo = StructuredPPOConfig(**recipe["ppo"])
+            update_index = 0
+        model = StructuredActorCritic(policy).to(args.device)
+        if payload is not None:
+            model.load_state_dict(payload["model"], strict=True)
+        trainer = StructuredPPOTrainer(model, ppo)
+        trainer.update_index = update_index
+        stage = args.stage
+        if stage is None and args.resume is not None:
+            stage = int(payload.get("stage", 0))
+        if stage is None:
+            stage = 0
+        if args.resume is not None:
+            trainer.actor_optimizer.load_state_dict(payload["actor_adam"])
+            trainer.critic_optimizer.load_state_dict(payload["critic_adam"])
+
+        formal_reward = None
+        if args.formal_reward:
+            description = load_asset_description(asset, expected_manifest_sha256=expected_asset)
+            formal_reward = FormalRewardConfig.from_manifest(description.manifest)
+        cfg = build_env_cfg(asset, num_envs=args.num_envs, env_spacing_m=args.env_spacing,
+                            device=args.device, response=response, pair_domain=pair,
+                            formal_reward=formal_reward,
+                            expected_manifest_sha256=expected_asset)
+        cfg.sim.enable_scene_query_support = True
+        cfg.sim.physics = PhysxCfg(
+            enable_external_forces_every_iteration=True,
+            enable_scene_query_support=True,
+            gpu_found_lost_pairs_capacity=2**22,
+            gpu_found_lost_aggregate_pairs_capacity=2**25,
+            gpu_total_aggregate_pairs_capacity=2**22,
+        )
+        env = WheeledLabEnv(cfg)
+        curriculum = LabCommandCurriculum(args.num_envs, device=args.device, stage=stage, seed=args.seed)
+        env.set_command_sampler(curriculum.sample)
+        collector = LabCollector(LabLabeledEnv(env), model)
+        args.output.mkdir(parents=True, exist_ok=True)
+        metrics_path = args.output / "metrics.jsonl"
+        collector.reset()
+        print(f"LAB PPO start update={trainer.update_index} envs={args.num_envs} steps={args.rollout_steps} stage={stage} formal_reward={args.formal_reward}", flush=True)
+        if args.formal_reward:
+            print(f"FORMAL reward missing terms={env._formal_reward.missing_terms}", flush=True)
+
+        for _ in range(args.updates):
+            collection_started = time.perf_counter()
+            batch = collector.collect(args.rollout_steps)
+            collected = time.perf_counter()
+            update_metrics = trainer.update(batch)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            updated = time.perf_counter()
+            record = {
+                "update": trainer.update_index,
+                "collection_s": collected - collection_started,
+                "optimization_s": updated - collected,
+                "stage": stage,
+                "formal_reward": args.formal_reward,
+                "collector": collector.last_metrics,
+                "ppo": update_metrics,
+            }
+            with metrics_path.open("a") as stream:
+                stream.write(json.dumps(_jsonable(record), ensure_ascii=False, allow_nan=False) + "\n")
+            print("LAB PPO update", json.dumps({
+                "update": trainer.update_index,
+                "collection_s": round(record["collection_s"], 3),
+                "optimization_s": round(record["optimization_s"], 3),
+                "reward_mean": collector.last_metrics.get("reward_mean"),
+                "kl": update_metrics.get("full_rollout_kl_after_guard"),
+                "actor_steps": update_metrics["actor_optimizer_steps"],
+                "critic_steps": update_metrics["critic_optimizer_steps"],
+                "rolled_back": update_metrics.get("whole_actor_update_rolled_back"),
+                "stage": stage,
+                "formal_reward": args.formal_reward,
+            }, ensure_ascii=False), flush=True)
+            if trainer.update_index % args.checkpoint_interval == 0:
+                checkpoint = args.output / f"update_{trainer.update_index:05d}.pt"
+                temporary = checkpoint.with_suffix(".tmp")
+                torch.save({
+                    "format": "lab_ppo_v1",
+                    "policy": asdict(policy),
+                    "ppo": asdict(ppo),
+                    "model": _cpu(model.state_dict()),
+                    "actor_adam": _cpu(trainer.actor_optimizer.state_dict()),
+                    "critic_adam": _cpu(trainer.critic_optimizer.state_dict()),
+                    "update": trainer.update_index,
+                    "stage": stage,
+                    "formal_reward": args.formal_reward,
+                    "formal_reward_available_terms": (
+                        None if formal_reward is None else list(formal_reward.available_terms)),
+                    "asset_manifest_sha256": cfg.asset_manifest_sha256,
+                    "response_source_sha256": runtime["response_source_pin"]["sha256"],
+                }, temporary)
+                temporary.replace(checkpoint)
+                (args.output / "latest.txt").write_text(checkpoint.name)
+        env.close()
+        print("LAB PPO done", flush=True)
+    finally:
+        launcher.app.close()
+
+
+if __name__ == "__main__":
+    main()

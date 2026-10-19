@@ -17,6 +17,19 @@ from ..control.ownership import ControlSource, validate_issued_control
 from ..control.observation import CommandMode, MechanicalBinding
 
 
+REWARD_POSITIVE_TERMS = (
+    'forward', 'yaw', 'height', 'jump_vertical', 'jump_attitude', 'recovery_upright',
+)
+REWARD_COST_TERMS = (
+    'forward', 'yaw', 'height', 'attitude', 'stand_world_xy', 'lateral_velocity',
+    'ordinary_vertical', 'jump_vertical', 'effort', 'mechanical_power_proxy',
+    'leg_velocity', 'leg_acceleration', 'issued_first_difference',
+    'issued_second_difference', 'harmful_contact', 'contact_slip', 'joint_boundary',
+    'flight_wheel_effort', 'landing_impact',
+)
+REWARD_TERMS = REWARD_POSITIVE_TERMS + REWARD_COST_TERMS
+
+
 class RewardPhase(IntEnum):
     SUPPORT = 0
     TAKEOFF = 1
@@ -94,6 +107,9 @@ class RewardPhysics:
     body_normal_load_n: torch.Tensor
     wheel_contact_tangent_speed_m_s: torch.Tensor
     joint_boundary_shortfall_rad: torch.Tensor
+    # None preserves the original full formal reward. A tuple names the terms
+    # whose physical producers exist; unavailable terms are not silently faked.
+    available_terms: tuple[str, ...] | None = None
     velocity_reference: str = 'base_link_origin'
     effort_reference: str = 'native_explicit_active_output_buffer'
     slip_reference: str = 'actual_contact_point_relative_tangent_speed'
@@ -259,6 +275,11 @@ class PhysicalRewardComposer:
             value = getattr(reference, name)
             self._tensor('reference.' + name, value, width, dtype)
             invalid |= ~torch.isfinite(value).reshape(self.num_envs, -1).all(-1)
+        if sample.available_terms is not None:
+            if (not isinstance(sample.available_terms, tuple)
+                    or len(set(sample.available_terms)) != len(sample.available_terms)
+                    or any(name not in REWARD_TERMS for name in sample.available_terms)):
+                raise ValueError('reward available term list is unknown or duplicated')
         invalid |= ((sample.body_normal_load_n < 0).any(-1) | (sample.wheel_contact_tangent_speed_m_s < 0).any(-1)
                     | (sample.joint_boundary_shortfall_rad < 0).any(-1)
                     | (sample.gravity_body.norm(dim=-1) - 1).abs().gt(1e-4)
@@ -328,6 +349,12 @@ class PhysicalRewardComposer:
                 'joint_boundary': 2 * (sample.joint_boundary_shortfall_rad / .05).square().sum(-1),
                 'flight_wheel_effort': .2 * (jump & (phase == int(RewardPhase.FLIGHT))) * (effort[:, 4:] / 4.5).square().sum(-1),
                 'landing_impact': .5 * landing * h(excess_landing)}
+        if sample.available_terms is not None:
+            available = set(sample.available_terms)
+            positive = {key: value if key in available else torch.zeros_like(value)
+                        for key, value in positive.items()}
+            cost = {key: value if key in available else torch.zeros_like(value)
+                    for key, value in cost.items()}
         p, c = torch.stack(tuple(positive.values())).sum(0), torch.stack(tuple(cost.values())).sum(0)
         scale = self.tuning.cost_density_scale
         attenuation = torch.where(c > 0, scale * torch.tanh(c / scale) / c.clamp_min(1e-20), torch.ones_like(c))
