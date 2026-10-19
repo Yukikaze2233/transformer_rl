@@ -52,6 +52,15 @@ class _ContactGroup:
     capacity: int
 
 
+@dataclass(frozen=True)
+class _PatchLayout:
+    force: torch.Tensor
+    counts: torch.Tensor
+    starts: torch.Tensor
+    pairs: torch.Tensor
+    indices: torch.Tensor
+
+
 class ContactCapacityError(RuntimeError):
     """Measurement capacity was reached; this is not a robot control failure."""
 
@@ -132,31 +141,33 @@ class NativeTerrainContacts:
             raise ValueError('native patch ranges exceed the actual shared buffer')
         if count.sum() >= capacity:
             raise ContactCapacityError('native contact patch capacity reached; qualification data is incomplete')
-        # Invalid sentinel starts are allowed only for an empty pair. Difference
-        # marks avoid reading uninitialized/NaN padding in the shared allocation.
-        start = torch.where(used, start, 0)
-        end = torch.where(used, end, 0)
-        difference = torch.zeros(force.numel() + 1, dtype=torch.long, device=force.device)
-        difference.scatter_add_(0, start.flatten(), used.long().flatten())
-        difference.scatter_add_(0, end.flatten(), -used.long().flatten())
-        occupancy = difference.cumsum(0)[:-1]
-        if (occupancy > 1).any():
+        # 只排序非空区间检查重叠，不为全部capacity分配差分/前缀数组。
+        active = used.flatten().nonzero().flatten()
+        order = start.flatten()[active].argsort()
+        sorted_start, sorted_end = start.flatten()[active][order], end.flatten()[active][order]
+        if (sorted_start[1:] < sorted_end[:-1]).any():
             raise ValueError('native contact pairs overlap shared patch ranges')
-        occupied = occupancy > 0
-        if (occupied & (~torch.isfinite(force) | (force < 0))).any():
+        # 空pair可保留任意sentinel；真实索引按pair顺序展开，不读取NaN padding。
+        start = torch.where(used, start, 0)
+        flat_count = count.flatten()
+        pairs = torch.repeat_interleave(torch.arange(count.numel(), device=force.device), flat_count)
+        begins = flat_count.cumsum(0) - flat_count
+        indices = start.flatten()[pairs] + torch.arange(pairs.numel(), device=force.device) - begins[pairs]
+        values = force[indices]
+        if (~torch.isfinite(values) | (values < 0)).any():
             raise ValueError('native active normal patch force is invalid')
-        return force, count, start, end, occupied
+        return _PatchLayout(force, count, start, pairs, indices)
 
     @staticmethod
     def _loads_from_layout(layout):
-        force, count, start, end, occupied = layout
-        clean = torch.where(occupied, force, 0).double()
-        prefix = torch.cat((clean.new_zeros(1), clean.cumsum(0)))
-        loads = prefix[end] - prefix[start]
-        total_load = loads.sum(-1).float()
+        values = layout.force[layout.indices].double()
+        sensor = layout.pairs // layout.counts.shape[1]
+        # 在各sensor内直接求和，避免巨大前缀相减损失小接触力的精度。
+        total_load = torch.zeros(layout.counts.shape[0], dtype=torch.float64,
+                                  device=values.device).scatter_add_(0, sensor, values).float()
         if not torch.isfinite(total_load).all():
             raise ValueError('native contact load exceeds the published tensor range')
-        return total_load, count.sum(-1)
+        return total_load, layout.counts.sum(-1)
 
     @staticmethod
     def _patch_loads(force, counts, starts, capacity):
@@ -185,7 +196,7 @@ class NativeTerrainContacts:
             raise ValueError('contact body motion and force measurement clocks differ')
 
     def _wheel_motion(self, group, layout, points, normals, motion):
-        force, counts, starts, _, _ = layout
+        force, counts, starts = layout.force, layout.counts, layout.starts
         for name, values in (('points', points), ('normals', normals)):
             if (not isinstance(values, torch.Tensor) or values.shape != (force.numel(), 3)
                     or values.device != self.device or values.dtype != torch.float32):

@@ -85,6 +85,32 @@ def test_empty_pair_sentinel_and_unused_nan_padding_do_not_affect_patch_load():
     torch.testing.assert_close(count, torch.tensor([2, 1]))
 
 
+def test_sparse_layout_scales_with_real_patches_instead_of_the_declared_padding():
+    force = torch.full((1_000_000,), float('nan'))
+    force[999_998], force[17] = 3., 7.
+    counts = torch.tensor([[1, 0], [0, 1]], dtype=torch.int32)
+    starts = torch.tensor([[999_998, -1], [2_000_000, 17]], dtype=torch.int32)
+    layout = NativeTerrainContacts._patch_layout(force, counts, starts, force.numel())
+    assert layout.indices.tolist() == [999_998, 17]
+    assert layout.pairs.tolist() == [0, 3]
+    load, count = NativeTerrainContacts._loads_from_layout(layout)
+    torch.testing.assert_close(load, torch.tensor([3., 7.]))
+    torch.testing.assert_close(count, torch.tensor([1, 1]))
+
+
+def test_separate_sensor_reduction_preserves_small_load_after_a_large_neighbor():
+    load, count = NativeTerrainContacts._patch_loads(torch.tensor([1e25, 3., float('nan')]),
+        torch.tensor([[1], [1]], dtype=torch.int32), torch.tensor([[0], [1]], dtype=torch.int32), 4)
+    assert load[0] == torch.tensor(1e25) and load[1] == 3.
+    assert count.eq(1).all()
+
+
+def test_unsorted_overlapping_native_ranges_are_rejected_without_a_dense_occupancy_map():
+    with pytest.raises(ValueError, match='overlap'):
+        NativeTerrainContacts._patch_loads(torch.ones(16), torch.tensor([[3, 4, 2]]),
+                                           torch.tensor([[9, 2, 4]]), 20)
+
+
 @pytest.mark.parametrize('change', ['negative_count', 'negative_start', 'past_buffer', 'overlap',
                                     'active_nan', 'negative_force', 'load_overflow', 'wrong_dtype'])
 def test_invalid_active_patch_data_is_rejected(change):
