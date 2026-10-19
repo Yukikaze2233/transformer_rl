@@ -17,6 +17,7 @@ import torch
 from .actuation import NativeEffortWriter
 from .contacts import NativeTerrainContacts
 from .observation import NativeObservationBridge
+from .health import NativePhysicsHealth
 from ..control.actuation import ResponseParameters
 from ..control.observation import MechanicalBinding
 from ..contracts import ACTION_ORDER
@@ -42,6 +43,7 @@ class NativeSceneState:
     terrain_meshes: tuple[tuple[TerrainMesh, ...], ...]
     clone_indices: tuple[int, ...]
     readback: dict
+    physics_health: NativePhysicsHealth | None = None
 
 
 class NativeSceneRecipe:
@@ -231,7 +233,7 @@ class NativeSceneRecipe:
         sim_utils.bind_physics_material(str(geometry.GetPath()), path + '/Material')
         return str(geometry.GetPath())
 
-    def build_on_admitted_context(self, sim):
+    def build_on_admitted_context(self, sim, *, physics_health=None):
         """Author this owned scene; the caller has already acquired admission."""
         if type(sim.cfg.dt) not in (int, float) or sim.cfg.dt not in (.001, .005):
             raise ValueError('scene physics must use the selected 200Hz or 1kHz interval')
@@ -292,6 +294,8 @@ class NativeSceneRecipe:
         cloner.filter_collisions(stage, sim.cfg.physics_prim_path, '/World/collisions', list(env_paths), global_paths=[])
         groups = self._collision_groups_readback(stage, sim.cfg.physics_prim_path, env_paths)
         sim.reset()
+        if physics_health is not None:
+            physics_health.check()
         paths = tuple(str(path) for path in robot.root_view.prim_paths)
         native_envs = tuple(path.split('/Robot')[0] for path in paths)
         if len(set(native_envs)) != len(env_paths) or set(native_envs) != set(env_paths):
@@ -325,4 +329,4 @@ class NativeSceneRecipe:
         return NativeSceneState(robot, bridge, NativeEffortWriter(robot, bridge.binding, self.model_spec,
                                                                  len(env_paths), device=device),
                                 contacts, native_envs, torch.tensor([self.origins[i] for i in order], device=device),
-                                tuple(self.meshes[i] for i in order), order, readback)
+                                tuple(self.meshes[i] for i in order), order, readback, physics_health)

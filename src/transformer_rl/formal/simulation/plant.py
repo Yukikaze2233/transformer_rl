@@ -160,6 +160,8 @@ class NativePhysicsPlant:
             robot.write_data_to_sim()
             explicit = self.scene.efforts.explicit_actuator_buffer()
             self.sim.step(render=False)
+            if self.scene.physics_health is not None:
+                self.scene.physics_health.check()
             bridge.after_physics_step(bridge.physical_tick + 1)
             motion = bridge.body_motion()
             contacts = self.scene.contacts.read(self.dt, bridge.timestamp_s(), body_motion=motion)

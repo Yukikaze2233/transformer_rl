@@ -18,6 +18,7 @@ from ..tasks.trajectory import CommandRates
 from ..simulation.collision import verify_wheel_cylinders
 from ..simulation.dynamics import StartupDynamicsConfig, apply_startup_dynamics
 from ..simulation.ground import WheelCollisionCentres
+from ..simulation.health import NativePhysicsHealth
 from .interop import native_proxy_launch
 from .assembly import NativeRuntimeTuning, NativeTaskRuntime
 from ..simulation.scene import NativeSceneRecipe
@@ -55,7 +56,15 @@ def _initial_policy_boundary(sim, scene):
         raise ValueError('initial refresh requires a fresh200Hz scene before its first physical step')
     for _ in range(2):
         sim.step(render=False)
+        if scene.physics_health is not None:
+            scene.physics_health.check()
         bridge.after_physics_step(bridge.physical_tick + 1)
+
+
+def _physics_configuration(config_type):
+    # 8192克隆的重叠地形AABB实测需要约6190万新增配对；保留容量余量。
+    return config_type(enable_external_forces_every_iteration=True, enable_scene_query_support=True,
+                       gpu_found_lost_pairs_capacity=2**27, gpu_total_aggregate_pairs_capacity=2**23)
 
 
 @contextmanager
@@ -80,6 +89,7 @@ def runtime(recipe, components, configuration, *, control):
     response = ResponseParameters.from_recorded_response(response_document['actuator_response'])
     launcher = None
     compatibility = None
+    physics_health = None
     try:
         from isaaclab.app import AppLauncher
 
@@ -91,6 +101,7 @@ def runtime(recipe, components, configuration, *, control):
             sys.argv = previous_argv
         import omni.kit.app
         import omni.physx
+        import carb.logging
         import warp as wp
         from isaaclab.app.settings_manager import SettingsManager
         from isaaclab.sim import SimulationCfg, SimulationContext
@@ -108,9 +119,9 @@ def runtime(recipe, components, configuration, *, control):
         torch.cuda.init()
         compatibility = native_proxy_launch(wp, ProxyArray)
         statistics = compatibility.__enter__()
+        physics_health = NativePhysicsHealth(carb.logging.acquire_logging())
         sim = SimulationContext(SimulationCfg(dt=.005, device=recipe.device, enable_scene_query_support=True,
-                                physics=PhysxCfg(enable_external_forces_every_iteration=True,
-                                                 enable_scene_query_support=True)))
+                                physics=_physics_configuration(PhysxCfg)))
         maximum_horizon = max(tuning.reset.ordinary_horizon_s, tuning.reset.extended_horizon_s)
         extent = TerrainExtent.for_horizon(maximum_horizon, max(abs(v) for v in recipe.domain.forward_m_s),
                                            tuning.reset.terrain_margin_m)
@@ -121,7 +132,13 @@ def runtime(recipe, components, configuration, *, control):
         origins = tuple((spacing * (i % columns), spacing * (i // columns), 0.) for i in range(recipe.num_envs))
         scene_recipe = NativeSceneRecipe(configuration['asset_directory'], recipe.asset_manifest_sha256,
                                          response, origins, tuple(c.surface.meshes for c in courses))
-        scene = scene_recipe.build_on_admitted_context(sim)
+        scene = scene_recipe.build_on_admitted_context(sim, physics_health=physics_health)
+        physics_prim = sim.stage.GetPrimAtPath(sim.cfg.physics_prim_path)
+        pair_buffers = {name: physics_prim.GetAttribute('physxScene:' + name).Get()
+                        for name in ('gpuFoundLostPairsCapacity', 'gpuTotalAggregatePairsCapacity')}
+        if tuple(pair_buffers.values()) != (2**27, 2**23):
+            raise RuntimeError('native GPU pair-buffer capacity differs from the full-scale configuration')
+        scene.readback['GPU_pair_buffers'] = pair_buffers
         dynamics_receipt = apply_startup_dynamics(
             scene, tuning.dynamics, recipe.training_seed + 15485863, native_to_tensor=wp.to_torch,
             tensor_to_native=lambda value: wp.from_torch(value, dtype=wp.uint32 if value.dtype == torch.int32
@@ -161,6 +178,8 @@ def runtime(recipe, components, configuration, *, control):
         control.fail(error)
         raise
     finally:
+        if physics_health is not None:
+            physics_health.close()
         if launcher is not None:
             launcher.app.close()
         if compatibility is not None:
