@@ -11,6 +11,7 @@ import struct
 import torch
 
 from .geometry import HeightPatch, TerrainKind, TerrainMesh, TerrainSurface
+from .roughness import SeededRoughGrid
 
 class TerrainRebuildRequired(RuntimeError):
     """The requested course cannot be adopted over the current native shapes."""
@@ -161,6 +162,22 @@ class ContinuousTerrainGenerator:
             walls.append(TerrainMesh(vertices, ((0, 1, 2), (0, 2, 3)), self.tuning.nominal_friction))
         return TerrainSurface(tuple(patches), tuple(walls))
 
+    def rough_grid(self, request, *, geometry_seed):
+        """返回完整域的惰性源；原生调用方必须另行绑定实际铺设的块。"""
+        if not isinstance(request, TerrainRequest) or request.kind != TerrainKind.ROUGH:
+            raise ValueError('rough grid requires an explicit rough-terrain request')
+        t = self.tuning
+        lo, hi = request.extent.x_m if request.direction > 0 else (-request.extent.x_m[1], -request.extent.x_m[0])
+        end = hi - t.runout_m - t.transition_m
+        if end <= t.entry_m + 2 * t.transition_m:
+            raise ValueError('roughness requires complete entry,active terrain and runout')
+        raw = (lo, t.entry_m, t.entry_m + t.transition_m, end, end + t.transition_m, hi,
+               *self._axis(t.entry_m, end + t.transition_m, t.rough_grid_spacing_m))
+        x = tuple(sorted({struct.unpack('<f', struct.pack('<f', v))[0] for v in raw}))
+        return SeededRoughGrid(x, self._axis(*request.extent.y_m, t.rough_grid_spacing_m),
+            amplitude_m=request.roughness_m, geometry_seed=geometry_seed, entry_m=t.entry_m,
+            transition_m=t.transition_m, active_end_m=end, friction=t.nominal_friction, direction=request.direction)
+
     def build(self, request: TerrainRequest, *, geometry_seed=None):
         if not isinstance(request, TerrainRequest):
             raise ValueError('course construction requires a complete named request')
@@ -190,32 +207,20 @@ class ContinuousTerrainGenerator:
         elif kind == TerrainKind.MATERIAL:
             middle = (t.entry_m + hi - t.runout_m) / 2
             surface = self._platforms(request, (0., 0., 0.), (t.entry_m, middle))
+        elif kind == TerrainKind.ROUGH:
+            grid = self.rough_grid(request, geometry_seed=geometry_seed)
+            surface = TerrainSurface((grid.patch(0, grid.shape[0] - 1, 0, grid.shape[1] - 1),))
         else:
             end = hi - t.runout_m - t.transition_m
             if end <= t.entry_m + 2 * t.transition_m:
                 raise ValueError('slopes and roughness require complete entry, active terrain and runout')
-            if kind == TerrainKind.SLOPE:
-                s = (lo, t.entry_m, t.entry_m + t.transition_m, end, end + t.transition_m, hi)
-                y = request.extent.y_m
-                along = math.tan(request.slope_rad) * math.cos(request.slope_bearing_rad)
-                across = math.tan(request.slope_rad) * math.sin(request.slope_bearing_rad)
-                z = tuple(tuple(along * min(max(x - t.entry_m, 0), end - t.entry_m)
-                                + across * b * min(max((x - t.entry_m) / t.transition_m, 0), 1)
-                                * min(max((end + t.transition_m - x) / t.transition_m, 0), 1) for b in y) for x in s)
-            else:
-                raw_s = (lo, t.entry_m, t.entry_m + t.transition_m, end, end + t.transition_m, hi,
-                         *self._axis(t.entry_m, end + t.transition_m, t.rough_grid_spacing_m))
-                s = tuple(sorted({struct.unpack('<f', struct.pack('<f', v))[0] for v in raw_s}))
-                y = self._axis(*request.extent.y_m, t.rough_grid_spacing_m)
-                rng = torch.Generator(device='cpu').manual_seed(geometry_seed)
-                noise = torch.rand((len(s), len(y)), generator=rng) * 2 - 1
-                core = [i for i, x in enumerate(s) if t.entry_m + t.transition_m <= x <= end]
-                if len(core) >= 2:
-                    noise[core[0], len(y) // 2], noise[core[1], len(y) // 2] = 1., -1.
-                z = tuple(tuple(float(noise[i, j]) * request.roughness_m
-                                * min(max((x - t.entry_m) / t.transition_m, 0), 1)
-                                * min(max((end + t.transition_m - x) / t.transition_m, 0), 1)
-                                for j in range(len(y))) for i, x in enumerate(s))
+            s = (lo, t.entry_m, t.entry_m + t.transition_m, end, end + t.transition_m, hi)
+            y = request.extent.y_m
+            along = math.tan(request.slope_rad) * math.cos(request.slope_bearing_rad)
+            across = math.tan(request.slope_rad) * math.sin(request.slope_bearing_rad)
+            z = tuple(tuple(along * min(max(x - t.entry_m, 0), end - t.entry_m)
+                            + across * b * min(max((x - t.entry_m) / t.transition_m, 0), 1)
+                            * min(max((end + t.transition_m - x) / t.transition_m, 0), 1) for b in y) for x in s)
             surface = TerrainSurface((self._patch(request, s, y, z, mu),))
         return TerrainCourse(request, geometry_seed, surface)
 
