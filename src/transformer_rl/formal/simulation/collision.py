@@ -26,6 +26,10 @@ def verify_wheel_cylinders(scene, wheels, query, *, native_to_tensor,
         raise ValueError('native cylinder probes require selected sources and explicit sample/error bounds')
     bridge = scene.observation
     bridge.before_physics_step()
+    # DirectGPU不保证CPU场景查询跟随动态GPU位姿。这里只核对初始cook，
+    # 必须早于显式物理推进；不能拿旧查询位姿判断移动轮的几何是否改变。
+    if bridge.physical_tick != 0:
+        raise RuntimeError('wheel cook probes require startup before the first physical tick')
     poses = native_to_tensor(scene.robot.root_view.get_link_transforms()).detach().cpu().double()
     if (poses.shape != (bridge.num_envs, 19, 7) or not torch.isfinite(poses).all()
             or not torch.allclose(poses[..., 3:].norm(dim=-1), torch.ones_like(poses[..., 6]), atol=1e-5, rtol=0)):
@@ -77,6 +81,7 @@ def verify_wheel_cylinders(scene, wheels, query, *, native_to_tensor,
                 if error is None or error > tolerance_m:
                     raise RuntimeError('selected wheel native collision differs at ' + repr(records[-1]))
     return {'scope': 'selected_cylinder_radial_and_cap_native_ray_probes',
+            'at_physical_tick': 0, 'pose_scope': 'initial_cooked_pose_not_dynamic_scene_query_tracking',
             'urdf_sha256': wheels.urdf_sha256, 'native_rows': rows, 'radial_samples': radial_samples,
             'tolerance_m': tolerance_m, 'maximum_error_m': max(item['error_m'] for item in records),
             'records': records, 'physical_task_qualified': False, 'hardware_qualified': False}

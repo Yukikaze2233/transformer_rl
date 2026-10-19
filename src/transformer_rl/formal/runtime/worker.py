@@ -126,13 +126,13 @@ def runtime(recipe, components, configuration, *, control):
             scene, tuning.dynamics, recipe.training_seed + 15485863, native_to_tensor=wp.to_torch,
             tensor_to_native=lambda value: wp.from_torch(value, dtype=wp.uint32 if value.dtype == torch.int32
                                                        else wp.float32))
-        _initial_policy_boundary(sim, scene)
         wheels = WheelCollisionCentres.from_urdf(
             (scene_recipe.asset / scene_recipe.manifest['urdf']).read_bytes(), scene.observation.binding)
         query = omni.physx.get_physx_scene_query_interface()
         wheel_receipt = verify_wheel_cylinders(scene, wheels, query, native_to_tensor=wp.to_torch,
                                                tolerance_m=configuration['wheel_probe_tolerance_m'])
         scene.readback['native_wheel_collision_equivalence_verified'] = True
+        _initial_policy_boundary(sim, scene)
         terrain_presence = NativeShapeQueries(query, tuning.terrain_edit.native_query_offset_m)(
             scene.contacts.terrain_paths_by_environment, scene.terrain_meshes,
             scene.environment_origins_m, required_present=True)

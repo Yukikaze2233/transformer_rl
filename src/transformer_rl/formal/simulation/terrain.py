@@ -175,12 +175,19 @@ class NativeTerrainEditor:
         self.tuning, self._contacts = tuning, contacts_factory
         self._probe = native_geometry_probe
         self._view, self._busy, self._faulted = scene.robot.root_view, False, False
+        self._prim_paths = tuple(str(p) for p in self._view.prim_paths)
+        # SDK可将根API绑定在Robot容器或base_link，之后仍要求完整路径不变。
+        if (len(self._prim_paths) != scene.observation.num_envs
+                or any(path not in (env + '/Robot', env + '/Robot/' + scene.observation.binding.native_body_names[0])
+                       for path, env in zip(self._prim_paths, scene.environment_paths))):
+            raise ValueError('native terrain editor requires its exact environment articulation roots')
         self.last_failure = None
 
     @classmethod
     def on_admitted_context(cls, sim, scene, tuning):
         from pxr import PhysxSchema, UsdGeom, UsdPhysics
         import omni.physx
+        from omni.physx.bindings import _physx
         import warp as wp
         import isaaclab.sim as sim_utils
         from isaaclab.sim.utils.stage import get_current_stage_id
@@ -191,7 +198,7 @@ class NativeTerrainEditor:
             raise ValueError('native terrain replacement requires scene-query support in the admitted configuration')
         return cls(scene, UsdTerrainAccess(sim.stage, UsdGeom, UsdPhysics, PhysxSchema, sim_utils),
                     omni.physx.get_physx_interface(), omni.physx.get_physx_simulation_interface(),
-                    omni.physx.get_physx_cooking_private_interface(), stage_id_source=get_current_stage_id,
+                    _physx.acquire_physx_cooking_private_interface(), stage_id_source=get_current_stage_id,
                     physics_view_source=PhysxManager.get_physics_sim_view, native_to_tensor=wp.to_torch,
                     native_geometry_probe=NativeShapeQueries(omni.physx.get_physx_scene_query_interface(),
                                                               tuning.native_query_offset_m), tuning=tuning)
@@ -239,7 +246,7 @@ class NativeTerrainEditor:
             result[name] = value.detach().clone()
         result['prim_paths'] = tuple(str(p) for p in self._view.prim_paths)
         result['joint_names'], result['body_names'] = tuple(self.scene.robot.joint_names), tuple(self.scene.robot.body_names)
-        if (result['prim_paths'] != tuple(p + '/Robot' for p in self.scene.environment_paths)
+        if (result['prim_paths'] != self._prim_paths
                 or result['joint_names'] != bridge.binding.native_joint_names
                 or result['body_names'] != bridge.binding.native_body_names):
             raise ValueError('native terrain edit cannot change the actual articulation clone or named topology')

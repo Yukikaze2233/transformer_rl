@@ -44,6 +44,7 @@ def test_native_probe_uses_owned_names_caps_and_radial_points_without_advancing_
     assert sum(v['kind'] == 'cap' for v in receipt['records']) == 8
     assert scene.observation.physical_tick == 0
     assert receipt['physical_task_qualified'] is False
+    assert receipt['at_physical_tick'] == 0
     assert scene.readback.get('native_wheel_collision_equivalence_verified') is not True
 
 
@@ -53,3 +54,12 @@ def test_native_probe_refuses_changed_surface_and_foreign_collider_hits(error, o
     with pytest.raises(RuntimeError, match='native collision differs'):
         verify_wheel_cylinders(scene, wheels, Query(scene, wheels.body_names, error=error, own_hits=own_hits),
                                native_to_tensor=lambda v: v, tolerance_m=.001)
+
+
+def test_dynamic_gpu_pose_is_never_compared_to_a_potentially_stale_cpu_query_pose():
+    scene, wheels = setup()
+    scene.observation.physical_tick = 2
+    query = Query(scene, wheels.body_names)
+    with pytest.raises(RuntimeError, match='before the first physical tick'):
+        verify_wheel_cylinders(scene, wheels, query, native_to_tensor=lambda v: v, tolerance_m=.001)
+    assert not query.calls

@@ -70,7 +70,7 @@ class Storage:
                 'native_static_collision_equivalence_verified': False}
 
 
-def fixture(*, reverse=False):
+def fixture(*, reverse=False, root_at_body=False):
     env, robot, sim, writes, _ = task_fixture()
     life, plant = env.lifecycle, env.lifecycle.plant
     old_scene, courses = plant.scene, life.ground.courses
@@ -99,7 +99,8 @@ def fixture(*, reverse=False):
     life._scene, life.ground, life._meshes, life._courses = scene, ground, scene.terrain_meshes, ground.courses
     env._scene, env.rewards._scene, env.rewards._physics_view = scene, scene, physics_view
     view = robot.root_view
-    view.prim_paths = tuple(p + '/Robot' for p in scene.environment_paths)
+    suffix = '/Robot/base_link' if root_at_body else '/Robot'
+    view.prim_paths = tuple(p + suffix for p in scene.environment_paths)
     view.get_root_transforms = lambda: robot.data.root_link_pose_w.torch
     view.get_root_velocities = lambda: robot.data.root_com_vel_w.torch
     view.get_link_transforms = lambda: robot.data.body_link_pose_w.torch
@@ -145,6 +146,16 @@ def changed(courses, *, row=0, height=.05):
     values[row] = replace(old, geometry_seed=old.geometry_seed + 1,
                            surface=TerrainSurface((patch,)))
     return tuple(values)
+
+
+def test_sdk_root_on_base_link_is_bound_once_and_later_path_changes_are_rejected():
+    env, robot, sim, _, editor, _, _, _, _, _ = fixture(root_at_body=True)
+    result = editor.replace_courses(env.lifecycle.ground, changed(env.lifecycle.ground.courses),
+                                     torch.tensor([True, False]))
+    assert sim.steps == 0 and result.changed_rows == (0,)
+    robot.root_view.prim_paths = tuple(p + '/Robot' for p in result.scene.environment_paths)
+    with pytest.raises(ValueError, match='actual articulation clone'):
+        editor._native_state()
 
 
 @pytest.mark.parametrize('reverse', [False, True])
