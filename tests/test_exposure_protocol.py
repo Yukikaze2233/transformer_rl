@@ -15,13 +15,13 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from transformer_rl import experiments, exposure_protocol as protocol
-from transformer_rl import exposure_training, frame_study, history_study
-from transformer_rl.config import PPOConfig
-from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig, digest
-from transformer_rl.frame_policy import FramePolicyConfig
-from transformer_rl.frame_training import FrameActorCritic
-from transformer_rl.frame_workflow import _model_state_sha256
+from transformer_rl.research import experiments, exposure_protocol as protocol
+from transformer_rl.research import exposure_training, frame_study, history_study
+from transformer_rl.research.config import PPOConfig
+from transformer_rl.research.frame_config import FrameModelConfig, FrameTrainConfig, digest
+from transformer_rl.research.frame_policy import FramePolicyConfig
+from transformer_rl.research.frame_training import FrameActorCritic
+from transformer_rl.research.frame_workflow import _model_state_sha256
 
 
 REAL_RUNTIME_IDENTITY = protocol.runtime_identity
@@ -87,7 +87,7 @@ def prepared(tmp_path, monkeypatch):
                      "retention_coef": 0., "anchor_seeds": [4101, 5101]},
         "evaluation": {"validation_seeds": [701, 1701], "seeds": [2701, 3701], "steps": 12,
                        "settle_steps": 1, "min_steady_samples": 1, "min_completed_episodes": 1},
-        "execution": {"devices": ["cpu"], "worker_module": "transformer_rl.frame_process",
+        "execution": {"devices": ["cpu"], "worker_module": 'transformer_rl.research.frame_process',
                       "job_timeout_seconds": 61.},
         "selection": {"min_training_seeds": 3, "objectives": [{"path": "metrics.error.mean",
             "direction": "minimize", "scale": 1., "weight": 1.}], "std_penalty": 1.,
@@ -426,11 +426,11 @@ def test_actual_runtime_provider_change_invalidates_frozen_protocol(prepared, ch
 def test_real_source_bytes_change_is_detected_without_modifying_shared_checkout(prepared, monkeypatch):
     original = freeze(prepared)
     copy = prepared["tmp"] / "changed_package"
-    shutil.copytree(Path(experiments.__file__).resolve().parent, copy,
+    shutil.copytree(Path(experiments.__file__).resolve().parents[1], copy,
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    path = copy / "frame_policy.py"
+    path = copy / "research/frame_policy.py"
     path.write_bytes(path.read_bytes() + b"\n# synthetic changed source bytes\n")
-    monkeypatch.setattr(experiments, "__file__", str(copy / "experiments.py"))
+    monkeypatch.setattr(experiments, "__file__", str(copy / "research/experiments.py"))
     assert experiments.source_identity() != original["source"]
     with pytest.raises(ValueError, match="source"):
         protocol.validate_protocol(original)
@@ -438,7 +438,7 @@ def test_real_source_bytes_change_is_detected_without_modifying_shared_checkout(
 
 @pytest.mark.parametrize("route", ["history_plan.json", "expanded_spec.json", "inputs/spec.json",
     "study/plan.json", "study/configs/transformer_h3.train.second.json",
-    "study/policy_source/transformer_rl/frame_policy.py"])
+    "study/policy_source/transformer_rl/research/frame_policy.py"])
 def test_actual_history_plan_or_frozen_member_bytes_change_is_detected(prepared, route):
     original = freeze(prepared)
     path = prepared["history"] / route

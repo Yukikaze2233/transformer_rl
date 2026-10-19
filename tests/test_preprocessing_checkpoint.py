@@ -2,10 +2,10 @@
 import pytest
 import torch
 
-from transformer_rl.checkpoint import load_checkpoint, save_checkpoint
-from transformer_rl.config import ModelConfig, PPOConfig
-from transformer_rl.model import ActorCritic
-from transformer_rl.ppo import PPOTrainer
+from transformer_rl.research.checkpoint import load_checkpoint, save_checkpoint
+from transformer_rl.research.config import ModelConfig, PPOConfig
+from transformer_rl.research.model import ActorCritic
+from transformer_rl.research.ppo import PPOTrainer
 
 
 @pytest.mark.parametrize("key", ["actor.frame_scale", "actor.time_frequencies"])

@@ -5,7 +5,7 @@ import math
 import pytest
 import torch
 
-from transformer_rl._terrain_geometry import HeightPatch, TerrainQueryBatch, TerrainSurface
+from transformer_rl.formal.tasks.geometry import HeightPatch, TerrainQueryBatch, TerrainSurface
 
 
 def at(surface, points):

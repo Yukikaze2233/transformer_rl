@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from transformer_rl import calibration_storage as storage
+from transformer_rl.research import calibration_storage as storage
 
 
 @pytest.fixture
@@ -391,13 +391,7 @@ def test_observer_own_journal_fd_is_not_an_sdk_helper(observer, owned):
 
 def test_real_launcher_ancestry_does_not_select_unrelated_sibling(owned):
     payload = create(owned, "request.json")
-    probe = """import json,os,sys
-from transformer_rl.calibration_storage import helper_inventory
-inventory=helper_inventory(sys.argv[1])
-ancestor=next(row for row in inventory['reference_discovery_exclusions'] if row['pid']==os.getppid())
-tracked=helper_inventory(sys.argv[1],[ancestor])
-print(json.dumps({'inventory':inventory,'tracked':tracked,'probe_pid':os.getpid()}),flush=True)
-"""
+    probe = "import json,os,sys\nfrom transformer_rl.research.calibration_storage import helper_inventory\ninventory=helper_inventory(sys.argv[1])\nancestor=next(row for row in inventory['reference_discovery_exclusions'] if row['pid']==os.getppid())\ntracked=helper_inventory(sys.argv[1],[ancestor])\nprint(json.dumps({'inventory':inventory,'tracked':tracked,'probe_pid':os.getpid()}),flush=True)\n"
     supervisor = """import json,os,subprocess,sys
 children=[]
 try:
@@ -418,7 +412,7 @@ finally:
     for child in children:
         child.wait(timeout=5)
 """
-    environment = {**os.environ, "PYTHONPATH": str(Path(storage.__file__).parents[1]),
+    environment = {**os.environ, "PYTHONPATH": str(Path(storage.__file__).parents[2]),
                    "PYTHONDONTWRITEBYTECODE": "1", "OWNED_LAUNCHER_TEST_PATH": str(owned)}
     process = subprocess.Popen([sys.executable, "-B", "-c", supervisor, str(owned), probe,
         f"--request={payload}"], cwd=owned, env=environment,

@@ -5,10 +5,10 @@ import math
 import pytest
 import torch
 
-from transformer_rl._skill_evidence import (
+from transformer_rl.formal.tasks.skills import (
     PhysicalJumpEvidence, SkillEvidenceConfig, SkillMeasurement, SkillOutcome, SkillPhase,
 )
-from transformer_rl._task_protocol import CompletedEstimate, RequestEnd, RequestProtocol, RequestProtocolConfig, RequestResponse
+from transformer_rl.formal.tasks.protocol import CompletedEstimate, RequestEnd, RequestProtocol, RequestProtocolConfig, RequestResponse
 
 
 class SkillHarness:

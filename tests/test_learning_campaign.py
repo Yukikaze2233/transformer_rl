@@ -517,12 +517,12 @@ def test_unsealed_metric_suffix_is_not_accepted_as_complete_endpoint(prepared, m
 
 def test_actual_cpu_checkpoint_probe_validates_model_adam_and_rng(tmp_path):
     import torch
-    from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig
-    from transformer_rl.frame_policy import FramePolicyConfig
-    from transformer_rl.frame_training import FrameActorCritic
-    from transformer_rl.frame_checkpoint import save_frame_checkpoint
-    from transformer_rl.ppo import PPOTrainer
-    from transformer_rl.config import PPOConfig
+    from transformer_rl.research.frame_config import FrameModelConfig, FrameTrainConfig
+    from transformer_rl.research.frame_policy import FramePolicyConfig
+    from transformer_rl.research.frame_training import FrameActorCritic
+    from transformer_rl.research.frame_checkpoint import save_frame_checkpoint
+    from transformer_rl.research.ppo import PPOTrainer
+    from transformer_rl.research.config import PPOConfig
     control_contract = {"policy_dt_s": .01, "observation_schema": "tensor_fixture",
         "feature_names": [f"feature_{i}" for i in range(5)], "action_names": ["position", "velocity"],
         "action_bounds": [.2, .5], "target_scale": [.25, 10.], "target_offset": [.1, -.2],
@@ -550,7 +550,7 @@ def test_actual_cpu_checkpoint_probe_validates_model_adam_and_rng(tmp_path):
 
 
 def test_real_cpu_preparation_validator_and_controller_preserve_inputs(prepared, template, tmp_path, monkeypatch):
-    from transformer_rl.learning_study import prepare_learning_study
+    from transformer_rl.research.learning_study import prepare_learning_study
     args, _, _, _ = prepared
     parent, packed = tmp_path / "real_parent", tmp_path / "real_prepared"
     shutil.copytree(template, parent)

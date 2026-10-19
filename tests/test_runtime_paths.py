@@ -12,7 +12,7 @@ import tempfile
 
 import pytest
 
-from transformer_rl import runtime_paths as runtime
+from transformer_rl.common import runtime_paths as runtime
 
 
 def raw_sha(path):

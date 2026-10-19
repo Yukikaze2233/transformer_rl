@@ -8,9 +8,9 @@ import pytest
 import torch
 from torch import nn
 
-from transformer_rl.config import ModelConfig
-from transformer_rl.model import ActorCritic, TimeAwareActor, ValueCritic
-from transformer_rl.types import ActionSample, HistoryBatch, PolicyEvaluation
+from transformer_rl.research.config import ModelConfig
+from transformer_rl.research.model import ActorCritic, TimeAwareActor, ValueCritic
+from transformer_rl.research.types import ActionSample, HistoryBatch, PolicyEvaluation
 
 
 @pytest.fixture(scope="module", autouse=True)

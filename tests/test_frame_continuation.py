@@ -10,14 +10,14 @@ import numpy as np
 import pytest
 import torch
 
-from transformer_rl.config import PPOConfig
-from transformer_rl.frame_checkpoint import capture_rng, load_frame_checkpoint, restore_rng
-from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig
-from transformer_rl.frame_continuation import FrameContinuation
-from transformer_rl.frame_policy import FramePolicyConfig
-from transformer_rl.frame_training import FrameCollector
-from transformer_rl.frame_workflow import train_frame_policy
-from transformer_rl.retention import save_anchors
+from transformer_rl.research.config import PPOConfig
+from transformer_rl.research.frame_checkpoint import capture_rng, load_frame_checkpoint, restore_rng
+from transformer_rl.research.frame_config import FrameModelConfig, FrameTrainConfig
+from transformer_rl.research.frame_continuation import FrameContinuation
+from transformer_rl.research.frame_policy import FramePolicyConfig
+from transformer_rl.research.frame_training import FrameCollector
+from transformer_rl.research.frame_workflow import train_frame_policy
+from transformer_rl.research.retention import save_anchors
 
 sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
 from packed_env import make_env
@@ -198,7 +198,7 @@ def test_private_sampler_and_complete_checkpoint_resume(tmp_path):
 def test_invalid_parent_rejected_before_environment(tmp_path, monkeypatch, override, match):
     config, path, sha = parent(tmp_path)
     calls = []
-    monkeypatch.setattr("transformer_rl.frame_continuation._seed", lambda *_: calls.append("seed"))
+    monkeypatch.setattr('transformer_rl.research.frame_continuation._seed', lambda *_: calls.append("seed"))
     with pytest.raises(ValueError, match=match):
         open_branch(config, path, sha, **override)
     assert calls == []
@@ -237,7 +237,7 @@ def test_resume_rejects_implicit_reset_or_changed_identity(tmp_path, monkeypatch
         torch.save(payload, saved)
         receipt = {"sha256": hashlib.sha256(saved.read_bytes()).hexdigest()}
     calls = []
-    monkeypatch.setattr("transformer_rl.frame_continuation._seed", lambda *_: calls.append("seed"))
+    monkeypatch.setattr('transformer_rl.research.frame_continuation._seed', lambda *_: calls.append("seed"))
     with pytest.raises(ValueError, match=match):
         open_branch(config, saved, receipt["sha256"], **{"resume": True, **overrides})
     assert calls == []

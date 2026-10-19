@@ -8,11 +8,11 @@ import torch
 from torch import nn
 from torch.distributions import Normal
 
-from transformer_rl.config import ModelConfig, PPOConfig
-from transformer_rl.model import ActorCritic
-from transformer_rl.ppo import PPOTrainer
-from transformer_rl.storage import PPOBatch, RolloutBuffer
-from transformer_rl.types import HistoryBatch, PolicyEvaluation
+from transformer_rl.research.config import ModelConfig, PPOConfig
+from transformer_rl.research.model import ActorCritic
+from transformer_rl.research.ppo import PPOTrainer
+from transformer_rl.research.storage import PPOBatch, RolloutBuffer
+from transformer_rl.research.types import HistoryBatch, PolicyEvaluation
 
 
 class GaussianActor(nn.Module):
@@ -779,7 +779,7 @@ def test_actual_detached_estimator_is_excluded_and_both_optimizer_states_match(f
 
 
 def test_diagnostics_false_never_constructs_optimizer_observer(monkeypatch):
-    import transformer_rl.ppo as ppo_module
+    import transformer_rl.research.ppo as ppo_module
 
     def forbidden(*args, **kwargs):
         raise AssertionError("disabled diagnostics must not construct a parameter observer")

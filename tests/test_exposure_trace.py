@@ -14,13 +14,13 @@ import numpy as np
 import pytest
 import torch
 
-from transformer_rl.control_metrics import ControlMetrics
-from transformer_rl.control_trace import ControlTrace
-from transformer_rl.exposure_trace import verify_trace_archive
-from transformer_rl.evaluation import _MetricAccumulator
-from transformer_rl.episode_outcomes import EpisodeOutcomeStatistics, TRACE_METADATA_KEY, trace_metadata, trace_packet
-from transformer_rl.history_control import HistoryControlStatistics
-from transformer_rl.stability import EpisodeSignalStatistics
+from transformer_rl.research.control_metrics import ControlMetrics
+from transformer_rl.research.control_trace import ControlTrace
+from transformer_rl.research.exposure_trace import verify_trace_archive
+from transformer_rl.research.evaluation import _MetricAccumulator
+from transformer_rl.research.episode_outcomes import EpisodeOutcomeStatistics, TRACE_METADATA_KEY, trace_metadata, trace_packet
+from transformer_rl.research.history_control import HistoryControlStatistics
+from transformer_rl.research.stability import EpisodeSignalStatistics
 
 
 BOUNDS = [.5] * 6
@@ -281,7 +281,7 @@ def test_health_replay_uses_original_precision_and_includes_warmup(tmp_path, fie
 
 
 def test_real_case_horizons_are_per_group_not_the_40_second_evaluation_window(tmp_path):
-    from transformer_rl.exposure_evaluation import _episode_outcome_rows
+    from transformer_rl.research.exposure_evaluation import _episode_outcome_rows
     labels = ["short", "long", "medium", "short", "medium", "long"]
     cases = {name: {"episode_horizon_ticks": ticks, "survival_applicable": True}
              for name, ticks in (("short", 1000), ("medium", 1600), ("long", 2800))}

@@ -13,7 +13,7 @@ import zipfile
 
 import pytest
 
-from transformer_rl import retention_evaluation as evaluation
+from transformer_rl.research import retention_evaluation as evaluation
 
 
 def npy(shape, dtype, payload, *, version=b"\x01\x00", fortran=False):

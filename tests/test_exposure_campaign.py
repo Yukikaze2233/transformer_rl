@@ -18,14 +18,14 @@ import pytest
 import numpy as np
 import torch
 
-from transformer_rl import exposure_campaign as campaign
-from transformer_rl import exposure_protocol as protocol
-from transformer_rl import exposure_training as training
-from transformer_rl import history_study
-from transformer_rl import queue_validation
-from transformer_rl.control_trace import ControlTrace
-from transformer_rl.frame_config import digest, json_bytes
-from transformer_rl.frame_training import FrameActorCritic
+from transformer_rl.research import exposure_campaign as campaign
+from transformer_rl.research import exposure_protocol as protocol
+from transformer_rl.research import exposure_training as training
+from transformer_rl.research import history_study
+from transformer_rl.research import queue_validation
+from transformer_rl.research.control_trace import ControlTrace
+from transformer_rl.research.frame_config import digest, json_bytes
+from transformer_rl.research.frame_training import FrameActorCritic
 from test_exposure_protocol import prepared, freeze, write_json
 from test_exposure_training import make_env
 
@@ -35,19 +35,7 @@ REAL_LAUNCH = campaign.launch_owned_worker
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-BOOTSTRAP = r'''
-import json,sys
-from copy import deepcopy
-from pathlib import Path
-from transformer_rl import exposure_protocol as protocol, queue_validation
-request=json.loads(Path(sys.argv[sys.argv.index('--request')+1]).read_bytes())
-p=json.loads(Path(request['protocol']['path']).read_bytes())
-protocol.predecessors._dependencies=lambda *a: (deepcopy(p['execution']['dependencies']),deepcopy(p['execution']['resource_locks']))
-queue_validation.check_dependency=lambda *a,**k: {'status':'completed','controller_live':False,'live_workers':[],'fixture':'synthetic closure only'}
-sys.path.insert(0,p['runtime_roots'][0])
-from transformer_rl.exposure_process import main
-raise SystemExit(main(sys.argv[1:]))
-'''
+BOOTSTRAP = "\nimport json,sys\nfrom copy import deepcopy\nfrom pathlib import Path\nfrom transformer_rl.research import exposure_protocol as protocol, queue_validation\nrequest=json.loads(Path(sys.argv[sys.argv.index('--request')+1]).read_bytes())\np=json.loads(Path(request['protocol']['path']).read_bytes())\nprotocol.predecessors._dependencies=lambda *a: (deepcopy(p['execution']['dependencies']),deepcopy(p['execution']['resource_locks']))\nqueue_validation.check_dependency=lambda *a,**k: {'status':'completed','controller_live':False,'live_workers':[],'fixture':'synthetic closure only'}\nsys.path.insert(0,p['runtime_roots'][0])\nfrom transformer_rl.research.exposure_process import main\nraise SystemExit(main(sys.argv[1:]))\n"
 
 
 def canonical(path, value):
@@ -690,20 +678,9 @@ def test_real_entire_CPU_training_grid_independent_stages_all_four_actor_modes(c
 
 def test_actual_final_optimizer_output_overflow_stops_before_checkpoint_publication(campaign_inputs, monkeypatch):
     p = campaign_inputs
-    late_output = r'''
-from transformer_rl.ppo import PPOTrainer
-original_update = PPOTrainer.update
-def update_with_late_sdk_output(self, *args, **kwargs):
-    result = original_update(self, *args, **kwargs)
-    contract = json.loads(Path(request['storage_contract']['path']).read_bytes())
-    destination = Path(request['output_root']).parent / 'late_sdk_output.bin'
-    with destination.open('xb') as stream:
-        stream.write(b'x' * (contract['caps']['inflight_bytes'] + 1))
-    return result
-PPOTrainer.update = update_with_late_sdk_output
-'''
-    bootstrap = BOOTSTRAP.replace("from transformer_rl.exposure_process import main",
-                                  late_output + "\nfrom transformer_rl.exposure_process import main")
+    late_output = "\nfrom transformer_rl.research.ppo import PPOTrainer\noriginal_update = PPOTrainer.update\ndef update_with_late_sdk_output(self, *args, **kwargs):\n    result = original_update(self, *args, **kwargs)\n    contract = json.loads(Path(request['storage_contract']['path']).read_bytes())\n    destination = Path(request['output_root']).parent / 'late_sdk_output.bin'\n    with destination.open('xb') as stream:\n        stream.write(b'x' * (contract['caps']['inflight_bytes'] + 1))\n    return result\nPPOTrainer.update = update_with_late_sdk_output\n"
+    bootstrap = BOOTSTRAP.replace('from transformer_rl.research.exposure_process import main',
+                                  late_output + '\nfrom transformer_rl.research.exposure_process import main')
     launches = []
 
     def launch(command, directory, leases, timeout, publish, **kwargs):
@@ -1090,13 +1067,7 @@ def test_controller_lease_checks_actual_inherited_FLOCK_parent_and_controller_by
     canonical(root / "controller.json", controller)
     receipt = protocol._receipt(root / "controller.json")
     with campaign.resource_lease(p["protocol"], lambda *a, **k: None) as leases:
-        program = r'''
-import json,sys
-from pathlib import Path
-from transformer_rl.exposure_campaign import validate_controller_lease
-data=json.loads(Path(sys.argv[1]).read_bytes())
-validate_controller_lease(data['protocol'],data['leases'],data['controller'])
-'''
+        program = "\nimport json,sys\nfrom pathlib import Path\nfrom transformer_rl.research.exposure_campaign import validate_controller_lease\ndata=json.loads(Path(sys.argv[1]).read_bytes())\nvalidate_controller_lease(data['protocol'],data['leases'],data['controller'])\n"
         descriptor = leases[0]["descriptor"]
         # A separate open of the same inode is not an inherited locked handle.
         unlocked = os.open(leases[0]["path"], os.O_RDWR)

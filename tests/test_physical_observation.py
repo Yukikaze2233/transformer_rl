@@ -6,11 +6,11 @@ import math
 import pytest
 import torch
 
-from transformer_rl._physical_observation import (
+from transformer_rl.formal.control.observation import (
     CommandFeatures, CommandMode, MechanicalBinding, NativePhysicalSample,
     ObservationAssembler, WheelContactHistory,
 )
-from transformer_rl._structured_collection import ACTION_ORDER
+from transformer_rl.formal.learning.collection import ACTION_ORDER
 
 
 TREE = ('L_joint1', 'R_joint1', 'LL_joint1', 'RR_joint1', 'L_joint2', 'R_jonit2',

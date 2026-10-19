@@ -12,11 +12,11 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import transformer_rl.exposure_training as exposure
-from transformer_rl.frame_checkpoint import capture_rng
-from transformer_rl.frame_config import digest, json_bytes
-from transformer_rl.frame_continuation import FrameContinuation
-from transformer_rl.ppo import PPOTrainer
+import transformer_rl.research.exposure_training as exposure
+from transformer_rl.research.frame_checkpoint import capture_rng
+from transformer_rl.research.frame_config import digest, json_bytes
+from transformer_rl.research.frame_continuation import FrameContinuation
+from transformer_rl.research.ppo import PPOTrainer
 from test_exposure_training import config, same
 from packed_env import make_env
 
@@ -122,62 +122,7 @@ def rebind_request(path, request):
     return rebind_payload(path, payload, request)
 
 
-CHILD = r'''
-import json,os,random,sys
-from pathlib import Path
-import numpy as np
-import torch
-from dataclasses import replace
-import transformer_rl.exposure_training as exposure
-from transformer_rl.frame_config import FrameTrainConfig
-from transformer_rl.frame_continuation import FrameContinuation
-from transformer_rl.frame_checkpoint import capture_rng
-from packed_env import make_env
-torch.set_num_threads(1)
-data=json.loads(sys.stdin.read())
-data['stage']['config']=FrameTrainConfig.from_dict(data['stage']['config'])
-original=FrameContinuation.open
-report={}
-def same(a,b):
-    if isinstance(a,torch.Tensor):assert torch.equal(a,b)
-    elif isinstance(a,dict):
-        assert a.keys()==b.keys()
-        for key in a:same(a[key],b[key])
-    elif isinstance(a,(list,tuple)):
-        assert len(a)==len(b)
-        for x,y in zip(a,b):same(x,y)
-    else:assert a==b
-def noisy_factory(**kwargs):
-    torch.rand(17);random.random();np.random.rand(5)
-    env=make_env(**kwargs)
-    reset=env.reset
-    def noisy_reset(seed=None):
-        torch.rand(11);random.random();np.random.rand(7)
-        return reset(seed)
-    env.reset=noisy_reset
-    return env
-def checked_open(cls,configuration,factory,reference,checkpoint,**kwargs):
-    payload=torch.load(checkpoint,map_location='cpu',weights_only=True)
-    session=original(configuration,factory,reference,checkpoint,**kwargs)
-    same(session.model.state_dict(),payload['model'])
-    same(session.trainer.optimizer.state_dict(),payload['optimizer'])
-    same(capture_rng(),payload['rng'])
-    same(session.sampler.state_dict(),payload['metadata']['continuation']['retention'])
-    assert session.update==kwargs['parent_update']
-    assert session.consumed_updates==kwargs['consumed_updates']
-    assert session.collected_transitions==kwargs['cumulative_transitions']
-    history=session.collector._history.snapshot().frames
-    assert torch.equal(history,history[:,:1].expand_as(history))
-    report.update(pid=os.getpid(),full_learning_state_equal=True,
-        episode_reset=True,history_repeat_first=True,
-        inherited_update=session.update,inherited_samples=session.collected_transitions,
-        Adam_state_entries=len(payload['optimizer']['state']))
-    return session
-FrameContinuation.open=classmethod(checked_open)
-result=exposure.train_exposure_segment(data['stage'],noisy_factory,'packed_env:make_env',
-    Path(data['output']),parent_endpoint=data['parent'],**data['options'])
-print(json.dumps({'result':result,'report':report}))
-'''
+CHILD = "\nimport json,os,random,sys\nfrom pathlib import Path\nimport numpy as np\nimport torch\nfrom dataclasses import replace\nimport transformer_rl.research.exposure_training as exposure\nfrom transformer_rl.research.frame_config import FrameTrainConfig\nfrom transformer_rl.research.frame_continuation import FrameContinuation\nfrom transformer_rl.research.frame_checkpoint import capture_rng\nfrom packed_env import make_env\ntorch.set_num_threads(1)\ndata=json.loads(sys.stdin.read())\ndata['stage']['config']=FrameTrainConfig.from_dict(data['stage']['config'])\noriginal=FrameContinuation.open\nreport={}\ndef same(a,b):\n    if isinstance(a,torch.Tensor):assert torch.equal(a,b)\n    elif isinstance(a,dict):\n        assert a.keys()==b.keys()\n        for key in a:same(a[key],b[key])\n    elif isinstance(a,(list,tuple)):\n        assert len(a)==len(b)\n        for x,y in zip(a,b):same(x,y)\n    else:assert a==b\ndef noisy_factory(**kwargs):\n    torch.rand(17);random.random();np.random.rand(5)\n    env=make_env(**kwargs)\n    reset=env.reset\n    def noisy_reset(seed=None):\n        torch.rand(11);random.random();np.random.rand(7)\n        return reset(seed)\n    env.reset=noisy_reset\n    return env\ndef checked_open(cls,configuration,factory,reference,checkpoint,**kwargs):\n    payload=torch.load(checkpoint,map_location='cpu',weights_only=True)\n    session=original(configuration,factory,reference,checkpoint,**kwargs)\n    same(session.model.state_dict(),payload['model'])\n    same(session.trainer.optimizer.state_dict(),payload['optimizer'])\n    same(capture_rng(),payload['rng'])\n    same(session.sampler.state_dict(),payload['metadata']['continuation']['retention'])\n    assert session.update==kwargs['parent_update']\n    assert session.consumed_updates==kwargs['consumed_updates']\n    assert session.collected_transitions==kwargs['cumulative_transitions']\n    history=session.collector._history.snapshot().frames\n    assert torch.equal(history,history[:,:1].expand_as(history))\n    report.update(pid=os.getpid(),full_learning_state_equal=True,\n        episode_reset=True,history_repeat_first=True,\n        inherited_update=session.update,inherited_samples=session.collected_transitions,\n        Adam_state_entries=len(payload['optimizer']['state']))\n    return session\nFrameContinuation.open=classmethod(checked_open)\nresult=exposure.train_exposure_segment(data['stage'],noisy_factory,'packed_env:make_env',\n    Path(data['output']),parent_endpoint=data['parent'],**data['options'])\nprint(json.dumps({'result':result,'report':report}))\n"
 
 
 @pytest.mark.parametrize("architecture,history,readout", [

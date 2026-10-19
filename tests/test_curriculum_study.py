@@ -7,11 +7,11 @@ import shutil
 
 import pytest
 
-from transformer_rl.curriculum_study import (
+from transformer_rl.research.curriculum_study import (
     ARM_DOMAINS, CLOCK_FIELDS, TASK_FIELDS, TRANSITIONS_PER_UPDATE,
     prepare_curriculum_study, validate_curriculum_study,
 )
-from transformer_rl.frame_config import FrameTrainConfig, digest
+from transformer_rl.research.frame_config import FrameTrainConfig, digest
 
 
 def write_json(path, value):
@@ -105,7 +105,7 @@ def source(tmp_path):
                         "contract": train_route, "contract_sha256": train_sha, "num_envs": 1024}})
     write_json(directory / "base.json", base.to_dict())
     write_json(directory / "study.json", {"base_config": "base.json", "scenarios": scenarios,
-               "environment_factory": "transformer_rl.chassis_adapter:make_env"})
+               "environment_factory": 'transformer_rl.research.chassis_adapter:make_env'})
     return directory, parent
 
 

@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from transformer_rl import experiments as ex
+from transformer_rl.research import experiments as ex
 from test_experiments import fake_runner, specification  # noqa: F401
 
 

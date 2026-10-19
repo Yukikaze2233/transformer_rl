@@ -13,8 +13,8 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from transformer_rl.config import load_config
-from transformer_rl.model import ActorCritic
+from transformer_rl.research.config import load_config
+from transformer_rl.research.model import ActorCritic
 
 
 def parameter_count(module: nn.Module) -> int:

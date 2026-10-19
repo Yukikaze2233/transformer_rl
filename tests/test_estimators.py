@@ -5,12 +5,12 @@ import copy
 import pytest
 import torch
 
-from transformer_rl.checkpoint import load_checkpoint, save_checkpoint
-from transformer_rl.config import ModelConfig, PPOConfig
-from transformer_rl.export import _synthetic_history, export_policy
-from transformer_rl.model import ActorCritic
-from transformer_rl.ppo import PPOTrainer
-from transformer_rl.storage import EstimatorBatch
+from transformer_rl.research.checkpoint import load_checkpoint, save_checkpoint
+from transformer_rl.research.config import ModelConfig, PPOConfig
+from transformer_rl.research.export import _synthetic_history, export_policy
+from transformer_rl.research.model import ActorCritic
+from transformer_rl.research.ppo import PPOTrainer
+from transformer_rl.research.storage import EstimatorBatch
 
 
 @pytest.fixture(autouse=True)

@@ -6,11 +6,11 @@ import pytest
 import torch
 from torch import nn
 
-from transformer_rl.config import ModelConfig, PPOConfig
-from transformer_rl.model import ActorCritic, TimeAwareActor
-from transformer_rl.ppo import PPOTrainer
-from transformer_rl.runner import RolloutCollector
-from transformer_rl.types import StepResult, VectorObservation
+from transformer_rl.research.config import ModelConfig, PPOConfig
+from transformer_rl.research.model import ActorCritic, TimeAwareActor
+from transformer_rl.research.ppo import PPOTrainer
+from transformer_rl.research.runner import RolloutCollector
+from transformer_rl.research.types import StepResult, VectorObservation
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -252,7 +252,7 @@ def test_callback_partial_rollout_counters_and_elapsed_time(model_config, monkey
     collector = RolloutCollector(env, model, PPOConfig(gamma=0.5, gae_lambda=0.5))
     collector.reset()
     ticks = iter([10.0, 12.5])
-    monkeypatch.setattr("transformer_rl.runner.time.perf_counter", lambda: next(ticks))
+    monkeypatch.setattr('transformer_rl.research.runner.time.perf_counter', lambda: next(ticks))
     calls = []
 
     def stop():

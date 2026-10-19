@@ -10,11 +10,11 @@ import torch
 from torch import nn
 from torch.distributions import Normal, kl_divergence
 
-from transformer_rl.config import ModelConfig
-from transformer_rl.model import ActorCritic
-from transformer_rl.ppo import PPOTrainer
-from transformer_rl.storage import PPOBatch
-from transformer_rl.types import HistoryBatch, PolicyEvaluation
+from transformer_rl.research.config import ModelConfig
+from transformer_rl.research.model import ActorCritic
+from transformer_rl.research.ppo import PPOTrainer
+from transformer_rl.research.storage import PPOBatch
+from transformer_rl.research.types import HistoryBatch, PolicyEvaluation
 
 from test_ppo import SyntheticModel, config, make_batch
 

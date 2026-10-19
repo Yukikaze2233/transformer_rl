@@ -7,10 +7,10 @@ import pytest
 import torch
 
 from test_native_observation import native_fixture
-from transformer_rl._native_ground import NativeGroundQuery, TerrainCoverageError, WheelCollisionCentres
-from transformer_rl._native_scene import NativeSceneState
-from transformer_rl._terrain_geometry import HeightPatch, TerrainSurface
-from transformer_rl._terrain_tasks import TerrainCourse, TerrainExtent, TerrainRequest, TerrainKind
+from transformer_rl.formal.simulation.ground import NativeGroundQuery, TerrainCoverageError, WheelCollisionCentres
+from transformer_rl.formal.simulation.scene import NativeSceneState
+from transformer_rl.formal.tasks.geometry import HeightPatch, TerrainSurface
+from transformer_rl.formal.tasks.terrain import TerrainCourse, TerrainExtent, TerrainRequest, TerrainKind
 
 
 def fixture():

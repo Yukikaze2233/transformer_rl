@@ -7,8 +7,8 @@ import pytest
 import torch
 
 from test_reset_program import fixture as program_fixture, draw
-from transformer_rl._native_episode import NativeEpisodeLifecycle
-from transformer_rl._reset_coordinator import ResetBatchCoordinator, ResetSourceNotReady
+from transformer_rl.formal.simulation.episode import NativeEpisodeLifecycle
+from transformer_rl.formal.runtime.reset_coordinator import ResetBatchCoordinator, ResetSourceNotReady
 
 
 def controlled_draws(program, sizes):

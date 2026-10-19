@@ -6,8 +6,8 @@ import math
 import pytest
 from scipy.stats import beta
 
-from transformer_rl._evaluation_plan import evaluation_plan
-from transformer_rl._evaluation_results import (
+from transformer_rl.formal.evaluation.plan import evaluation_plan
+from transformer_rl.formal.evaluation.results import (
     RecordedTrial, exact_binomial_limits, pool_moments, summarize_evaluation,
 )
 

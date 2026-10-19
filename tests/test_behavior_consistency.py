@@ -8,8 +8,8 @@ import pytest
 import torch
 from torch.distributions import Normal
 
-from transformer_rl.ppo import PPOTrainer
-from transformer_rl.types import PolicyEvaluation
+from transformer_rl.research.ppo import PPOTrainer
+from transformer_rl.research.types import PolicyEvaluation
 
 from test_ppo import GaussianActor, SyntheticModel, config, make_batch
 

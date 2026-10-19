@@ -6,12 +6,12 @@ import math
 import pytest
 import torch
 
-from transformer_rl.checkpoint import save_checkpoint
-from transformer_rl.config import ModelConfig, PPOConfig
-from transformer_rl.evaluation import evaluate_policy
-from transformer_rl.model import ActorCritic
-from transformer_rl.ppo import PPOTrainer
-from transformer_rl.types import StepResult, VectorObservation
+from transformer_rl.research.checkpoint import save_checkpoint
+from transformer_rl.research.config import ModelConfig, PPOConfig
+from transformer_rl.research.evaluation import evaluate_policy
+from transformer_rl.research.model import ActorCritic
+from transformer_rl.research.ppo import PPOTrainer
+from transformer_rl.research.types import StepResult, VectorObservation
 
 
 class ScriptedEvaluation:

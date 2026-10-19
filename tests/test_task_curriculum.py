@@ -6,7 +6,7 @@ import hashlib
 import pytest
 import torch
 
-from transformer_rl._task_curriculum import (
+from transformer_rl.formal.tasks.curriculum import (
     AuditedStageDecision, ContinuousTaskSampler, CurriculumBudget, STAGE_BUDGETS,
     STAGE_NAMES, STAGE_WEIGHTS, TaskDomain, TaskDraw, TaskFamily,
 )

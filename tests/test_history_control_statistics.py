@@ -4,7 +4,7 @@ import math
 import pytest
 import torch
 
-from transformer_rl.history_control import HistoryControlStatistics
+from transformer_rl.research.history_control import HistoryControlStatistics
 
 
 def physical_packet(ages, tick, *, changing=True):

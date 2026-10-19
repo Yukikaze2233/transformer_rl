@@ -54,33 +54,7 @@ PARITY_INPUTS = {"seed": 9271, "cases": 5, "batch_sizes": [1, 7],
                  "inputs": "zeros, random windows and repeat-first windows", "output": "raw mean before clipping or target mapping"}
 # This is a reproducible CPU-only producer command definition. The selector
 # never runs it; the independent latency producer owns its request/process/output.
-PARITY_PROBE_SCRIPT = """import hashlib,json,sys
-from pathlib import Path
-request=json.loads(Path(sys.argv[1]).read_text())
-sys.path.insert(0,str(Path(request['source_root'])/'src'))
-import torch
-from transformer_rl.frame_checkpoint import load_frame_checkpoint
-assert not torch.cuda.is_initialized()
-checkpoint=Path(request['checkpoint']['path'])
-assert hashlib.sha256(checkpoint.read_bytes()).hexdigest()==request['checkpoint']['sha256']
-model,_,config,update,_,_=load_frame_checkpoint(checkpoint)
-assert update==1200
-policy=model.actor.policy.eval()
-generator=torch.Generator().manual_seed(9271)
-cases=[torch.zeros(1,config.model.history_length,config.model.frame_dim)]
-for batch in (1,7):
-    frames=torch.randn(batch,config.model.history_length,config.model.frame_dim,generator=generator)
-    cases.extend((frames,frames[:,-1:].expand_as(frames).clone()))
-with torch.no_grad():
-    outputs=[policy(frames) for frames in cases]
-assert all(torch.isfinite(value).all() for value in outputs)
-assert not torch.cuda.is_initialized()
-result={'format':'transformer_rl.learning_export_parity_reference','schema_version':1,
-        'identity':request['identity'],'protocol':request['protocol'],
-        'reference_max_abs':max(float(value.abs().max()) for value in outputs),'cuda_initialized':False}
-with Path(request['output']).open('x') as stream:
-    stream.write(json.dumps(result,allow_nan=False)+'\\n')
-"""
+PARITY_PROBE_SCRIPT = "import hashlib,json,sys\nfrom pathlib import Path\nrequest=json.loads(Path(sys.argv[1]).read_text())\nsys.path.insert(0,str(Path(request['source_root'])/'src'))\nimport torch\nfrom transformer_rl.research.frame_checkpoint import load_frame_checkpoint\nassert not torch.cuda.is_initialized()\ncheckpoint=Path(request['checkpoint']['path'])\nassert hashlib.sha256(checkpoint.read_bytes()).hexdigest()==request['checkpoint']['sha256']\nmodel,_,config,update,_,_=load_frame_checkpoint(checkpoint)\nassert update==1200\npolicy=model.actor.policy.eval()\ngenerator=torch.Generator().manual_seed(9271)\ncases=[torch.zeros(1,config.model.history_length,config.model.frame_dim)]\nfor batch in (1,7):\n    frames=torch.randn(batch,config.model.history_length,config.model.frame_dim,generator=generator)\n    cases.extend((frames,frames[:,-1:].expand_as(frames).clone()))\nwith torch.no_grad():\n    outputs=[policy(frames) for frames in cases]\nassert all(torch.isfinite(value).all() for value in outputs)\nassert not torch.cuda.is_initialized()\nresult={'format':'transformer_rl.learning_export_parity_reference','schema_version':1,\n        'identity':request['identity'],'protocol':request['protocol'],\n        'reference_max_abs':max(float(value.abs().max()) for value in outputs),'cuda_initialized':False}\nwith Path(request['output']).open('x') as stream:\n    stream.write(json.dumps(result,allow_nan=False)+'\\n')\n"
 
 
 def require(condition, message):

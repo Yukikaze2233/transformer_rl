@@ -14,14 +14,14 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from transformer_rl.config import PPOConfig
-from transformer_rl.experiments import source_identity
-from transformer_rl.frame_checkpoint import load_frame_checkpoint, save_frame_checkpoint
-from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig, digest, json_bytes
-from transformer_rl.frame_policy import FramePolicyConfig
-from transformer_rl.frame_training import FrameActorCritic
-from transformer_rl.ppo import PPOTrainer
-from transformer_rl.retention import save_anchors
+from transformer_rl.research.config import PPOConfig
+from transformer_rl.research.experiments import source_identity
+from transformer_rl.research.frame_checkpoint import load_frame_checkpoint, save_frame_checkpoint
+from transformer_rl.research.frame_config import FrameModelConfig, FrameTrainConfig, digest, json_bytes
+from transformer_rl.research.frame_policy import FramePolicyConfig
+from transformer_rl.research.frame_training import FrameActorCritic
+from transformer_rl.research.ppo import PPOTrainer
+from transformer_rl.research.retention import save_anchors
 
 sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
 from packed_env import PackedFixture
@@ -95,8 +95,8 @@ def one_thread():
 
 @pytest.fixture
 def rig(tmp_path, monkeypatch):
-    worker = importlib.import_module("transformer_rl.continuation_process")
-    campaign = importlib.import_module("transformer_rl.retention_campaign")
+    worker = importlib.import_module('transformer_rl.research.continuation_process')
+    campaign = importlib.import_module('transformer_rl.research.retention_campaign')
     config = configuration()
     parent = tmp_path / "parent.pt"
     with torch.random.fork_rng(devices=[]):
@@ -285,7 +285,7 @@ def test_output_occupancy_rejected_without_overwrite_or_factory(rig, tmp_path, o
 
 
 def test_fixed_authorization_rejection_precedes_factory(rig, monkeypatch):
-    campaign = importlib.import_module("transformer_rl.retention_campaign")
+    campaign = importlib.import_module('transformer_rl.research.retention_campaign')
     failure = ValueError("synthetic authorization refused")
 
     def refuse(request):
@@ -339,7 +339,7 @@ def test_complete_updates_publish_interval_and_final_without_tensorboard(rig, mo
 
 @pytest.mark.parametrize("outcome", ["completed", "stopped", "invalid_source"])
 def test_worker_preserves_reward_windows_and_partial_failure_accounting(rig, monkeypatch, outcome):
-    from transformer_rl.reward_components import RewardComponentStatistics
+    from transformer_rl.research.reward_components import RewardComponentStatistics
 
     original_init, original_step = PackedFixture.__init__, PackedFixture.step
     budgets, writers = [], []
@@ -540,7 +540,7 @@ def test_failed_final_publication_does_not_pair_residual_path_with_interval_sha(
 
 
 def test_worker_owns_only_new_apps_and_restores_old_registry(rig, monkeypatch):
-    process = importlib.import_module("transformer_rl.frame_process")
+    process = importlib.import_module('transformer_rl.research.frame_process')
     calls = []
 
     class App:
@@ -569,7 +569,7 @@ def test_worker_owns_only_new_apps_and_restores_old_registry(rig, monkeypatch):
 
 
 def test_shutdown_errors_do_not_mask_ppo_failure_and_all_apps_close(rig, monkeypatch):
-    process = importlib.import_module("transformer_rl.frame_process")
+    process = importlib.import_module('transformer_rl.research.frame_process')
     original = PackedFixture.__init__
     calls = []
     failure = RuntimeError("original synthetic PPO failure")
@@ -633,7 +633,7 @@ def test_cli_requires_absolute_request_path(rig, tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("reason", ["SIGTERM", "time_budget"])
 def test_soft_stop_discards_partial_rollout_and_charges_actual_samples(rig, monkeypatch, reason):
-    cli = importlib.import_module("transformer_rl.cli")
+    cli = importlib.import_module('transformer_rl.research.cli')
     budgets = []
     original_step = PackedFixture.step
     previous_handlers = {number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM)}
@@ -671,7 +671,7 @@ def test_soft_stop_discards_partial_rollout_and_charges_actual_samples(rig, monk
 
 
 def test_sigterm_during_ppo_finishes_update_before_final_save(rig, monkeypatch):
-    cli = importlib.import_module("transformer_rl.cli")
+    cli = importlib.import_module('transformer_rl.research.cli')
     budgets = []
     original = PPOTrainer.update
 

@@ -5,13 +5,13 @@ import json
 import pytest
 import torch
 
-from transformer_rl.checkpoint import load_checkpoint, save_checkpoint
-from transformer_rl.config import ModelConfig, PPOConfig
-from transformer_rl.export import _synthetic_history, export_policy
-from transformer_rl.model import (
+from transformer_rl.research.checkpoint import load_checkpoint, save_checkpoint
+from transformer_rl.research.config import ModelConfig, PPOConfig
+from transformer_rl.research.export import _synthetic_history, export_policy
+from transformer_rl.research.model import (
     ActorCritic, GaussianActor, HistoryMLPActor, TimeAwareActor, WindowGRUActor,
 )
-from transformer_rl.ppo import PPOTrainer
+from transformer_rl.research.ppo import PPOTrainer
 
 
 VARIANTS = [
@@ -208,7 +208,7 @@ def test_schema_one_exact_default_migration_and_adam_order(tmp_path):
     payload = torch.load(path, weights_only=True)
     payload["schema_version"] = 1
     payload.pop("source_schema_version")
-    from transformer_rl.checkpoint import _V5_MODEL_DEFAULTS, _V5_PPO_DEFAULTS
+    from transformer_rl.research.checkpoint import _V5_MODEL_DEFAULTS, _V5_PPO_DEFAULTS
     payload.pop("estimator_optimizer_state")
     for key in _V5_MODEL_DEFAULTS:
         payload["model_config"].pop(key)

@@ -138,7 +138,7 @@ def verify_configs(root, manifest):
 
 def train_command(args, manifest, config, directory, seed, remaining, offset, parent, *, phase_transfer):
     invocation = command(args.source_root, "train", "--config", args.study_root / config,
-        "--env-factory", manifest.get("environment_factory", "transformer_rl.chassis_adapter:make_env"),
+        "--env-factory", manifest.get("environment_factory", 'transformer_rl.research.chassis_adapter:make_env'),
         "--run-dir", directory / "train", "--updates", remaining,
         "--rollout-steps", manifest["training"]["rollout_steps"], "--seed", seed,
         "--device", args.device, "--max-seconds", manifest["training"]["max_seconds"],

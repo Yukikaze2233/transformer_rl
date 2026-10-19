@@ -8,9 +8,9 @@ from types import ModuleType
 
 import pytest
 
-from transformer_rl.frame_config import FrameTrainConfig
-from transformer_rl.frame_study import plan_study, validate_study
-from transformer_rl.transfer_study import prepare_transfer_study
+from transformer_rl.research.frame_config import FrameTrainConfig
+from transformer_rl.research.frame_study import plan_study, validate_study
+from transformer_rl.research.transfer_study import prepare_transfer_study
 
 
 def write_json(path, value):
@@ -80,7 +80,7 @@ def source(tmp_path, monkeypatch):
     }
     task = root / "parent.json"
     write_json(task, parent)
-    module = ModuleType("transformer_rl.transfer_profiles")
+    module = ModuleType('transformer_rl.research.transfer_profiles')
     def cases(base):
         result = []
         for profile in ("nominal", "delay40_30"):
@@ -96,7 +96,7 @@ def source(tmp_path, monkeypatch):
         return result
     module.build_transfer_cases = cases
     module.configure_transfer_evaluation = evaluation
-    monkeypatch.setitem(sys.modules, "transformer_rl.transfer_profiles", module)
+    monkeypatch.setitem(sys.modules, 'transformer_rl.research.transfer_profiles', module)
     return root, task, parent
 
 

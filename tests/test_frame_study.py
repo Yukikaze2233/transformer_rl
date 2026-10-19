@@ -9,10 +9,10 @@ import threading
 import pytest
 import torch
 
-from transformer_rl.frame_config import digest
-from transformer_rl import frame_study as study
-from transformer_rl.frame_workflow import evaluate_frame_policy, train_frame_policy
-from transformer_rl.chassis_adapter import merge_evaluation_contracts
+from transformer_rl.research.frame_config import digest
+from transformer_rl.research import frame_study as study
+from transformer_rl.research.frame_workflow import evaluate_frame_policy, train_frame_policy
+from transformer_rl.research.chassis_adapter import merge_evaluation_contracts
 from test_frame_workflow import configuration
 from packed_env import make_env
 
@@ -30,7 +30,7 @@ def specification(tmp_path):
                      "anchor_seeds": [4101]},
         "evaluation": {"validation_seeds": [701], "seeds": [2701], "steps": 12, "settle_steps": 1,
                        "min_steady_samples": 1, "min_completed_episodes": 6},
-        "execution": {"devices": ["cpu"], "worker_module": "transformer_rl.frame_process", "job_timeout_seconds": 60.},
+        "execution": {"devices": ["cpu"], "worker_module": 'transformer_rl.research.frame_process', "job_timeout_seconds": 60.},
         "selection": {"min_training_seeds": 2, "objectives": [{"path": "metrics.tracking_error.mean",
              "direction": "minimize", "scale": 1., "weight": 1.}], "std_penalty": 1.,
              "latency_p99_ms": 9.9, "latency_max_ms": 1000., "max_deadline_misses": 1000,
@@ -191,14 +191,14 @@ def test_batch_contract_merge_preserves_dynamics_and_fixed_case_layout(tmp_path)
 def test_frozen_worker_source_is_hash_checked(tmp_path):
     root = tmp_path / "study"
     study.plan_study(specification(tmp_path), root)
-    policy = root / "policy_source/transformer_rl/frame_policy.py"
+    policy = root / "policy_source/transformer_rl/research/frame_policy.py"
     policy.write_text(policy.read_text() + "\n# accidental modification\n")
     with pytest.raises(ValueError, match="frozen policy source changed"):
         study.validate_study(root)
 
 
 def test_sdk_adapter_requires_dedicated_worker_before_imports():
-    from transformer_rl.chassis_adapter import make_env as make_chassis
+    from transformer_rl.research.chassis_adapter import make_env as make_chassis
     imported = {name for name in sys.modules if name.startswith("isaaclab")}
     with pytest.raises(RuntimeError, match="frame_process"):
         make_chassis(configuration().model, {}, "cpu")

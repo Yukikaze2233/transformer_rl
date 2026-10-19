@@ -9,8 +9,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from transformer_rl import frame_runtime
-from transformer_rl.frame_runtime import FrameRuntime, run_control_loop
+from transformer_rl.research import frame_runtime
+from transformer_rl.research.frame_runtime import FrameRuntime, run_control_loop
 
 
 class Clock:

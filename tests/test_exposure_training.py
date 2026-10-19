@@ -12,13 +12,13 @@ import numpy as np
 import pytest
 import torch
 
-from transformer_rl.config import PPOConfig
-import transformer_rl.exposure_training as exposure
-from transformer_rl.frame_checkpoint import capture_rng
-from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig
-from transformer_rl.frame_continuation import FrameContinuation
-from transformer_rl.frame_policy import FramePolicyConfig
-from transformer_rl.ppo import PPOTrainer
+from transformer_rl.research.config import PPOConfig
+import transformer_rl.research.exposure_training as exposure
+from transformer_rl.research.frame_checkpoint import capture_rng
+from transformer_rl.research.frame_config import FrameModelConfig, FrameTrainConfig
+from transformer_rl.research.frame_continuation import FrameContinuation
+from transformer_rl.research.frame_policy import FramePolicyConfig
+from transformer_rl.research.ppo import PPOTrainer
 
 sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
 from packed_env import make_env

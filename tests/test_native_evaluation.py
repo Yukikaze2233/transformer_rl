@@ -8,11 +8,11 @@ import torch
 
 from test_native_task import fixture
 from test_structured_collection import model
-from transformer_rl._native_evaluation import (
+from transformer_rl.formal.evaluation.native import (
     EvaluationPhysicalSample, FirstEpisodeStatistics, evaluate_first_episodes,
 )
-from transformer_rl._native_task import FailureReason
-from transformer_rl._task_commands import RequestInputs
+from transformer_rl.formal.simulation.task import FailureReason
+from transformer_rl.formal.tasks.commands import RequestInputs
 
 
 def sample(tick, dt=.005, *, count=2, **changes):

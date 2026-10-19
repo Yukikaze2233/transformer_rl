@@ -5,7 +5,7 @@ import math
 import pytest
 import torch
 
-from transformer_rl.stability import EpisodeSignalStatistics
+from transformer_rl.research.stability import EpisodeSignalStatistics
 
 
 def update(statistics, values, timestamp, done=None):

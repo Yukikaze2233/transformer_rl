@@ -3,7 +3,7 @@ import math
 import pytest
 import torch
 
-from transformer_rl.action_statistics import action_statistics
+from transformer_rl.research.action_statistics import action_statistics
 
 
 def test_action_counts_distinguish_clipping_from_exact_bound_and_policy_mean():

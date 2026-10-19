@@ -12,11 +12,11 @@ import pytest
 import torch
 
 from test_native_task import fixture as task_fixture, advance
-from transformer_rl._native_contacts import NativeTerrainContacts
-from transformer_rl._native_ground import NativeGroundQuery
-from transformer_rl._native_terrain import NativeShapeQueries, NativeTerrainEditor, NativeTerrainInstaller, TerrainEditTuning
-from transformer_rl._terrain_geometry import HeightPatch, TerrainSurface, TerrainKind
-from transformer_rl._terrain_tasks import ContinuousTerrainGenerator, TerrainExtent, TerrainRequest, TerrainTuning
+from transformer_rl.formal.simulation.contacts import NativeTerrainContacts
+from transformer_rl.formal.simulation.ground import NativeGroundQuery
+from transformer_rl.formal.simulation.terrain import NativeShapeQueries, NativeTerrainEditor, NativeTerrainInstaller, TerrainEditTuning
+from transformer_rl.formal.tasks.geometry import HeightPatch, TerrainSurface, TerrainKind
+from transformer_rl.formal.tasks.terrain import ContinuousTerrainGenerator, TerrainExtent, TerrainRequest, TerrainTuning
 
 
 class Storage:

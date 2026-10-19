@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from transformer_rl import retention_campaign
+from transformer_rl.research import retention_campaign
 
 
 def absent_python_wrappers(monkeypatch):

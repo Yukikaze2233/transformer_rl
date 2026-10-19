@@ -1,0 +1,147 @@
+"""Native SDK lifetime for the private structured learner's runtime factory.
+
+The launch parent supplies fixed-GPU admission and original resource leases.
+This factory creates one owned context, checks its selected collision binding
+once and then exposes the continuous task. It schedules no evaluation.
+"""
+from __future__ import annotations
+
+from contextlib import contextmanager
+from dataclasses import fields
+import json
+from pathlib import Path
+import sys
+
+import torch
+
+from ..tasks.trajectory import CommandRates
+from ..simulation.collision import verify_wheel_cylinders
+from ..simulation.ground import WheelCollisionCentres
+from .interop import native_proxy_launch
+from .assembly import NativeRuntimeTuning, NativeTaskRuntime
+from ..simulation.scene import NativeSceneRecipe
+from ..simulation.task import NativeTaskLimits
+from ..simulation.terrain import NativeShapeQueries, TerrainEditTuning
+from ..control.actuation import PairTargetDomain, ResponseParameters
+from ..tasks.recovery import RecoveryTuning
+from ..tasks.reset_program import ResetProgramTuning
+from ..tasks.geometry import TerrainKind
+from ..tasks.terrain import TerrainExtent, TerrainRequest
+from ...common.training_control import boot_id, verify_pin, write_json
+
+
+def parse_tuning(value):
+    if not isinstance(value, dict) or set(value) != {f.name for f in fields(NativeRuntimeTuning)}:
+        raise ValueError('native runtime tuning fields differ')
+    parsed = dict(value)
+    for name, config_type in (('reset', ResetProgramTuning), ('recovery', RecoveryTuning),
+                              ('limits', NativeTaskLimits), ('command_rates', CommandRates),
+                              ('terrain_edit', TerrainEditTuning)):
+        raw = dict(parsed[name])
+        if name == 'limits':
+            raw['forbidden_body_names'] = tuple(raw['forbidden_body_names'])
+        parsed[name] = config_type(**raw)
+    parsed['pair_domain'] = PairTargetDomain(**parsed['pair_domain']) if parsed['pair_domain'] is not None else None
+    return NativeRuntimeTuning(**parsed)
+
+
+@contextmanager
+def runtime(recipe, components, configuration, *, control):
+    """Return a single native task after explicit cold physics setup.
+
+    Initial flat geometry is temporary, not an alternate curriculum draw.
+    The reset coordinator consumes and applies the real first task request.
+    """
+    expected = {'asset_directory', 'response_source_pin', 'tuning', 'environment_spacing_m',
+                'wheel_probe_tolerance_m', 'authorized_boot'}
+    if (not isinstance(configuration, dict) or set(configuration) != expected
+            or configuration['authorized_boot'] != boot_id()
+            or configuration['authorized_boot'] != control.binding['boot_id']
+            or recipe.device != 'cuda:0' or recipe.collection.policy_dt_s != .01
+            or type(configuration['environment_spacing_m']) not in (int, float)
+            or configuration['environment_spacing_m'] <= 0):
+        raise ValueError('native worker requires its exact current-boot recipe and spatial configuration')
+    tuning = parse_tuning(configuration['tuning'])
+    verify_pin(configuration['response_source_pin'])
+    response_document = json.loads(Path(configuration['response_source_pin']['path']).read_text())
+    response = ResponseParameters.from_recorded_response(response_document['actuator_response'])
+    launcher = None
+    compatibility = None
+    try:
+        from isaaclab.app import AppLauncher
+
+        previous_argv = sys.argv
+        try:
+            sys.argv = [sys.argv[0], '--info']
+            launcher = AppLauncher(headless=True, device=recipe.device, enable_cameras=False, livestream=0)
+        finally:
+            sys.argv = previous_argv
+        import omni.kit.app
+        import omni.physx
+        import warp as wp
+        from isaaclab.app.settings_manager import SettingsManager
+        from isaaclab.sim import SimulationCfg, SimulationContext
+        from isaaclab.utils.warp.proxy_array import ProxyArray
+        from isaaclab_physx.physics.physx_manager_cfg import PhysxCfg
+
+        settings = SettingsManager.instance()
+        settings.initialize_carb_settings()
+        settings.set_int('/physics/cudaDevice', 0)
+        settings.set_bool('/physics/suppressReadback', True)
+        extensions = omni.kit.app.get_app().get_extension_manager()
+        if not extensions.is_extension_enabled('omni.physx.gpu'):
+            extensions.set_extension_enabled_immediate('omni.physx.gpu', True)
+        torch.cuda.set_device(0)
+        torch.cuda.init()
+        compatibility = native_proxy_launch(wp, ProxyArray)
+        statistics = compatibility.__enter__()
+        sim = SimulationContext(SimulationCfg(dt=.005, device=recipe.device, enable_scene_query_support=True,
+                                physics=PhysxCfg(enable_external_forces_every_iteration=True,
+                                                 enable_scene_query_support=True)))
+        maximum_horizon = max(tuning.reset.ordinary_horizon_s, tuning.reset.extended_horizon_s)
+        extent = TerrainExtent.for_horizon(maximum_horizon, max(abs(v) for v in recipe.domain.forward_m_s),
+                                           tuning.reset.terrain_margin_m)
+        initial = components.terrain.build(TerrainRequest(TerrainKind.FLAT, extent), geometry_seed=0)
+        courses = (initial,) * recipe.num_envs
+        columns = max(1, int(recipe.num_envs**.5))
+        spacing = configuration['environment_spacing_m']
+        origins = tuple((spacing * (i % columns), spacing * (i // columns), 0.) for i in range(recipe.num_envs))
+        scene_recipe = NativeSceneRecipe(configuration['asset_directory'], recipe.asset_manifest_sha256,
+                                         response, origins, tuple(c.surface.meshes for c in courses))
+        scene = scene_recipe.build_on_admitted_context(sim)
+        # One actual refresh makes the initial post-physics read boundary
+        # explicit. It is physical preparation, not a PPO/sample reservation.
+        sim.step(render=False)
+        scene.observation.after_physics_step(1)
+        wheels = WheelCollisionCentres.from_urdf(
+            (scene_recipe.asset / scene_recipe.manifest['urdf']).read_bytes(), scene.observation.binding)
+        query = omni.physx.get_physx_scene_query_interface()
+        wheel_receipt = verify_wheel_cylinders(scene, wheels, query, native_to_tensor=wp.to_torch,
+                                               tolerance_m=configuration['wheel_probe_tolerance_m'])
+        scene.readback['native_wheel_collision_equivalence_verified'] = True
+        terrain_presence = NativeShapeQueries(query, tuning.terrain_edit.native_query_offset_m)(
+            scene.contacts.terrain_paths_by_environment, scene.terrain_meshes,
+            scene.environment_origins_m, required_present=True)
+        value = NativeTaskRuntime.on_admitted_scene(
+            sim, scene, recipe, components, tuning, asset_directory=scene_recipe.asset, response=response,
+            design_courses=courses, native_to_tensor=wp.to_torch,
+            sensor_source=scene.observation.assembler.clean_sensors)
+        write_json(Path(control.binding['attempt']) / 'native_setup.json', {
+            'boot': boot_id(), 'scene_readback': scene.readback, 'wheel_probe': wheel_receipt,
+            'terrain_presence': terrain_presence, 'solver_position_iterations': 12,
+            'solver_velocity_iterations': 6, 'automatic_evaluation': False,
+            'timing': 'selected_effective_response_no_additional_USB_transport_delay',
+            'sensor_noise_or_delay_randomization_active': False, 'hardware_qualified': False,
+            'full_task_health_qualified': False})
+        yield value
+        control.publish(control.state['phase'], SDK_zero_copy_compatibility=dict(statistics))
+    except BaseException as error:
+        # Kit may exit during close. Publish an actual functional error first,
+        # so a zero waitpid code can never fabricate a learning endpoint.
+        control.fail(error)
+        raise
+    finally:
+        if launcher is not None:
+            launcher.app.close()
+        if compatibility is not None:
+            compatibility.__exit__(None, None, None)

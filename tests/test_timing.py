@@ -5,7 +5,7 @@ import math
 import pytest
 import torch
 
-from transformer_rl.timing import DelayedCommandChannel, TimingProfile
+from transformer_rl.research.timing import DelayedCommandChannel, TimingProfile
 
 
 @pytest.fixture(params=["cpu", "cuda"])

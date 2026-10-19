@@ -5,8 +5,8 @@ import math
 
 import pytest
 
-from transformer_rl import exposure_selection, frame_study
-from transformer_rl.exposure_protocol import _receipt
+from transformer_rl.research import exposure_selection, frame_study
+from transformer_rl.research.exposure_protocol import _receipt
 from test_frame_study import specification
 from test_frame_workflow import configuration
 

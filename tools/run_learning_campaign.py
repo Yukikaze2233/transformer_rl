@@ -30,7 +30,7 @@ _SPEC.loader.exec_module(diagnostic)
 transfer, control = diagnostic.transfer, diagnostic.control
 write = transfer.write
 FORMAT = "transformer_rl.learning_campaign"
-FACTORY = "transformer_rl.chassis_adapter:make_env"
+FACTORY = 'transformer_rl.research.chassis_adapter:make_env'
 SAMPLES = 49152
 UPDATES = 1200
 TOTAL = SAMPLES * UPDATES
@@ -142,9 +142,7 @@ def runtime_identity(source):
 
 def validate_prepared(prepared, source):
     """The preparation validator authenticates inputs, never runtime outputs."""
-    script = ("import json,sys; sys.path.insert(0,sys.argv[1]); "
-              "from transformer_rl.learning_study import validate_learning_study; "
-              "print(json.dumps(validate_learning_study(sys.argv[2]),allow_nan=False))")
+    script = ('import json,sys; sys.path.insert(0,sys.argv[1]); from transformer_rl.research.learning_study import validate_learning_study; print(json.dumps(validate_learning_study(sys.argv[2]),allow_nan=False))')
     with tempfile.TemporaryDirectory(prefix="learning-inputs-cpu-") as cache:
         process = subprocess.run(python_command(sys.executable, cache, "-c", script,
             str(plain(source) / "src"), str(prepared)), env=cpu_environment(source),
@@ -638,40 +636,7 @@ def training_request(manifest, cell, directory, consumed, parent):
         "updates": remaining, "reserved_samples": remaining * SAMPLES, "command": command}
 
 
-_CHECKPOINT_SCRIPT = r'''
-import hashlib, json, sys
-sys.path.insert(0,sys.argv[1])
-import torch
-from transformer_rl.frame_checkpoint import load_frame_checkpoint
-from transformer_rl.frame_workflow import _model_state_sha256
-from transformer_rl.ppo import PPOTrainer
-def encode(value):
-    if isinstance(value,torch.Tensor):
-        value=value.detach().cpu().contiguous()
-        return {"tensor":str(value.dtype),"shape":list(value.shape),"sha256":hashlib.sha256(value.reshape(-1).view(torch.uint8).numpy().tobytes()).hexdigest()}
-    if isinstance(value,dict):
-        return {"dict":[[encode(k),encode(v)] for k,v in sorted(value.items(),key=lambda p:(type(p[0]).__name__,str(p[0])))]}
-    if isinstance(value,(list,tuple)):
-        return {type(value).__name__:[encode(v) for v in value]}
-    return value
-def digest(value):
-    return hashlib.sha256(json.dumps(encode(value),sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
-model,trainer,config,update,metadata,rng=load_frame_checkpoint(sys.argv[2],device="cpu")
-state=trainer.optimizer.state_dict()
-steps=[float(v["step"]) for v in state["state"].values()]
-groups=[{k:v for k,v in group.items() if k!="params"} for group in state["param_groups"]]
-reference=PPOTrainer(model,config.ppo).optimizer.state_dict()
-reference_groups=[{k:v for k,v in group.items() if k!="params"} for group in reference["param_groups"]]
-print(json.dumps({"checkpoint_sha256":hashlib.sha256(open(sys.argv[2],"rb").read()).hexdigest(),
- "config":config.to_dict(),"update":update,"metadata":metadata,
- "model_sha256":_model_state_sha256(model),"optimizer_sha256":digest(state),"rng_sha256":digest(rng),
- "optimizer_groups":groups,"optimizer_state_count":len(steps),
- "optimizer_parameter_count":sum(len(group["params"]) for group in state["param_groups"]),
- "optimizer_recipe_matches_fresh":groups==reference_groups,
- "optimizer_step_min":min(steps) if steps else None,"optimizer_step_max":max(steps) if steps else None,
- "rng_validated":True,"model_validated":True,"optimizer_validated":True,
- "cuda_initialized":torch.cuda.is_initialized()},allow_nan=False))
-'''
+_CHECKPOINT_SCRIPT = '\nimport hashlib, json, sys\nsys.path.insert(0,sys.argv[1])\nimport torch\nfrom transformer_rl.research.frame_checkpoint import load_frame_checkpoint\nfrom transformer_rl.research.frame_workflow import _model_state_sha256\nfrom transformer_rl.research.ppo import PPOTrainer\ndef encode(value):\n    if isinstance(value,torch.Tensor):\n        value=value.detach().cpu().contiguous()\n        return {"tensor":str(value.dtype),"shape":list(value.shape),"sha256":hashlib.sha256(value.reshape(-1).view(torch.uint8).numpy().tobytes()).hexdigest()}\n    if isinstance(value,dict):\n        return {"dict":[[encode(k),encode(v)] for k,v in sorted(value.items(),key=lambda p:(type(p[0]).__name__,str(p[0])))]}\n    if isinstance(value,(list,tuple)):\n        return {type(value).__name__:[encode(v) for v in value]}\n    return value\ndef digest(value):\n    return hashlib.sha256(json.dumps(encode(value),sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()\nmodel,trainer,config,update,metadata,rng=load_frame_checkpoint(sys.argv[2],device="cpu")\nstate=trainer.optimizer.state_dict()\nsteps=[float(v["step"]) for v in state["state"].values()]\ngroups=[{k:v for k,v in group.items() if k!="params"} for group in state["param_groups"]]\nreference=PPOTrainer(model,config.ppo).optimizer.state_dict()\nreference_groups=[{k:v for k,v in group.items() if k!="params"} for group in reference["param_groups"]]\nprint(json.dumps({"checkpoint_sha256":hashlib.sha256(open(sys.argv[2],"rb").read()).hexdigest(),\n "config":config.to_dict(),"update":update,"metadata":metadata,\n "model_sha256":_model_state_sha256(model),"optimizer_sha256":digest(state),"rng_sha256":digest(rng),\n "optimizer_groups":groups,"optimizer_state_count":len(steps),\n "optimizer_parameter_count":sum(len(group["params"]) for group in state["param_groups"]),\n "optimizer_recipe_matches_fresh":groups==reference_groups,\n "optimizer_step_min":min(steps) if steps else None,"optimizer_step_max":max(steps) if steps else None,\n "rng_validated":True,"model_validated":True,"optimizer_validated":True,\n "cuda_initialized":torch.cuda.is_initialized()},allow_nan=False))\n'
 
 
 def checkpoint_probe(manifest, path):

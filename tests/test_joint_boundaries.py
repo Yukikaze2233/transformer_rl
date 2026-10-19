@@ -8,8 +8,8 @@ import pytest
 import torch
 
 from test_physical_observation import BODIES, TREE, fixture as physical_fixture
-from transformer_rl._joint_boundaries import LegBoundaryGeometry
-from transformer_rl._output_actuation import OutputFeedbackController, PairTargetDomain
+from transformer_rl.formal.control.joints import LegBoundaryGeometry
+from transformer_rl.formal.control.actuation import OutputFeedbackController, PairTargetDomain
 
 
 def asset_sources(binding):

@@ -88,7 +88,7 @@ def synthetic_worker(args, plan, calls, *, partial_first=False, incomplete_varia
     def worker(invocation, directory, environment, timeout, heartbeat):
         calls.append(invocation)
         operation = invocation[3]
-        assert "transformer_rl.frame_process" in invocation[2]
+        assert 'transformer_rl.research.frame_process' in invocation[2]
         option = lambda name: invocation[invocation.index(name) + 1]
         if operation == "run":
             assert invocation[-2:] == ["--max-parallel", "1"]

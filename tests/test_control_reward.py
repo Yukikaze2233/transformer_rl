@@ -5,12 +5,12 @@ import pytest
 import torch
 
 from test_physical_observation import fixture as mechanics_fixture
-from transformer_rl._control_reward import (
+from transformer_rl.formal.tasks.reward import (
     PhysicalRewardComposer, RewardPhase, RewardPhysics, RewardReference, RewardTuning,
 )
-from transformer_rl._physical_observation import CommandMode
-from transformer_rl.reward_components import RewardComponentStatistics
-from transformer_rl._training_contract import BoundaryMasks, masked_gae
+from transformer_rl.formal.control.observation import CommandMode
+from transformer_rl.research.reward_components import RewardComponentStatistics
+from transformer_rl.formal.learning.contracts import BoundaryMasks, masked_gae
 
 
 def fixture(period=.005, retired=None):

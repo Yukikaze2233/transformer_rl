@@ -17,7 +17,7 @@ import types
 
 import pytest
 
-from transformer_rl import retention_campaign as campaign
+from transformer_rl.research import retention_campaign as campaign
 
 
 def small_protocol(tmp_path):
@@ -119,7 +119,7 @@ def test_actual_inherited_lock_lease_positive_and_negative(tmp_path, mutation):
         if mutation == "wrong_parent":leases[0]["controller_start"] += 1
         if mutation == "descriptor_bool":leases[0]["descriptor"] = True
         payload = tmp_path / "lease.json"; payload.write_text(json.dumps([protocol, leases]))
-        code = "import json,sys;from transformer_rl.retention_campaign import validate_lease;p,l=json.load(open(sys.argv[1]));validate_lease(p,l)"
+        code = 'import json,sys;from transformer_rl.research.retention_campaign import validate_lease;p,l=json.load(open(sys.argv[1]));validate_lease(p,l)'
         result = subprocess.run([sys.executable, "-B", "-c", code, str(payload)],
             env=campaign._environment(tmp_path), pass_fds=tuple(descriptors), capture_output=True, timeout=15.)
         assert (result.returncode == 0) == (mutation is None), result.stderr.decode()
@@ -128,7 +128,7 @@ def test_actual_inherited_lock_lease_positive_and_negative(tmp_path, mutation):
 
 
 def test_resource_wait_does_not_create_or_replace_original_lock(tmp_path, monkeypatch):
-    from transformer_rl import queue_validation
+    from transformer_rl.research import queue_validation
     protocol = small_protocol(tmp_path)
     before = deepcopy(protocol["execution"]["resource_locks"])
     monkeypatch.setattr(queue_validation, "check_dependency", lambda *args, **kwargs: {"status": "pending"})
@@ -139,7 +139,7 @@ def test_resource_wait_does_not_create_or_replace_original_lock(tmp_path, monkey
 
 
 def test_held_resource_is_not_stolen_after_predecessor_closes(tmp_path, monkeypatch):
-    from transformer_rl import queue_validation
+    from transformer_rl.research import queue_validation
     protocol = small_protocol(tmp_path)
     monkeypatch.setattr(queue_validation, "check_dependency", lambda *args, **kwargs: {"status": "completed"})
     with open(protocol["execution"]["resource_locks"][0]["path"], "r+") as holder:
@@ -252,7 +252,7 @@ def test_source_budget_and_extra_field_changes_cannot_be_equivalent(tmp_path):
 def test_synthetic_grid_accounts_reservation_without_refunding_failure(tmp_path, monkeypatch, fail_training):
     # Only orchestration is exercised. These stubs cannot authorize real teachers.
     from contextlib import contextmanager
-    from transformer_rl import retention_evaluation
+    from transformer_rl.research import retention_evaluation
     protocol = small_protocol(tmp_path)
     first = protocol["branches"][0]
     second = deepcopy(first); second["id"] = "branch_second"

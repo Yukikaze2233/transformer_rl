@@ -7,9 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from transformer_rl import checkpoint, cli, evaluation, experiments as ex
-from transformer_rl.config import ModelConfig
-from transformer_rl.stability import EpisodeSignalStatistics
+from transformer_rl.research import checkpoint, cli, evaluation, experiments as ex
+from transformer_rl.research.config import ModelConfig
+from transformer_rl.research.stability import EpisodeSignalStatistics
 from test_experiments import fake_runner, specification  # noqa: F401
 from test_scenario_experiments import scenario_runner, scenario_spec  # noqa: F401
 

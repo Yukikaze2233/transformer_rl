@@ -553,12 +553,12 @@ def test_duplicate_json_nonfinite_and_symlink_receipts_reject(tmp_path):
 
 def test_actual_cpu_parity_probe_measures_raw_mean_without_clipping_or_training(tmp_path):
     import torch
-    from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig
-    from transformer_rl.frame_policy import FramePolicyConfig
-    from transformer_rl.frame_training import FrameActorCritic
-    from transformer_rl.frame_checkpoint import save_frame_checkpoint
-    from transformer_rl.ppo import PPOTrainer
-    from transformer_rl.config import PPOConfig
+    from transformer_rl.research.frame_config import FrameModelConfig, FrameTrainConfig
+    from transformer_rl.research.frame_policy import FramePolicyConfig
+    from transformer_rl.research.frame_training import FrameActorCritic
+    from transformer_rl.research.frame_checkpoint import save_frame_checkpoint
+    from transformer_rl.research.ppo import PPOTrainer
+    from transformer_rl.research.config import PPOConfig
     source = Path(__file__).parents[1]
     contract = {"policy_dt_s": .01, "observation_schema": "cpu_parity_fixture", "feature_names": [f"f_{i}" for i in range(5)],
         "action_names": ["leg", "wheel"], "action_bounds": [.2, .5], "target_scale": [.25, 10.],

@@ -6,8 +6,8 @@ import shutil
 
 import pytest
 
-from transformer_rl import experiments as ex
-from transformer_rl.config import ModelConfig, PPOConfig
+from transformer_rl.research import experiments as ex
+from transformer_rl.research.config import ModelConfig, PPOConfig
 from test_experiments import fake_runner, specification  # noqa: F401
 
 
@@ -253,13 +253,13 @@ def test_sensitivity_checks_actual_budgets_and_all_seeds(sensitivity_spec, diffe
 
 def test_same_source_hash_is_location_independent_and_plan_is_portable(sensitivity_spec, tmp_path, monkeypatch):
     path, root, _ = sensitivity_spec
-    package = Path(ex.__file__).resolve().parent
+    package = Path(ex.__file__).resolve().parents[1]
     remote_package = tmp_path / "remote_package"
     shutil.copytree(package, remote_package, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     manifest = ex.plan(path, root)
     remote_root = tmp_path / "remote_plan"
     shutil.copytree(root, remote_root)
-    monkeypatch.setattr(ex, "__file__", str(remote_package / "experiments.py"))
+    monkeypatch.setattr(ex, "__file__", str(remote_package / "research/experiments.py"))
     assert ex.source_identity() == manifest["source"]
     assert ex.validate_plan(remote_root, check_source=True) == manifest
     assert all(job["status"] == "completed" for job in ex.run(remote_root, runner=fake_runner)["jobs"])

@@ -5,10 +5,10 @@ from dataclasses import fields
 import pytest
 import torch
 
-from transformer_rl._command_trajectory import (
+from transformer_rl.formal.tasks.trajectory import (
     CommandAdmission, CommandRates, CommandStream, CommandTrajectory, DriveEnvelope, TrajectoryKind,
 )
-from transformer_rl._task_curriculum import ContinuousTaskSampler
+from transformer_rl.formal.tasks.curriculum import ContinuousTaskSampler
 
 
 def envelope():

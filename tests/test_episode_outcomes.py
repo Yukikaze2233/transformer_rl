@@ -5,7 +5,7 @@ import math
 import pytest
 import torch
 
-from transformer_rl.episode_outcomes import EpisodeOutcomeStatistics
+from transformer_rl.research.episode_outcomes import EpisodeOutcomeStatistics
 
 
 def packet(num_envs=1, *, ticks=1, horizon=3, time_out=False, failure=False,

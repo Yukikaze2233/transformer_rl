@@ -3,7 +3,7 @@ import math
 import pytest
 import torch
 
-from transformer_rl.reward_components import RewardComponentStatistics
+from transformer_rl.research.reward_components import RewardComponentStatistics
 
 
 def test_vector_steps_preserve_density_and_actual_step_units():

@@ -8,15 +8,15 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from transformer_rl.chassis_adapter import ChassisFrameAdapter
-from transformer_rl.config import PPOConfig
-from transformer_rl.frame_config import FrameModelConfig
-from transformer_rl.frame_continuation import FrameContinuation
-from transformer_rl.frame_policy import FramePolicyConfig
-from transformer_rl.frame_training import FrameActorCritic, FrameCollector
-from transformer_rl.frame_workflow import _model_state_sha256, train_frame_policy
-from transformer_rl.ppo import PPOTrainer
-from transformer_rl.reward_components import RewardComponentStatistics
+from transformer_rl.research.chassis_adapter import ChassisFrameAdapter
+from transformer_rl.research.config import PPOConfig
+from transformer_rl.research.frame_config import FrameModelConfig
+from transformer_rl.research.frame_continuation import FrameContinuation
+from transformer_rl.research.frame_policy import FramePolicyConfig
+from transformer_rl.research.frame_training import FrameActorCritic, FrameCollector
+from transformer_rl.research.frame_workflow import _model_state_sha256, train_frame_policy
+from transformer_rl.research.ppo import PPOTrainer
+from transformer_rl.research.reward_components import RewardComponentStatistics
 
 from test_chassis_adapter import TensorChassis
 from test_frame_workflow import PackedFixture, configuration as packed_configuration

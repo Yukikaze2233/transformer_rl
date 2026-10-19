@@ -4,10 +4,10 @@ from dataclasses import replace
 import pytest
 import torch
 
-from transformer_rl._control_reward import RewardPhase
-from transformer_rl._jump_reference import JumpReferenceConfig, JumpReferenceProgram, ReferenceStage, reward_phases, reward_reference
-from transformer_rl._physical_observation import CommandFeatures, CommandMode
-from transformer_rl._skill_evidence import SkillPhase
+from transformer_rl.formal.tasks.reward import RewardPhase
+from transformer_rl.formal.tasks.jump import JumpReferenceConfig, JumpReferenceProgram, ReferenceStage, reward_phases, reward_reference
+from transformer_rl.formal.control.observation import CommandFeatures, CommandMode
+from transformer_rl.formal.tasks.skills import SkillPhase
 
 
 def sample(height, rise, clock, *, ground=None, active=None):
@@ -85,7 +85,8 @@ def test_invalid_visible_target_or_clock_is_rejected(height, rise, clock):
 
 def test_physical_phase_is_reward_only_and_never_rewrites_actor_command_or_task_curve():
     cmd = commands([CommandMode.JUMP, CommandMode.JUMP, CommandMode.RECOVERY, CommandMode.NORMAL])
-    before = [value.clone() for value in vars(cmd).values()]
+    before = {name: value.clone() if isinstance(value, torch.Tensor) else value
+              for name, value in vars(cmd).items()}
     curve = sample([.3] * 4, [.1] * 4, .35, ground=[2.] * 4)
     phase = reward_phases(cmd, torch.tensor([int(SkillPhase.FLIGHT), int(SkillPhase.SETTLING),
                                             int(SkillPhase.FLIGHT), int(SkillPhase.FLIGHT)]))
@@ -95,10 +96,11 @@ def test_physical_phase_is_reward_only_and_never_rewrites_actor_command_or_task_
     assert ref.jump_height_world_z_m[0] == curve.height_world_z_m[0]
     assert ref.jump_height_world_z_m[1] == torch.tensor(3.3)
     assert ref.jump_velocity_world_z_m_s[1] == 0
-    for value, old in zip(vars(cmd).values(), before):
-        assert torch.equal(value, old)
+    for name, value in vars(cmd).items():
+        old = before[name]
+        assert torch.equal(value, old) if isinstance(value, torch.Tensor) else value == old
     ref.admitted_body_command.zero_()
-    assert torch.equal(cmd.admitted_body_command, before[0])
+    assert torch.equal(cmd.admitted_body_command, before['admitted_body_command'])
 
 
 def test_reference_configuration_and_reward_packet_shape_fail_before_use():

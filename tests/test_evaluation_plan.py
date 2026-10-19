@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from transformer_rl._evaluation_plan import (
+from transformer_rl.formal.evaluation.plan import (
     EvaluationSelection, FAMILIES, INTRODUCED_AT, PROBE_CASE_NAMES,
     evaluation_cost_bound, evaluation_plan, formal_cases,
 )

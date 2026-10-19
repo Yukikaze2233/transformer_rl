@@ -7,8 +7,8 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from transformer_rl import cli
-from transformer_rl.config import ModelConfig, PPOConfig, load_config
+from transformer_rl.research import cli
+from transformer_rl.research.config import ModelConfig, PPOConfig, load_config
 
 
 def test_inspect_reports_actual_architecture_without_factory(capsys, monkeypatch):
@@ -44,9 +44,9 @@ def test_example_configuration_loads():
 @pytest.fixture
 def orchestration(tmp_path, monkeypatch):
     """Replace collection, optimization and publication with inert call records."""
-    import transformer_rl.checkpoint as checkpoint
-    import transformer_rl.ppo as ppo
-    import transformer_rl.runner as runner
+    import transformer_rl.research.checkpoint as checkpoint
+    import transformer_rl.research.ppo as ppo
+    import transformer_rl.research.runner as runner
 
     events = []
     state = SimpleNamespace(mode="normal", saved=[], env=None)
@@ -123,7 +123,7 @@ def test_explicit_orchestration_publishes_after_each_update(orchestration):
 
 
 def test_diagnostics_keyword_and_metadata_are_opt_in(orchestration, monkeypatch):
-    from transformer_rl import ppo
+    from transformer_rl.research import ppo
 
     args, directory, state, events = orchestration
     calls = []

@@ -191,9 +191,12 @@ def study_jobs_terminal(study_root, plan):
 
 
 def build_command(args, checkpoint, configs, outputs, control_output, trace_output):
+    module = ('transformer_rl.research.frame_process'
+              if (args.source_root / 'src/transformer_rl/research/frame_process.py').is_file()
+              else 'transformer_rl.frame_process')
     bootstrap = ("import runpy, sys; sys.path.insert(0, "
                  + repr(str(args.source_root / "src"))
-                 + "); runpy.run_module('transformer_rl.frame_process', "
+                 + "); runpy.run_module(" + repr(module) + ", "
                  "run_name='__main__', alter_sys=True)")
     return [sys.executable, "-c", bootstrap, "evaluate-suite", "--checkpoint", checkpoint,
             "--configs", *map(str, configs), "--outputs", *map(str, outputs),

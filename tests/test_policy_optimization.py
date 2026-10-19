@@ -5,9 +5,9 @@ from dataclasses import replace
 import pytest
 import torch
 
-from transformer_rl._policy_optimization import StructuredBatch, StructuredPPOConfig, StructuredPPOTrainer
-from transformer_rl._structured_policy import StructuredActorCritic, StructuredPolicyConfig
-from transformer_rl._training_contract import AuxiliaryLabels, BoundaryMasks, ObservationWindows
+from transformer_rl.formal.learning.optimization import StructuredBatch, StructuredPPOConfig, StructuredPPOTrainer
+from transformer_rl.formal.policy import StructuredActorCritic, StructuredPolicyConfig
+from transformer_rl.formal.learning.contracts import AuxiliaryLabels, BoundaryMasks, ObservationWindows
 
 
 @pytest.fixture(autouse=True)

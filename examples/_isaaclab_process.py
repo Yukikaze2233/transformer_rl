@@ -20,7 +20,7 @@ def main():
     _active = True
     exit_code = 1
     try:
-        from transformer_rl.cli import main as cli_main
+        from transformer_rl.research.cli import main as cli_main
         exit_code = cli_main()
         exit_code = 0 if exit_code is None else exit_code
     except SystemExit as error:

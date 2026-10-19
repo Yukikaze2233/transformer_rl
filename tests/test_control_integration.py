@@ -8,12 +8,12 @@ import numpy as np
 import pytest
 import torch
 
-from transformer_rl.chassis_adapter import ChassisFrameAdapter
-from transformer_rl.frame_checkpoint import save_frame_checkpoint
-from transformer_rl.frame_config import FrameModelConfig, digest
-from transformer_rl.frame_training import FrameActorCritic
-from transformer_rl.frame_workflow import evaluate_frame_policy
-from transformer_rl.ppo import PPOTrainer
+from transformer_rl.research.chassis_adapter import ChassisFrameAdapter
+from transformer_rl.research.frame_checkpoint import save_frame_checkpoint
+from transformer_rl.research.frame_config import FrameModelConfig, digest
+from transformer_rl.research.frame_training import FrameActorCritic
+from transformer_rl.research.frame_workflow import evaluate_frame_policy
+from transformer_rl.research.ppo import PPOTrainer
 
 from test_chassis_adapter import TensorChassis
 from test_frame_workflow import configuration
@@ -173,7 +173,7 @@ def test_scaled_nominal_packet_rejects_scale_changes_inside_physical_step():
 
 
 def test_scaled_nominal_packet_survives_trace_publication(tmp_path):
-    from transformer_rl.control_trace import ControlTrace
+    from transformer_rl.research.control_trace import ControlTrace
 
     env = ScaledPhysicalChassis()
     adapter = ChassisFrameAdapter(env, FrameModelConfig(), {}, enable_control_metrics=True)
@@ -197,7 +197,7 @@ def test_scaled_nominal_packet_survives_trace_publication(tmp_path):
 
 @pytest.mark.parametrize("strength", (.9, .95))
 def test_scaled_nominal_float32_endpoint_matches_parent_operation_order(strength):
-    from transformer_rl.control_metrics import ControlMetrics
+    from transformer_rl.research.control_metrics import ControlMetrics
 
     class ClippedChassis(ScaledPhysicalChassis):
         def step(self, issued):
@@ -237,7 +237,7 @@ def test_adapter_enabled_physical_diagnostics_fail_closed(missing):
 
 
 def test_adapter_uses_physical_endpoint_and_canonical_motor_order():
-    from transformer_rl.control_metrics import ControlMetrics
+    from transformer_rl.research.control_metrics import ControlMetrics
 
     source_order = ["L_joint1", "LL_joint1", "L_joint3", "R_joint1", "RR_joint1", "R_joint3"]
     canonical_order = ["L_joint1", "LL_joint1", "R_joint1", "RR_joint1", "L_joint3", "R_joint3"]
@@ -460,7 +460,7 @@ def test_existing_trace_is_preserved_when_evaluation_refuses_overwrite(tmp_path,
 
 
 def test_suite_publishes_per_case_control_and_checkpoint_provenance(tmp_path, checkpoint, monkeypatch):
-    from transformer_rl import chassis_adapter
+    from transformer_rl.research import chassis_adapter
 
     path, config = checkpoint
     snapshot = tmp_path / "snapshot"

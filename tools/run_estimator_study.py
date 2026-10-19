@@ -19,11 +19,11 @@ import sys
 import threading
 import time
 
-from transformer_rl.checkpoint import load_checkpoint
-from transformer_rl.config import load_config
-from transformer_rl.experiments import _report, plan, source_identity, validate_plan
-from transformer_rl.export import export_policy
-from transformer_rl.model import ActorCritic
+from transformer_rl.research.checkpoint import load_checkpoint
+from transformer_rl.research.config import load_config
+from transformer_rl.research.experiments import _report, plan, source_identity, validate_plan
+from transformer_rl.research.export import export_policy
+from transformer_rl.research.model import ActorCritic
 
 
 def read(path):

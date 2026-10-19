@@ -5,12 +5,12 @@ import math
 import pytest
 import torch
 
-from transformer_rl._control_sources import ControlSource, validate_issued_control
+from transformer_rl.formal.control.ownership import ControlSource, validate_issued_control
 
-from transformer_rl._output_actuation import (
+from transformer_rl.formal.control.actuation import (
     EffectiveDriveResponse, OutputFeedbackController, PairTargetDomain, ResponseParameters,
 )
-from transformer_rl._structured_collection import ACTION_ORDER
+from transformer_rl.formal.learning.collection import ACTION_ORDER
 
 
 NOMINAL = (-.42, .13742282595395358, .42, -.1374155762580851, 0., 0.)

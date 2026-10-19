@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from transformer_rl.frame_policy import FramePolicy, FramePolicyConfig
+from transformer_rl.research.frame_policy import FramePolicy, FramePolicyConfig
 
 
 def main() -> None:

@@ -7,9 +7,9 @@ import torch
 
 from test_native_contacts import fixture as contact_fixture
 from test_native_observation import native_fixture
-from transformer_rl._native_contacts import NativeTerrainContacts
-from transformer_rl._native_scene import NativeSceneRecipe
-from transformer_rl._physical_observation import RigidBodyMotion
+from transformer_rl.formal.simulation.contacts import NativeTerrainContacts
+from transformer_rl.formal.simulation.scene import NativeSceneRecipe
+from transformer_rl.formal.control.observation import RigidBodyMotion
 
 
 def fixture():

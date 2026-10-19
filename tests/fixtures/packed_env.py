@@ -1,8 +1,8 @@
 """Small synthetic tensor contract; no robot, physics engine or hardware."""
 import torch
 
-from transformer_rl.frame_config import digest
-from transformer_rl.types import StepResult, VectorObservation
+from transformer_rl.research.frame_config import digest
+from transformer_rl.research.types import StepResult, VectorObservation
 
 
 class PackedFixture:

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from transformer_rl import queue_validation as queue
+from transformer_rl.research import queue_validation as queue
 
 
 def write(path, value):

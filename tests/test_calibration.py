@@ -14,31 +14,17 @@ import sys
 import numpy as np
 import pytest
 
-from transformer_rl import calibration, exposure_campaign as campaign
-from transformer_rl import exposure_protocol as protocol, queue_validation
-from transformer_rl.episode_outcomes import TRACE_FIELDS, TRACE_METADATA_KEY, trace_metadata
-from transformer_rl.frame_config import digest, json_bytes
+from transformer_rl.research import calibration, exposure_campaign as campaign
+from transformer_rl.research import exposure_protocol as protocol, queue_validation
+from transformer_rl.research.episode_outcomes import TRACE_FIELDS, TRACE_METADATA_KEY, trace_metadata
+from transformer_rl.research.frame_config import digest, json_bytes
 from test_exposure_protocol import freeze, prepared
 from test_exposure_evaluation import physical_protocol
 from test_exposure_trace import array, rewrite
 
 
 REAL_LAUNCH = campaign.launch_owned_worker
-BOOTSTRAP = r'''
-import json,sys
-from pathlib import Path
-from copy import deepcopy
-from transformer_rl import exposure_protocol as protocol,queue_validation,cli
-request=json.loads(Path(sys.argv[sys.argv.index('--request')+1]).read_bytes())
-p=json.loads(Path(request['protocol']['path']).read_bytes())
-protocol.predecessors._dependencies=lambda *a: (deepcopy(p['execution']['dependencies']),deepcopy(p['execution']['resource_locks']))
-queue_validation.check_dependency=lambda *a,**k: {'status':'completed','controller_live':False,'live_workers':[],'fixture':'synthetic closure only'}
-sys.path.insert(0,p['runtime_roots'][0])
-import physical_cpu_fixture
-cli._factory=lambda reference: physical_cpu_fixture.make_six_motor_env
-from transformer_rl.calibration_worker import main
-raise SystemExit(main(sys.argv[1:]))
-'''
+BOOTSTRAP = "\nimport json,sys\nfrom pathlib import Path\nfrom copy import deepcopy\nfrom transformer_rl.research import exposure_protocol as protocol, queue_validation, cli\nrequest=json.loads(Path(sys.argv[sys.argv.index('--request')+1]).read_bytes())\np=json.loads(Path(request['protocol']['path']).read_bytes())\nprotocol.predecessors._dependencies=lambda *a: (deepcopy(p['execution']['dependencies']),deepcopy(p['execution']['resource_locks']))\nqueue_validation.check_dependency=lambda *a,**k: {'status':'completed','controller_live':False,'live_workers':[],'fixture':'synthetic closure only'}\nsys.path.insert(0,p['runtime_roots'][0])\nimport physical_cpu_fixture\ncli._factory=lambda reference: physical_cpu_fixture.make_six_motor_env\nfrom transformer_rl.research.calibration_worker import main\nraise SystemExit(main(sys.argv[1:]))\n"
 
 
 def publish(path, value):

@@ -5,13 +5,13 @@ import math
 
 import pytest
 
-from transformer_rl._command_trajectory import CommandRates
-from transformer_rl._native_runtime import NativeRuntimeTuning
-from transformer_rl._native_task import NativeTaskLimits
-from transformer_rl._native_terrain import TerrainEditTuning
-from transformer_rl._native_worker import parse_tuning
-from transformer_rl._recovery_poses import RecoveryTuning
-from transformer_rl._reset_program import ResetProgramTuning
+from transformer_rl.formal.tasks.trajectory import CommandRates
+from transformer_rl.formal.runtime.assembly import NativeRuntimeTuning
+from transformer_rl.formal.simulation.task import NativeTaskLimits
+from transformer_rl.formal.simulation.terrain import TerrainEditTuning
+from transformer_rl.formal.runtime.worker import parse_tuning
+from transformer_rl.formal.tasks.recovery import RecoveryTuning
+from transformer_rl.formal.tasks.reset_program import ResetProgramTuning
 
 
 def test_native_factory_reconstructs_explicit_json_tuning_without_importing_an_sdk():

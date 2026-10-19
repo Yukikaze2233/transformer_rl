@@ -7,7 +7,7 @@ import torch
 
 from test_passive_pressure import fixture as pressure_fixture
 from test_physical_observation import fixture as observation_fixture
-from transformer_rl._native_actuation import NativeEffortWriter
+from transformer_rl.formal.simulation.actuation import NativeEffortWriter
 
 
 def fixture():

@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from test_physical_observation import fixture as observation_fixture
-from transformer_rl._native_contacts import ContactCapacityError, NativeTerrainContacts
+from transformer_rl.formal.simulation.contacts import ContactCapacityError, NativeTerrainContacts
 
 
 def fixture():

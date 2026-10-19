@@ -4,7 +4,7 @@ from copy import deepcopy
 import pytest
 import torch
 
-from transformer_rl._passive_pressure import NativeSliderPressure, PressureParameters
+from transformer_rl.formal.control.pressure import NativeSliderPressure, PressureParameters
 
 
 def fixture(count=4):

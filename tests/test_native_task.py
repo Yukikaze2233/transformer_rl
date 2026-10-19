@@ -10,18 +10,18 @@ import torch
 from test_native_episode import fixture as episode_fixture
 from test_native_reward import fixture as reward_fixture
 from test_structured_collection import model as small_model
-from transformer_rl._command_trajectory import CommandRates, CommandStream, CommandTrajectory, DriveEnvelope
-from transformer_rl._jump_reference import JumpReferenceProgram
-from transformer_rl._native_episode import NativeEpisodeLifecycle, TerrainRebuildRequired
-from transformer_rl._native_ground import NativeGroundQuery, WheelCollisionCentres
-from transformer_rl._native_task import (
+from transformer_rl.formal.tasks.trajectory import CommandRates, CommandStream, CommandTrajectory, DriveEnvelope
+from transformer_rl.formal.tasks.jump import JumpReferenceProgram
+from transformer_rl.formal.simulation.episode import NativeEpisodeLifecycle, TerrainRebuildRequired
+from transformer_rl.formal.simulation.ground import NativeGroundQuery, WheelCollisionCentres
+from transformer_rl.formal.simulation.task import (
     FailureReason, NativePreparationError, NativeTaskEnvironment, NativeTaskLimits, NativeTaskResetPlan,
 )
-from transformer_rl._policy_optimization import StructuredPPOConfig, StructuredPPOTrainer
-from transformer_rl._skill_evidence import PhysicalJumpEvidence, SkillEvidenceConfig
-from transformer_rl._structured_collection import StructuredCollector
-from transformer_rl._task_commands import RequestInputs, TaskCommandPlan, TaskCommandProgram
-from transformer_rl._task_protocol import CompletedEstimate, RequestResponse
+from transformer_rl.formal.learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
+from transformer_rl.formal.tasks.skills import PhysicalJumpEvidence, SkillEvidenceConfig
+from transformer_rl.formal.learning.collection import StructuredCollector
+from transformer_rl.formal.tasks.commands import RequestInputs, TaskCommandPlan, TaskCommandProgram
+from transformer_rl.formal.tasks.protocol import CompletedEstimate, RequestResponse
 
 
 def fixture(period=.005, *, horizons=(.2, .2), jump=False, trace_sink=None):

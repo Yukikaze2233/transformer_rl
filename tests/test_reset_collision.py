@@ -8,12 +8,12 @@ import torch
 
 from test_joint_boundaries import encode
 from test_reset_kinematics import fixture as kinematic_fixture
-from transformer_rl._command_trajectory import CommandTrajectory
-from transformer_rl._reset_collision import AssetCollisionGeometry, FlatSpawnPatch
-from transformer_rl._reset_kinematics import AssetResetKinematics
-from transformer_rl._task_commands import TaskCommandPlan
-from transformer_rl._terrain_geometry import HeightPatch, TerrainKind, TerrainSurface
-from transformer_rl._terrain_tasks import (
+from transformer_rl.formal.tasks.trajectory import CommandTrajectory
+from transformer_rl.formal.tasks.reset_collision import AssetCollisionGeometry, FlatSpawnPatch
+from transformer_rl.formal.tasks.reset_kinematics import AssetResetKinematics
+from transformer_rl.formal.tasks.commands import TaskCommandPlan
+from transformer_rl.formal.tasks.geometry import HeightPatch, TerrainKind, TerrainSurface
+from transformer_rl.formal.tasks.terrain import (
     ContinuousTerrainGenerator, TerrainCourse, TerrainExtent, TerrainRequest, TerrainTuning,
 )
 

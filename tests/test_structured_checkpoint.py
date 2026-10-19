@@ -6,17 +6,17 @@ import pytest
 import torch
 
 from test_policy_optimization import assert_identical, batch_for, model as small_model
-from transformer_rl._learning_accounting import LearningJournal, RecoveryConsumptionMismatch
-from transformer_rl._policy_optimization import StructuredPPOConfig, StructuredPPOTrainer
-from transformer_rl._structured_checkpoint import LearningComponents, LearningRecipe, StructuredCheckpointStore
-from transformer_rl._structured_collection import StructuredCollectionConfig
-from transformer_rl._structured_policy import StructuredActorCritic
-from transformer_rl._task_curriculum import ContinuousTaskSampler, CurriculumBudget, TaskDomain
-from transformer_rl._task_protocol import RequestProtocol, RequestProtocolConfig
-from transformer_rl._terrain_tasks import ContinuousTerrainGenerator, TerrainExtent, TerrainRequest, TerrainTuning
-from transformer_rl._terrain_geometry import TerrainKind
-from transformer_rl.frame_checkpoint import capture_rng, restore_rng
-from transformer_rl.training_control import boot_id
+from transformer_rl.formal.learning.accounting import LearningJournal, RecoveryConsumptionMismatch
+from transformer_rl.formal.learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
+from transformer_rl.formal.learning.checkpoint import LearningComponents, LearningRecipe, StructuredCheckpointStore
+from transformer_rl.formal.learning.collection import StructuredCollectionConfig
+from transformer_rl.formal.policy import StructuredActorCritic
+from transformer_rl.formal.tasks.curriculum import ContinuousTaskSampler, CurriculumBudget, TaskDomain
+from transformer_rl.formal.tasks.protocol import RequestProtocol, RequestProtocolConfig
+from transformer_rl.formal.tasks.terrain import ContinuousTerrainGenerator, TerrainExtent, TerrainRequest, TerrainTuning
+from transformer_rl.formal.tasks.geometry import TerrainKind
+from transformer_rl.research.frame_checkpoint import capture_rng, restore_rng
+from transformer_rl.common.training_control import boot_id
 
 
 @pytest.fixture(autouse=True)

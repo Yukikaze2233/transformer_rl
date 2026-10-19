@@ -10,7 +10,7 @@ import torch
 
 from test_output_actuation import parameters
 from test_physical_observation import fixture as observation_fixture
-from transformer_rl._native_scene import NativeSceneRecipe, TerrainMesh
+from transformer_rl.formal.simulation.scene import NativeSceneRecipe, TerrainMesh
 
 
 def mesh():

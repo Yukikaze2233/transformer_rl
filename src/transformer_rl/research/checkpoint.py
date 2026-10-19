@@ -1,0 +1,291 @@
+"""Validated, weights-only checkpoints with no-clobber atomic publication."""
+from __future__ import annotations
+
+from dataclasses import asdict, fields
+import hashlib
+import io
+import json
+import math
+import os
+from pathlib import Path
+import pickle
+import tempfile
+
+import torch
+
+from ..common.artifacts import (_require_new_paths, _publish_new_files, _validate_json_value, _json_metadata, _cpu_snapshot, _validate_tensor, _validate_optimizer_state)
+from .config import ModelConfig, PPOConfig
+from .model import ActorCritic
+from .ppo import PPOTrainer
+
+
+_FORMAT = "transformer_rl.checkpoint"
+_SCHEMA_VERSION = 5
+_V2_MODEL_DEFAULTS = {
+    "actor_type": "transformer", "time_encoding": "elapsed", "residual_type": "add",
+    "auxiliary_indices": [], "baseline_hidden": [128, 64], "gru_hidden": 64,
+}
+_V2_PPO_DEFAULTS = {"auxiliary_coef": 0.0}
+_V3_MODEL_DEFAULTS = {"mean_init_scale": 1.0}
+_V4_MODEL_DEFAULTS = {"readout_type": "query"}
+_V5_MODEL_DEFAULTS = {
+    "estimator_type": "none", "state_indices": [], "controller_hidden": [128, 64, 32],
+    "state_velocity_scale": 1.0, "state_height_center": 0.30, "state_height_scale": 0.10,
+    "context_dim": 16, "context_target_hidden": [128, 64], "context_prototypes": 32,
+    "context_temperature": 3.0, "context_sinkhorn_epsilon": 0.05, "context_sinkhorn_iterations": 3,
+}
+_V5_PPO_DEFAULTS = {
+    "estimator_learning_rate": 0.001, "estimator_epochs": 2, "estimator_minibatches": 4,
+    "estimator_max_grad_norm": 1.0, "estimator_target_kl": 0.0025, "estimator_context_coef": 1.0,
+}
+_DTYPES = {
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+    "float32": torch.float32,
+    "float64": torch.float64,
+}
+_PAYLOAD_KEYS = {
+    "format", "schema_version", "model_config", "ppo_config", "model_dtype",
+    "model_state", "optimizer_type", "optimizer_state", "update", "metadata",
+}
+
+
+def _config_payload(config: ModelConfig | PPOConfig) -> dict:
+    data = asdict(config)
+    for field in fields(config):
+        if isinstance(getattr(config, field.name), tuple):
+            data[field.name] = list(getattr(config, field.name))
+    return data
+
+
+def _parse_config(
+    data: object, cls: type[ModelConfig] | type[PPOConfig]
+) -> ModelConfig | PPOConfig:
+    if type(data) is not dict or set(data) != {field.name for field in fields(cls)}:
+        raise ValueError(f"{cls.__name__} requires exactly its declared configuration keys")
+    defaults = cls()
+    for field in fields(cls):
+        value = data[field.name]
+        default = getattr(defaults, field.name)
+        if type(default) is tuple:
+            valid = type(value) is list and all(type(item) is int for item in value)
+        elif type(default) is float:
+            valid = type(value) in (int, float) and math.isfinite(value)
+        else:
+            valid = type(value) is type(default)
+        if not valid:
+            raise ValueError(f"invalid {cls.__name__}.{field.name} type or value")
+    arguments = dict(data)
+    for field in fields(cls):
+        if isinstance(getattr(defaults, field.name), tuple):
+            arguments[field.name] = tuple(arguments[field.name])
+    try:
+        return cls(**arguments)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(f"invalid {cls.__name__}: {error}") from error
+
+
+def _validate_time_frequencies(value: torch.Tensor, config: ModelConfig) -> None:
+    # Match TimeAwareActor's float32 construction BEFORE model dtype conversion.
+    # In particular, double checkpoints still contain a float32 recipe, whereas
+    # half checkpoints cannot recover that recipe by converting back to float32.
+    reference = torch.exp(
+        -math.log(10000.0)
+        * torch.arange(0, config.d_model, 2, dtype=torch.float32, device="cpu")
+        / config.d_model
+    )
+    lower = torch.nextafter(reference, torch.full_like(reference, -math.inf))
+    upper = torch.nextafter(reference, torch.full_like(reference, math.inf))
+    # exp(0) has an exact result, independent of the exp implementation.
+    lower[0] = upper[0] = reference[0]
+    saved = value.detach().cpu()
+    # A discrete set, not an allclose tolerance or a continuous double interval.
+    matches = (
+        (saved == reference.to(saved.dtype))
+        | (saved == lower.to(saved.dtype))
+        | (saved == upper.to(saved.dtype))
+    )
+    # Low-precision casts may collapse neighboring frequencies to equal values.
+    if not (
+        matches.all() and (saved > 0).all()
+        and (saved[:-1] >= saved[1:]).all()
+    ):
+        raise ValueError(
+            "model_state.actor.time_frequencies differs from configured preprocessing "
+            "(requires float32 recipe +/-1 ULP then dtype cast, exact exp(0), "
+            "positive nonincreasing values)"
+        )
+
+
+def _validate_model_state(state: object, model: ActorCritic) -> None:
+    expected = model.state_dict()
+    if type(state) is not dict or set(state) != set(expected):
+        raise ValueError("model_state keys do not match the configured ActorCritic")
+    for name, reference in expected.items():
+        _validate_tensor(f"model_state.{name}", state[name], reference.shape, reference.dtype)
+    # These buffers define preprocessing promised by ModelConfig and the ONNX
+    # sidecar. They are not learned parameters and must not drift independently.
+    for name, _ in model.named_buffers():
+        if name in ("actor.time_frequencies", "actor.estimator.time_frequencies"):
+            _validate_time_frequencies(state[name], model.config)
+        elif not torch.equal(state[name].cpu(), expected[name].cpu()):
+            raise ValueError(f"model_state.{name} differs from configured preprocessing")
+
+
+def _new_model(config: ModelConfig, dtype: torch.dtype) -> ActorCritic:
+    # Initialization consumes CPU RNG even though every parameter is overwritten.
+    # Keep loading (including failed validation) invisible to caller RNG streams.
+    with torch.random.fork_rng(devices=[]), torch.device("cpu"):
+        return ActorCritic(config).to(dtype=dtype)
+
+
+def _validated_components(
+    payload: object, device: str | torch.device = "cpu"
+) -> tuple[ActorCritic, PPOTrainer, int, dict]:
+    if type(payload) is not dict:
+        raise ValueError("checkpoint requires exactly the declared top-level keys")
+    if "schema_version" in payload and (
+        type(payload["schema_version"]) is not int or payload["schema_version"] not in (1, 2, 3, 4, 5)
+    ):
+        raise ValueError("unsupported checkpoint schema_version")
+    expected_keys = _PAYLOAD_KEYS | (
+        {"source_schema_version"} if payload.get("schema_version") in (2, 3, 4, 5) else set()
+    )
+    if payload.get("schema_version") == 5:
+        expected_keys |= {"estimator_optimizer_state"}
+    if set(payload) != expected_keys:
+        raise ValueError("checkpoint requires exactly the declared top-level keys")
+    if payload["format"] != _FORMAT:
+        raise ValueError("unrecognized checkpoint format")
+    source_schema = payload.get("source_schema_version", payload["schema_version"])
+    schema = payload["schema_version"]
+    if type(source_schema) is not int or not 1 <= source_schema <= schema:
+        raise ValueError("unsupported source_schema_version")
+    if schema < _SCHEMA_VERSION:
+        payload = dict(payload)
+        for key, cls, additions in (
+            ("model_config", ModelConfig, {
+                **(_V2_MODEL_DEFAULTS if schema == 1 else {}),
+                **(_V3_MODEL_DEFAULTS if schema <= 2 else {}),
+                **(_V4_MODEL_DEFAULTS if schema <= 3 else {}), **_V5_MODEL_DEFAULTS,
+            }),
+            ("ppo_config", PPOConfig, {**(_V2_PPO_DEFAULTS if schema == 1 else {}), **_V5_PPO_DEFAULTS}),
+        ):
+            original = payload[key]
+            legacy_keys = {field.name for field in fields(cls)} - additions.keys()
+            if type(original) is not dict or set(original) != legacy_keys:
+                raise ValueError(f"schema {schema} {key} requires exactly its original keys")
+            payload[key] = {**original, **additions}
+        payload["schema_version"] = _SCHEMA_VERSION
+        payload["estimator_optimizer_state"] = None
+    if type(payload["update"]) is not int or payload["update"] < 0:
+        raise ValueError("checkpoint update must be a nonnegative integer")
+    metadata = _json_metadata(payload["metadata"])
+    config = _parse_config(payload["model_config"], ModelConfig)
+    ppo_config = _parse_config(payload["ppo_config"], PPOConfig)
+    if ppo_config.auxiliary_coef > 0 and not config.auxiliary_indices:
+        raise ValueError("positive auxiliary_coef requires explicit auxiliary_indices")
+    dtype_name = payload["model_dtype"]
+    if type(dtype_name) is not str or dtype_name not in _DTYPES:
+        raise ValueError("unsupported checkpoint model_dtype")
+    if payload["optimizer_type"] != "Adam":
+        raise ValueError("unsupported checkpoint optimizer_type")
+    model = _new_model(config, _DTYPES[dtype_name])
+    model.checkpoint_source_schema_version = source_schema
+    _validate_model_state(payload["model_state"], model)
+    _validate_optimizer_state(payload["optimizer_state"], model)
+    estimator_state = payload["estimator_optimizer_state"]
+    if config.estimator_type == "none":
+        if estimator_state is not None:
+            raise ValueError("non-estimator checkpoint requires null estimator_optimizer_state")
+    else:
+        _validate_optimizer_state(estimator_state, model, estimator=True)
+    model.load_state_dict(payload["model_state"], strict=True)
+    # Device conversion may replace Parameter objects. Bind the optimizer only
+    # after conversion, and let Adam place moments/counters by its own rules.
+    model.to(device=device)
+    trainer = PPOTrainer(model, ppo_config)
+    trainer.optimizer.load_state_dict(payload["optimizer_state"])
+    _validate_optimizer_state(trainer.optimizer.state_dict(), model)
+    if trainer.estimator is not None:
+        trainer.estimator.optimizer.load_state_dict(estimator_state)
+        _validate_optimizer_state(trainer.estimator.optimizer.state_dict(), model, estimator=True)
+    return model, trainer, payload["update"], metadata
+
+
+def save_checkpoint(
+    path: str | Path, model: ActorCritic, trainer: PPOTrainer,
+    update: int, metadata: dict,
+) -> dict:
+    """Save a new checkpoint, returning path, SHA-256 and cumulative update.
+
+    The parent directory must exist. Existing destinations are never replaced.
+    Configs, dense tensor keys/shapes/dtypes/finiteness, JSON metadata and ordinary
+    single-group Adam state are validated before publication. No environment,
+    collector, controller or global RNG state is captured.
+    """
+    path = Path(path)
+    _require_new_paths([path])
+    if not isinstance(model, ActorCritic) or not isinstance(trainer, PPOTrainer):
+        raise TypeError("save_checkpoint requires ActorCritic and PPOTrainer")
+    if trainer.model is not model or type(trainer.optimizer) is not torch.optim.Adam:
+        raise ValueError("trainer must own this model and an ordinary Adam optimizer")
+    if model.actor.config != model.config or model.critic.config != model.config:
+        raise ValueError("actor and critic configurations must match model.config")
+    attached = [p for group in trainer.optimizer.param_groups for p in group["params"]]
+    parameters = model.policy_parameters()
+    if len(attached) != len(parameters) or any(a is not b for a, b in zip(attached, parameters)):
+        raise ValueError("optimizer parameter identity/order must match the model")
+    if trainer.estimator is not None:
+        if trainer.estimator.model is not model or type(trainer.estimator.optimizer) is not torch.optim.Adam:
+            raise ValueError("estimator trainer must own this model and ordinary Adam")
+        attached = [p for group in trainer.estimator.optimizer.param_groups for p in group["params"]]
+        expected = model.estimator_parameters()
+        if len(attached) != len(expected) or any(a is not b for a, b in zip(attached, expected)):
+            raise ValueError("estimator optimizer parameter identity/order differs from the model")
+    dtype = next(model.parameters()).dtype
+    dtype_name = str(dtype).removeprefix("torch.")
+    payload = {
+        "format": _FORMAT,
+        "schema_version": _SCHEMA_VERSION,
+        "source_schema_version": getattr(model, "checkpoint_source_schema_version", _SCHEMA_VERSION),
+        "model_config": _config_payload(model.config),
+        "ppo_config": _config_payload(trainer.config),
+        "model_dtype": dtype_name,
+        "model_state": _cpu_snapshot(dict(model.state_dict())),
+        "optimizer_type": "Adam",
+        "optimizer_state": _cpu_snapshot(trainer.optimizer.state_dict()),
+        "estimator_optimizer_state": (
+            _cpu_snapshot(trainer.estimator.optimizer.state_dict()) if trainer.estimator is not None else None
+        ),
+        "update": update,
+        "metadata": _json_metadata(metadata),
+    }
+    _validated_components(payload)
+    stream = io.BytesIO()
+    torch.save(payload, stream)
+    data = stream.getvalue()
+    _publish_new_files({path: data})
+    return {"path": str(path), "sha256": hashlib.sha256(data).hexdigest(), "update": update}
+
+
+def _load_checkpoint_bytes(
+    data: bytes, device: str | torch.device = "cpu"
+) -> tuple[ActorCritic, PPOTrainer, int, dict]:
+    try:
+        payload = torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
+    except (pickle.UnpicklingError, RuntimeError, EOFError, TypeError, ValueError) as error:
+        raise ValueError(f"invalid weights-only checkpoint: {error}") from error
+    return _validated_components(payload, device=device)
+
+
+def load_checkpoint(
+    path: str | Path, device: str | torch.device = "cpu"
+) -> tuple[ActorCritic, PPOTrainer, int, dict]:
+    """Return (model, trainer, update, metadata), using weights_only=True.
+
+    Restores model dtype and Adam state, without changing global CPU RNG state.
+    Resume collection from a new episode; exact external-state or bitwise
+    training continuation is not part of this checkpoint contract.
+    """
+    return _load_checkpoint_bytes(Path(path).read_bytes(), device=device)

@@ -4,9 +4,9 @@ from dataclasses import fields, replace
 import pytest
 import torch
 
-from transformer_rl.adapters import TensorEnvAdapter
-from transformer_rl.config import ModelConfig
-from transformer_rl.types import VectorObservation
+from transformer_rl.research.adapters import TensorEnvAdapter
+from transformer_rl.research.config import ModelConfig
+from transformer_rl.research.types import VectorObservation
 
 
 @pytest.fixture

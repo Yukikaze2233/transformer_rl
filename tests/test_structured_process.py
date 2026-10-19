@@ -10,8 +10,8 @@ import torch
 
 from test_structured_learning import attempt, command, components
 from test_structured_collection import SyntheticLabeledEnv
-from transformer_rl._structured_process import fresh_components, run_worker
-from transformer_rl.training_control import read_json
+from transformer_rl.formal.runtime.process import fresh_components, run_worker
+from transformer_rl.common.training_control import read_json
 
 
 @pytest.fixture(autouse=True)

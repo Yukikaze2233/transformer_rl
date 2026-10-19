@@ -3,8 +3,8 @@ import numpy as np
 import pytest
 import torch
 
-from transformer_rl.control_quality import ControlQuality, EvaluationTrace
-from transformer_rl.stability import EpisodeSignalStatistics
+from transformer_rl.research.control_quality import ControlQuality, EvaluationTrace
+from transformer_rl.research.stability import EpisodeSignalStatistics
 
 
 def step(quality, t, height=0.30, x=0.0, term=False, trunc=False):

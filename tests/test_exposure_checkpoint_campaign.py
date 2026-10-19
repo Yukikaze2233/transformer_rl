@@ -9,13 +9,13 @@ from pathlib import Path
 import pytest
 import torch
 
-from transformer_rl import exposure_campaign as campaign
-from transformer_rl import exposure_evaluation as evaluator
-from transformer_rl import exposure_protocol as protocol
-from transformer_rl import exposure_training as training
-from transformer_rl import exposure_selection as selection
-from transformer_rl import history_study
-from transformer_rl.frame_config import FrameTrainConfig
+from transformer_rl.research import exposure_campaign as campaign
+from transformer_rl.research import exposure_evaluation as evaluator
+from transformer_rl.research import exposure_protocol as protocol
+from transformer_rl.research import exposure_training as training
+from transformer_rl.research import exposure_selection as selection
+from transformer_rl.research import history_study
+from transformer_rl.research.frame_config import FrameTrainConfig
 from test_exposure_campaign import campaign_inputs, canonical, run
 from test_exposure_evaluation import (make_six_motor_env, physical_protocol,
                                       run_physical_worker)
@@ -162,7 +162,7 @@ def test_actual_failed_worker_prefix_is_validated_and_evaluated_without_a_final_
     launched = []
 
     def stop_after_first_real_job(command, directory, *args, **kwargs):
-        if "transformer_rl.exposure_process" in command and Path(directory).parent.name != first["id"]:
+        if 'transformer_rl.research.exposure_process' in command and Path(directory).parent.name != first["id"]:
             raise campaign.CampaignWorkerError("CPU fixture ends after the first actual failed-prefix job")
         result = original_launch(command, directory, *args, **kwargs)
         launched.append(deepcopy(result))
@@ -170,7 +170,7 @@ def test_actual_failed_worker_prefix_is_validated_and_evaluated_without_a_final_
 
     monkeypatch.setattr(campaign, "launch_owned_worker", stop_after_first_real_job)
     with pytest.raises(campaign.CampaignWorkerError, match="fixture ends"):
-        run(p, evaluation_provider="transformer_rl.exposure_evaluation", confirm_heldout=False)
+        run(p, evaluation_provider='transformer_rl.research.exposure_evaluation', confirm_heldout=False)
     summary = campaign._read(Path(value["output_root"]) / "summary.json")
     assert summary["status"] == "stopped" and summary["full_evaluation_matrix_closed"] is False
     assert len(summary["evaluation_cells"]) == len(value["evaluation_cells"])
@@ -205,7 +205,7 @@ def test_actual_scheduled_validation_and_heldout_close_with_verified_failed_pref
         return sealed
 
     monkeypatch.setattr(selection, "freeze_selection", observe_choice)
-    summary = run(p, evaluation_provider="transformer_rl.exposure_evaluation")
+    summary = run(p, evaluation_provider='transformer_rl.research.exposure_evaluation')
     assert summary["status"] == "comparison_closed_deployment_qualification_pending"
     assert summary["full_evaluation_matrix_closed"] is True
     assert summary["validation_matrix_closed"] is True

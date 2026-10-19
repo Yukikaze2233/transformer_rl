@@ -6,8 +6,8 @@ import pytest
 import torch
 
 from test_reset_kinematics import fixture as kinematics_fixture
-from transformer_rl._output_actuation import OutputFeedbackController, PairTargetDomain
-from transformer_rl._recovery_poses import RECOVERY_NAMES, RecoveryPoseCompiler, RecoveryTuning
+from transformer_rl.formal.control.actuation import OutputFeedbackController, PairTargetDomain
+from transformer_rl.formal.tasks.recovery import RECOVERY_NAMES, RecoveryPoseCompiler, RecoveryTuning
 
 
 def tuning():

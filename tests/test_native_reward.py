@@ -9,11 +9,11 @@ from test_control_reward import reference
 from test_joint_boundaries import asset_sources, encode, forward_poses
 from test_native_plant import fixture as plant_fixture
 from test_structured_collection import model as small_model
-from transformer_rl._control_reward import RewardPhase
-from transformer_rl._joint_boundaries import LegBoundaryGeometry
-from transformer_rl._native_reward import NativeRewardBridge
-from transformer_rl._physical_observation import CommandMode
-from transformer_rl._structured_collection import StructuredCollectionConfig, StructuredCollector
+from transformer_rl.formal.tasks.reward import RewardPhase
+from transformer_rl.formal.control.joints import LegBoundaryGeometry
+from transformer_rl.formal.simulation.reward import NativeRewardBridge
+from transformer_rl.formal.control.observation import CommandMode
+from transformer_rl.formal.learning.collection import StructuredCollectionConfig, StructuredCollector
 
 
 def fixture(period=.005, *, native_plant=None, initialize=True):

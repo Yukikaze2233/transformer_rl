@@ -7,9 +7,9 @@ import torch
 from test_control_reward import reference
 from test_native_episode import fixture as episode_fixture, observe, reset
 from test_structured_collection import model as small_model
-from transformer_rl._control_reward import PhysicalRewardComposer, RewardPhysics, RewardTuning
-from transformer_rl._policy_optimization import StructuredPPOConfig, StructuredPPOTrainer
-from transformer_rl._structured_collection import LabeledStep, StructuredCollector
+from transformer_rl.formal.tasks.reward import PhysicalRewardComposer, RewardPhysics, RewardTuning
+from transformer_rl.formal.learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
+from transformer_rl.formal.learning.collection import LabeledStep, StructuredCollector
 
 
 @pytest.fixture(autouse=True)

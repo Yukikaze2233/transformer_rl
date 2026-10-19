@@ -415,7 +415,7 @@ def test_invalid_npy_dtype_width_rejected(descriptor):
 
 def test_validator_accepts_real_planar_and_scaled_metric_schemas():
     import torch
-    from transformer_rl.control_metrics import ControlMetrics
+    from transformer_rl.research.control_metrics import ControlMetrics
     from test_control_metrics import packet, with_scaled_nominal_envelope
 
     collector = ControlMetrics(1, .01, settle_steps=200, min_steady_samples=200)

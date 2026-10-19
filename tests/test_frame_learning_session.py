@@ -8,12 +8,12 @@ import numpy as np
 import pytest
 import torch
 
-from transformer_rl.frame_checkpoint import capture_rng, load_frame_checkpoint, restore_rng
-from transformer_rl.frame_config import digest
-from transformer_rl.frame_continuation import FrameContinuation
-from transformer_rl.frame_training import FrameActorCritic, FrameCollector
-from transformer_rl.frame_workflow import _model_state_sha256, _seed
-from transformer_rl.retention import save_anchors
+from transformer_rl.research.frame_checkpoint import capture_rng, load_frame_checkpoint, restore_rng
+from transformer_rl.research.frame_config import digest
+from transformer_rl.research.frame_continuation import FrameContinuation
+from transformer_rl.research.frame_training import FrameActorCritic, FrameCollector
+from transformer_rl.research.frame_workflow import _model_state_sha256, _seed
+from transformer_rl.research.retention import save_anchors
 from test_frame_continuation import assert_same, configuration, make_env, parent
 
 
@@ -194,7 +194,7 @@ def test_fresh_preflight_failure_preserves_rng_and_precedes_environment_or_cuda(
     def forbidden(*_, **__):
         calls.append("unexpected startup")
         raise AssertionError("environment/CUDA/seeding before guard")
-    monkeypatch.setattr("transformer_rl.frame_continuation._seed", forbidden)
+    monkeypatch.setattr('transformer_rl.research.frame_continuation._seed', forbidden)
     monkeypatch.setattr(torch.cuda, "_lazy_init", forbidden)
     options = {"device": "cuda:0", "expected_initial_model_sha256": expected, **override}
     with pytest.raises(ValueError, match=match):
@@ -209,7 +209,7 @@ def test_fresh_model_construction_error_restores_caller_rng(monkeypatch):
     def broken(_):
         torch.rand(11)
         raise RuntimeError("CPU construction failed")
-    monkeypatch.setattr("transformer_rl.frame_continuation.FrameActorCritic", broken)
+    monkeypatch.setattr('transformer_rl.research.frame_continuation.FrameActorCritic', broken)
     calls = []
     def forbidden(*_, **__):
         calls.append(True)
@@ -226,7 +226,7 @@ def test_mutated_fresh_config_rejected_before_model_factory_or_rng(monkeypatch):
     before = capture_rng()
     def forbidden(*_, **__):
         raise AssertionError("preflight did not revalidate config")
-    monkeypatch.setattr("transformer_rl.frame_continuation.FrameActorCritic", forbidden)
+    monkeypatch.setattr('transformer_rl.research.frame_continuation.FrameActorCritic', forbidden)
     with pytest.raises(ValueError, match="policy_dt_s"):
         FrameContinuation.start(config, forbidden, "packed_env:make_env", rollout_steps=4,
             training_seed=71, retention_seed=901, expected_initial_model_sha256="0" * 64)
@@ -280,7 +280,7 @@ def test_exact_resume_after_transition_preserves_parent_binding_and_does_not_rep
 def test_transition_flag_rejected_before_checkpoint_read(tmp_path, monkeypatch, flag, resume_mode):
     def forbidden(*_, **__):
         raise AssertionError("invalid flag read a checkpoint")
-    monkeypatch.setattr("transformer_rl.frame_continuation._file_sha", forbidden)
+    monkeypatch.setattr('transformer_rl.research.frame_continuation._file_sha', forbidden)
     with pytest.raises(ValueError, match="environment_transition"):
         FrameContinuation.open(configuration(), forbidden, "packed_env:make_env", tmp_path / "absent.pt",
             checkpoint_sha256="0" * 64, parent_update=0, cumulative_transitions=0,
@@ -321,7 +321,7 @@ def test_transition_never_relaxes_non_environment_identity(tmp_path, monkeypatch
     before = capture_rng()
     def forbidden(*_, **__):
         raise AssertionError("invalid identity constructed an environment or seeded")
-    monkeypatch.setattr("transformer_rl.frame_continuation._seed", forbidden)
+    monkeypatch.setattr('transformer_rl.research.frame_continuation._seed', forbidden)
     with pytest.raises(ValueError, match=match):
         resume(changed, path, receipt, update=0, transitions=0, factory=forbidden,
             environment_transition=True, **override)

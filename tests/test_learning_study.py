@@ -8,10 +8,10 @@ import sys
 import pytest
 import torch
 
-from transformer_rl import learning_study as learning
-from transformer_rl import transfer_profiles as real_profiles
-from transformer_rl.frame_config import digest
-from transformer_rl.transfer_study import prepare_transfer_study
+from transformer_rl.research import learning_study as learning
+from transformer_rl.research import transfer_profiles as real_profiles
+from transformer_rl.research.frame_config import digest
+from transformer_rl.research.transfer_study import prepare_transfer_study
 from test_transfer_study import source as transfer_source
 
 
@@ -37,7 +37,7 @@ def template(tmp_path_factory):
     directory = tmp_path_factory.mktemp("learning-template")
     with pytest.MonkeyPatch.context() as patch:
         source, task, parent = transfer_source.__wrapped__(directory, patch)
-        patch.setitem(sys.modules, "transformer_rl.transfer_profiles", real_profiles)
+        patch.setitem(sys.modules, 'transformer_rl.research.transfer_profiles', real_profiles)
         parent["evaluation"]["cases"] = [
             {"name": name, "task": "survive", "terrain": "flat"}
             for name in real_profiles.REPRESENTATIVE_CASES]
@@ -289,7 +289,7 @@ def test_sealed_snapshot_bytes_and_inventory_are_authenticated(sealed):
 
 
 def test_changed_child_source_is_rejected(sealed):
-    path = sealed / "rate_000/study/policy_source/transformer_rl/frame_workflow.py"
+    path = sealed / "rate_000/study/policy_source/transformer_rl/research/frame_workflow.py"
     path.write_text(path.read_text() + "\n# changed source\n")
     with pytest.raises(ValueError, match="source"):
         learning.validate_learning_study(sealed)
@@ -304,7 +304,7 @@ def test_runtime_artifacts_do_not_return_prepared_and_not_started(sealed):
 
 
 def test_cpu_initializer_restores_rng_on_success_and_failure(parent, monkeypatch):
-    import transformer_rl.frame_training as training
+    import transformer_rl.research.frame_training as training
     base, spec = learning._read(parent / "base.json"), learning._read(parent / "study.json")
     state = torch.get_rng_state().clone()
     for name in ("manual_seed_all", "_lazy_init", "get_rng_state_all", "set_rng_state_all"):

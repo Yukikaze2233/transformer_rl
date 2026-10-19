@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from transformer_rl.training_control import _lease, boot_id, file_pin
-from transformer_rl.training_queue import TrainingQueue, cell_key
+from transformer_rl.common.training_control import _lease, boot_id, file_pin
+from transformer_rl.research.training_queue import TrainingQueue, cell_key
 
 
 def prepare(tmp_path):
@@ -58,7 +58,7 @@ def test_adoption_skips_all_old_work_and_runs_original_remaining_grid_once(tmp_p
     queue = TrainingQueue.adopt(tmp_path / "queue", plan, name="research")
     assert queue.status()["queue_counts"] == {"completed": 2, "retained_incomplete": 38, "not_started": 50, "total": 90}
     trained, evaluated = [], []
-    import transformer_rl.training_queue as module
+    import transformer_rl.research.training_queue as module
     def create(root, *_, **kwargs):
         root.mkdir(parents=True)
         assert kwargs["updates"] == 1200 and kwargs["rollout_steps"] == 48
@@ -73,7 +73,7 @@ def test_adoption_skips_all_old_work_and_runs_original_remaining_grid_once(tmp_p
     descriptor = _lease(queue.root)
     directory = queue.root / "controllers/test"
     directory.mkdir()
-    from transformer_rl.training_control import write_json
+    from transformer_rl.common.training_control import write_json
     write_json(queue.root / "request.json", {"operation": "resume", "sequence": 0})
     try:
         assert queue.run(descriptor, directory) == 0
@@ -102,12 +102,12 @@ def test_registered_queue_works_in_cli_and_changed_boot_never_polls_old_owner(tm
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     plan, _, _ = prepare(tmp_path)
     queue = TrainingQueue.adopt(tmp_path / "queues/research", plan, name="research")
-    from transformer_rl.training_cli import main
+    from transformer_rl.common.training_cli import main
     assert main(["jobs", "research", "--json"]) == 0
     assert len(json.loads(capsys.readouterr().out)) == 90
     assert main(["list", str(queue.root.parent), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)[0]["queue_counts"]["completed"] == 2
-    import transformer_rl.training_queue as module
+    import transformer_rl.research.training_queue as module
     monkeypatch.setattr(module, "boot_id", lambda: "changed-boot")
     monkeypatch.setattr(module, "process_identity", lambda _: pytest.fail("retired owner was polled"))
     assert queue.status()["boot_changed"]
@@ -117,7 +117,7 @@ def test_registered_queue_works_in_cli_and_changed_boot_never_polls_old_owner(tm
 
 def test_idle_queue_stop_and_restart_hold_all_inherited_leases(tmp_path, monkeypatch):
     import time
-    from transformer_rl.training_control import read_json
+    from transformer_rl.common.training_control import read_json
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     plan_path, _, _ = prepare(tmp_path)
     script = tmp_path / "gpu-query"
@@ -138,7 +138,7 @@ def test_idle_queue_stop_and_restart_hold_all_inherited_leases(tmp_path, monkeyp
             state = queue.status()
             assert state["phase"] == "waiting_resources" and state["resources"]["gpu_free_mib"] == 0
             assert state["queue_counts"]["not_started"] == 50 and state["active_cell"] is None
-            from transformer_rl.training_cli import render
+            from transformer_rl.common.training_cli import render
             assert "可用 RAM" in render(state)
             owners.append(read_json(queue.root / "controller.json")["identity"])
             # An inherited FLOCK can retain its creator's PID after fork. Probe

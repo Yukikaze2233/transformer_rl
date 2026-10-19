@@ -11,16 +11,16 @@ import numpy as np
 import pytest
 import torch
 
-from transformer_rl.config import PPOConfig
-from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig, digest
-from transformer_rl.frame_policy import FramePolicy, FramePolicyConfig
-from transformer_rl.frame_training import FrameActorCritic, FrameCollector, FrameHistory
-from transformer_rl.frame_checkpoint import load_frame_checkpoint, restore_rng, save_frame_checkpoint
-from transformer_rl.frame_export import export_frame_policy
-from transformer_rl.frame_runtime import FrameRuntime
-from transformer_rl.frame_workflow import _model_state_sha256, evaluate_frame_policy, train_frame_policy
-from transformer_rl.ppo import PPOTrainer
-from transformer_rl.retention import AnchorRegularizer, save_anchors
+from transformer_rl.research.config import PPOConfig
+from transformer_rl.research.frame_config import FrameModelConfig, FrameTrainConfig, digest
+from transformer_rl.research.frame_policy import FramePolicy, FramePolicyConfig
+from transformer_rl.research.frame_training import FrameActorCritic, FrameCollector, FrameHistory
+from transformer_rl.research.frame_checkpoint import load_frame_checkpoint, restore_rng, save_frame_checkpoint
+from transformer_rl.research.frame_export import export_frame_policy
+from transformer_rl.research.frame_runtime import FrameRuntime
+from transformer_rl.research.frame_workflow import _model_state_sha256, evaluate_frame_policy, train_frame_policy
+from transformer_rl.research.ppo import PPOTrainer
+from transformer_rl.research.retention import AnchorRegularizer, save_anchors
 
 sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
 from packed_env import PackedFixture, make_env
@@ -306,7 +306,7 @@ def test_history_mlp_latent_has_configured_width_and_window_is_stateless():
 
 
 def test_frequency_difference_penalties_preserve_physical_scaling():
-    from transformer_rl.chassis_adapter import rescale_action_differences
+    from transformer_rl.research.chassis_adapter import rescale_action_differences
     baseline = {"action_rate": torch.tensor(4.), "leg_action_smoothness": torch.tensor(16.), "wheel_action_smoothness": torch.tensor(16.)}
     faster = {"action_rate": torch.tensor(1.), "leg_action_smoothness": torch.tensor(1.), "wheel_action_smoothness": torch.tensor(1.)}
     adjusted = rescale_action_differences(faster, .02, .01)
@@ -316,7 +316,7 @@ def test_frequency_difference_penalties_preserve_physical_scaling():
 
 @pytest.mark.parametrize("stale", (False, True))
 def test_control_loop_stops_and_hands_off_without_rearming(monkeypatch, stale):
-    from transformer_rl import frame_runtime
+    from transformer_rl.research import frame_runtime
     class Clock:
         now = 0.
         def monotonic(self):
@@ -461,7 +461,7 @@ def _cpu_initial_model(config, seed):
 
 
 def _reject_guard_side_effects(monkeypatch):
-    import transformer_rl.frame_workflow as workflow
+    import transformer_rl.research.frame_workflow as workflow
     def forbidden(*args, **kwargs):
         pytest.fail("initialization guard reached a forbidden side effect")
     monkeypatch.setattr(workflow, "_seed", forbidden)
@@ -503,7 +503,7 @@ def _assert_same_state(first, second):
 
 
 def test_initial_guard_mismatch_including_fixed_buffers_has_zero_startup_side_effects(tmp_path, monkeypatch):
-    import transformer_rl.frame_workflow as workflow
+    import transformer_rl.research.frame_workflow as workflow
     config, seed = configuration(residual_type="gated"), 71
     original = _cpu_initial_model(config, seed)
     expected = _model_state_sha256(original)
@@ -528,7 +528,7 @@ def test_initial_guard_mismatch_including_fixed_buffers_has_zero_startup_side_ef
 
 
 def test_initial_guard_construction_failure_restores_rng_before_any_run(tmp_path, monkeypatch):
-    import transformer_rl.frame_workflow as workflow
+    import transformer_rl.research.frame_workflow as workflow
     state = torch.get_rng_state().clone()
     python_state, numpy_state = random.getstate(), np.random.get_state()
     def broken(config):
@@ -547,7 +547,7 @@ def test_initial_guard_construction_failure_restores_rng_before_any_run(tmp_path
 
 @pytest.mark.parametrize("value", [False, True, 0, "", "0" * 63, "0" * 65, "A" * 64, "g" * 64, b"0" * 64])
 def test_initial_guard_rejects_non_sha_input_before_startup(tmp_path, monkeypatch, value):
-    import transformer_rl.frame_workflow as workflow
+    import transformer_rl.research.frame_workflow as workflow
     forbidden = _reject_guard_side_effects(monkeypatch)
     monkeypatch.setattr(workflow, "FrameActorCritic", forbidden)
     with pytest.raises(ValueError, match="lowercase 64-hex"):
@@ -558,7 +558,7 @@ def test_initial_guard_rejects_non_sha_input_before_startup(tmp_path, monkeypatc
 
 @pytest.mark.parametrize("parent", ["resume", "initialize_from", "restore_learning_from"])
 def test_initial_guard_cannot_be_combined_with_parent_initialization(tmp_path, monkeypatch, parent):
-    import transformer_rl.frame_workflow as workflow
+    import transformer_rl.research.frame_workflow as workflow
     forbidden = _reject_guard_side_effects(monkeypatch)
     monkeypatch.setattr(workflow, "FrameActorCritic", forbidden)
     monkeypatch.setattr(workflow, "load_frame_checkpoint", forbidden)
@@ -570,7 +570,7 @@ def test_initial_guard_cannot_be_combined_with_parent_initialization(tmp_path, m
 
 @pytest.mark.parametrize("seed", [True, -1, 2**32, 1.])
 def test_initial_guard_seed_validation_precedes_model_and_cuda(tmp_path, monkeypatch, seed):
-    import transformer_rl.frame_workflow as workflow
+    import transformer_rl.research.frame_workflow as workflow
     forbidden = _reject_guard_side_effects(monkeypatch)
     monkeypatch.setattr(workflow, "FrameActorCritic", forbidden)
     with pytest.raises(ValueError, match="unsigned 32-bit"):
@@ -629,7 +629,7 @@ def test_matching_initial_guard_preserves_raw_rollout_metrics_model_adam_and_rng
 
 
 def test_guarded_cli_does_not_resolve_factory_or_create_error_artifacts_on_mismatch(tmp_path, monkeypatch, capsys):
-    from transformer_rl import frame_cli
+    from transformer_rl.research import frame_cli
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(configuration().to_dict()))
     forbidden = _reject_guard_side_effects(monkeypatch)
@@ -643,7 +643,7 @@ def test_guarded_cli_does_not_resolve_factory_or_create_error_artifacts_on_misma
 
 
 def test_cli_guard_forwarding_is_lazy_and_default_none_preserves_legacy_order(tmp_path, monkeypatch, capsys):
-    from transformer_rl import frame_cli, frame_workflow
+    from transformer_rl.research import frame_cli, frame_workflow
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(configuration().to_dict()))
     arguments = ["train", "--config", str(config_path), "--env-factory", "fixture:make_env",
@@ -671,7 +671,7 @@ def test_cli_guard_forwarding_is_lazy_and_default_none_preserves_legacy_order(tm
 
 
 def test_cli_rejects_bad_guard_format_before_loading_config(tmp_path, monkeypatch):
-    from transformer_rl import frame_cli
+    from transformer_rl.research import frame_cli
     monkeypatch.setattr(frame_cli, "_factory", lambda *args: pytest.fail("factory imported"))
     with pytest.raises(SystemExit) as error:
         frame_cli.main(["train", "--config", str(tmp_path / "never-read.json"), "--env-factory", "never:factory",

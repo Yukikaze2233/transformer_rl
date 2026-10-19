@@ -8,12 +8,12 @@ import threading
 import pytest
 import torch
 
-from transformer_rl import chassis_adapter, frame_cli, frame_study, frame_workflow
-from transformer_rl.frame_checkpoint import save_frame_checkpoint
-from transformer_rl.frame_config import digest
-from transformer_rl.frame_training import FrameActorCritic
-from transformer_rl.ppo import PPOTrainer
-from transformer_rl.retention import AnchorRegularizer
+from transformer_rl.research import chassis_adapter, frame_cli, frame_study, frame_workflow
+from transformer_rl.research.frame_checkpoint import save_frame_checkpoint
+from transformer_rl.research.frame_config import digest
+from transformer_rl.research.frame_training import FrameActorCritic
+from transformer_rl.research.ppo import PPOTrainer
+from transformer_rl.research.retention import AnchorRegularizer
 from test_frame_study import specification
 from test_frame_workflow import configuration
 from packed_env import make_env
@@ -196,7 +196,7 @@ def scheduler_fixture(tmp_path, monkeypatch, *, capacity, batch, coefficient=.2,
     if capacity is not None:
         spec["training"]["max_anchors"] = capacity
     if batch:
-        spec["environment_factory"] = "transformer_rl.chassis_adapter:make_env"
+        spec["environment_factory"] = 'transformer_rl.research.chassis_adapter:make_env'
         for scenario in spec["scenarios"]:
             scenario["environment"]["evaluation_batch"] = "combined"
     frame_study._validate_spec(spec)

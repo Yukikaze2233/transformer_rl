@@ -7,9 +7,9 @@ import torch
 from test_control_reward import begin, reference, sample
 from test_physical_observation import fixture as mechanics_fixture
 from test_skill_evidence import SkillHarness
-from transformer_rl._control_reward import PhysicalRewardComposer, RewardPhase, RewardTuning
-from transformer_rl._physical_observation import CommandMode
-from transformer_rl._skill_evidence import SkillOutcome
+from transformer_rl.formal.tasks.reward import PhysicalRewardComposer, RewardPhase, RewardTuning
+from transformer_rl.formal.control.observation import CommandMode
+from transformer_rl.formal.tasks.skills import SkillOutcome
 
 
 @pytest.fixture(scope='module')

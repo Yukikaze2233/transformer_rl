@@ -10,8 +10,8 @@ import time
 
 import pytest
 
-from transformer_rl import experiments as ex
-from transformer_rl.experiment_cli import main
+from transformer_rl.research import experiments as ex
+from transformer_rl.research.experiment_cli import main
 
 
 FAKE = r'''
@@ -259,15 +259,8 @@ def test_sigterm_cleans_children(specification, tmp_path):
     path, root, spec = specification
     ex.plan(path, root)
     pidfile = tmp_path / "child_pid"
-    code = '''
-import pathlib, sys
-from transformer_rl import experiments as ex
-def runner(argv, log, deadline, stop):
-    child = "import os,pathlib,time; pathlib.Path(" + repr(sys.argv[2]) + ").write_text(str(os.getpid())); time.sleep(30)"
-    ex._process([sys.executable, '-c', child], log, deadline, stop)
-ex.run(sys.argv[1], max_parallel=1, runner=runner)
-'''
-    env = {**os.environ, "PYTHONPATH": str(Path(ex.__file__).parents[1])}
+    code = '\nimport pathlib, sys\nfrom transformer_rl.research import experiments as ex\ndef runner(argv, log, deadline, stop):\n    child = "import os,pathlib,time; pathlib.Path(" + repr(sys.argv[2]) + ").write_text(str(os.getpid())); time.sleep(30)"\n    ex._process([sys.executable, \'-c\', child], log, deadline, stop)\nex.run(sys.argv[1], max_parallel=1, runner=runner)\n'
+    env = {**os.environ, "PYTHONPATH": str(Path(ex.__file__).parents[2])}
     process = subprocess.Popen([sys.executable, "-c", code, str(root), str(pidfile)], env=env)
     try:
         deadline = time.monotonic() + 15

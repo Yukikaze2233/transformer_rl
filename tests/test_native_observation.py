@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from test_physical_observation import fixture
-from transformer_rl._native_observation import NativeObservationBridge, SurfaceSample
+from transformer_rl.formal.simulation.observation import NativeObservationBridge, SurfaceSample
 
 
 class NativeView:

@@ -10,9 +10,9 @@ from types import MethodType
 
 import torch
 
-from transformer_rl.adapters import _TensorEnvContract
-from transformer_rl.history import pack_frame
-from transformer_rl.types import StepResult, VectorObservation
+from transformer_rl.research.adapters import _TensorEnvContract
+from transformer_rl.research.history import pack_frame
+from transformer_rl.research.types import StepResult, VectorObservation
 
 
 def encode_observation(config, raw, previous_issued_action, timestamp, policy_dt):

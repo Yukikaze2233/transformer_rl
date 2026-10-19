@@ -45,8 +45,11 @@ def write(path, value, *, replace=False):
 
 
 def command(source, operation, *arguments):
+    module = ('transformer_rl.research.frame_process'
+              if (source / 'src/transformer_rl/research/frame_process.py').is_file()
+              else 'transformer_rl.frame_process')
     bootstrap = ("import runpy, sys; sys.path.insert(0, " + repr(str(source / "src"))
-                 + "); runpy.run_module('transformer_rl.frame_process', "
+                 + "); runpy.run_module(" + repr(module) + ", "
                  "run_name='__main__', alter_sys=True)")
     return [sys.executable, "-c", bootstrap, operation, *map(str, arguments)]
 

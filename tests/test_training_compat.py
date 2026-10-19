@@ -11,8 +11,8 @@ import time
 import pytest
 import torch
 
-from transformer_rl.training_compat import instrument_package
-from transformer_rl.training_control import TrainingSession
+from transformer_rl.research.training_compat import instrument_package
+from transformer_rl.research.session import TrainingSession
 from test_frame_continuation import assert_same, configuration
 from test_training_control import wait_for
 

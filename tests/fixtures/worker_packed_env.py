@@ -11,7 +11,7 @@ class OwnedApplication:
 
 
 def make_env(model_config, environment_config, device):
-    from transformer_rl import frame_process
+    from transformer_rl.research import frame_process
 
     assert frame_process is sys.modules["__main__"]
     frame_process.require_worker()

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from transformer_rl import exposure_campaign as campaign
-from transformer_rl import exposure_selection as selection
+from transformer_rl.research import exposure_campaign as campaign
+from transformer_rl.research import exposure_selection as selection
 
 
 def grid():

@@ -5,7 +5,7 @@ import math
 import pytest
 import torch
 
-from transformer_rl.control_metrics import ControlMetrics
+from transformer_rl.research.control_metrics import ControlMetrics
 
 
 def packet(num_envs=1, *, time=0., reference=(0., 0., .3), actual=None,

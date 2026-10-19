@@ -5,13 +5,13 @@ import json
 import pytest
 import torch
 
-import transformer_rl.checkpoint as checkpoint
-import transformer_rl.export as policy_export
-from transformer_rl.checkpoint import save_checkpoint
-from transformer_rl.config import ModelConfig, PPOConfig
-from transformer_rl.export import export_policy
-from transformer_rl.model import ActorCritic
-from transformer_rl.ppo import PPOTrainer
+import transformer_rl.research.checkpoint as checkpoint
+import transformer_rl.research.export as policy_export
+from transformer_rl.research.checkpoint import save_checkpoint
+from transformer_rl.research.config import ModelConfig, PPOConfig
+from transformer_rl.research.export import export_policy
+from transformer_rl.research.model import ActorCritic
+from transformer_rl.research.ppo import PPOTrainer
 
 
 @pytest.fixture(scope="module", autouse=True)

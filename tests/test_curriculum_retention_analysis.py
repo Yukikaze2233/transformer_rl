@@ -96,7 +96,7 @@ def frozen(tmp_path):
         evaluation_cases.append({"name": scenario["name"], "config": route})
     learner = {k.removeprefix("src/transformer_rl/"): v for k, v in source_files.items()}
     manifest = {"format": "transformer_rl.curriculum_study", "schema_version": 1,
-        "environment_factory": "transformer_rl.chassis_adapter:make_env",
+        "environment_factory": 'transformer_rl.research.chassis_adapter:make_env',
         "arms": arms, "training_seeds": [1101, 1102, 1103], "scenarios": evaluation_cases,
         "configs": configs, "artifacts": config_files,
         "training": {"rollout_steps": 48, "checkpoint_interval": 100, "max_seconds": 172800.},

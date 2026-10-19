@@ -12,10 +12,10 @@ import numpy as np
 import pytest
 import torch
 
-from transformer_rl import calibration_worker as worker
-from transformer_rl import frame_process
-from transformer_rl import runtime_paths
-from transformer_rl.frame_config import digest
+from transformer_rl.research import calibration_worker as worker
+from transformer_rl.research import frame_process
+from transformer_rl.common import runtime_paths
+from transformer_rl.research.frame_config import digest
 
 
 def factory_fixture(monkeypatch, *, correct_control=True, close_failure=False):
@@ -160,13 +160,11 @@ def test_startup_rejects_reused_or_unbound_runtime_before_factory_resolution(tmp
 def test_fresh_os_process_uses_real_launch_time_bytecode_settings(tmp_path, monkeypatch):
     directory, cache = prepare_profile(tmp_path, monkeypatch)
     environment = dict(os.environ)
-    source = str(Path(worker.__file__).resolve().parents[1])
+    source = str(Path(worker.__file__).resolve().parents[2])
     environment["PYTHONPATH"] = source
     environment["CUDA_VISIBLE_DEVICES"] = ""
     result = subprocess.run([sys.executable, "-B", "-c",
-        "import json,os,sys; from transformer_rl.calibration_worker import _startup_profile; "
-        "print(json.dumps({'pid':os.getpid(),'prefix':sys.pycache_prefix,"
-        "'dont_write':sys.dont_write_bytecode,'profile':_startup_profile(sys.argv[1])}))",
+        "import json,os,sys; from transformer_rl.research.calibration_worker import _startup_profile; print(json.dumps({'pid':os.getpid(),'prefix':sys.pycache_prefix,'dont_write':sys.dont_write_bytecode,'profile':_startup_profile(sys.argv[1])}))",
         str(directory)], env=environment, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     actual = json.loads(result.stdout)
@@ -381,9 +379,9 @@ def test_real_os_cli_accepts_controller_worker_arguments_before_rejecting_raw_by
     worker.campaign._new(request, {"fixture": "CPU CLI byte authorization only; no SDK"})
     cache = tmp_path / "empty_python_cache"
     cache.mkdir(mode=0o700)
-    environment = {**os.environ, "PYTHONPATH": str(Path(worker.__file__).resolve().parents[1]),
+    environment = {**os.environ, "PYTHONPATH": str(Path(worker.__file__).resolve().parents[2]),
         "PYTHONPYCACHEPREFIX": str(cache), "PYTHONDONTWRITEBYTECODE": "1", "CUDA_VISIBLE_DEVICES": ""}
-    result = subprocess.run([sys.executable, "-B", "-m", "transformer_rl.calibration_worker", "worker",
+    result = subprocess.run([sys.executable, "-B", "-m", 'transformer_rl.research.calibration_worker', "worker",
         "--request", str(request), "--expected-request-sha256", "0" * 64],
         env=environment, capture_output=True, text=True, timeout=30)
     assert result.returncode == 1

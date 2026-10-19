@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from transformer_rl import _learning_accounting as accounting
-from transformer_rl._learning_accounting import LearningJournal, LearningJournalSpec, RecoveryConsumptionMismatch
-from transformer_rl.training_control import boot_id
+from transformer_rl.formal.learning import accounting
+from transformer_rl.formal.learning.accounting import LearningJournal, LearningJournalSpec, RecoveryConsumptionMismatch
+from transformer_rl.common.training_control import boot_id
 
 
 def spec():

@@ -4,12 +4,12 @@ from dataclasses import replace
 import pytest
 import torch
 
-from transformer_rl._command_trajectory import CommandRates, CommandStream, DriveEnvelope, TrajectoryKind
-from transformer_rl._jump_reference import JumpReferenceProgram
-from transformer_rl._physical_observation import CommandMode
-from transformer_rl._task_commands import RequestInputs, TaskCommandPlan, TaskCommandProgram
-from transformer_rl._task_curriculum import ContinuousTaskSampler, TaskFamily
-from transformer_rl._task_protocol import CompletedEstimate, RequestProtocol, RequestResponse
+from transformer_rl.formal.tasks.trajectory import CommandRates, CommandStream, DriveEnvelope, TrajectoryKind
+from transformer_rl.formal.tasks.jump import JumpReferenceProgram
+from transformer_rl.formal.control.observation import CommandMode
+from transformer_rl.formal.tasks.commands import RequestInputs, TaskCommandPlan, TaskCommandProgram
+from transformer_rl.formal.tasks.curriculum import ContinuousTaskSampler, TaskFamily
+from transformer_rl.formal.tasks.protocol import CompletedEstimate, RequestProtocol, RequestResponse
 
 
 def fixture(count=120, stage=5):

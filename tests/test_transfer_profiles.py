@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from transformer_rl.transfer_profiles import (
+from transformer_rl.research.transfer_profiles import (
     MODULES, REPRESENTATIVE_CASES, apply_reset_profiles, build_transfer_cases,
     configure_transfer_evaluation,
 )

@@ -20,10 +20,10 @@ import time
 
 import torch
 
-from transformer_rl.chassis_adapter import network_variants
-from transformer_rl.frame_checkpoint import load_frame_checkpoint
-from transformer_rl.frame_config import FrameTrainConfig
-from transformer_rl.frame_policy import FramePolicyConfig
+from transformer_rl.research.chassis_adapter import network_variants
+from transformer_rl.research.frame_checkpoint import load_frame_checkpoint
+from transformer_rl.research.frame_config import FrameTrainConfig
+from transformer_rl.research.frame_policy import FramePolicyConfig
 
 
 def write(path, value):
@@ -32,7 +32,7 @@ def write(path, value):
 
 
 def worker(arguments, log, timeout):
-    command = [sys.executable, "-m", "transformer_rl.frame_process", *map(str, arguments)]
+    command = [sys.executable, "-m", 'transformer_rl.research.frame_process', *map(str, arguments)]
     with log.open("x") as stream:
         process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
         try:

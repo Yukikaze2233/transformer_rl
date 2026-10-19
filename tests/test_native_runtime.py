@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from transformer_rl._native_ground import WheelCollisionCentres
-from transformer_rl._native_runtime import NativeTaskRuntime
+from transformer_rl.formal.simulation.ground import WheelCollisionCentres
+from transformer_rl.formal.runtime.assembly import NativeTaskRuntime
 
 
 def test_drive_geometry_uses_selected_rotated_collider_offsets_and_body_order():

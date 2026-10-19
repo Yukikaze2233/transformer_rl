@@ -11,8 +11,9 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from transformer_rl import chassis_adapter, frame_process, runtime_paths
-from transformer_rl.continuation_process import _ApplicationRegistry
+from transformer_rl.research import chassis_adapter, frame_process
+from transformer_rl.common import runtime_paths
+from transformer_rl.research.continuation_process import _ApplicationRegistry
 
 
 @pytest.fixture

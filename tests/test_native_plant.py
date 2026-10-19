@@ -9,12 +9,12 @@ from test_native_observation import NativeRobot
 from test_output_actuation import parameters
 from test_passive_pressure import fixture as pressure_fixture
 from test_physical_observation import fixture as physical_fixture
-from transformer_rl._native_actuation import NativeEffortWriter
-from transformer_rl._native_contacts import NativeTerrainContacts
-from transformer_rl._native_observation import NativeObservationBridge
-from transformer_rl._native_plant import GroundReference, NativePhysicsPlant
-from transformer_rl._native_scene import NativeSceneState
-from transformer_rl._output_actuation import EffectiveDriveResponse, OutputFeedbackController
+from transformer_rl.formal.simulation.actuation import NativeEffortWriter
+from transformer_rl.formal.simulation.contacts import NativeTerrainContacts
+from transformer_rl.formal.simulation.observation import NativeObservationBridge
+from transformer_rl.formal.simulation.plant import GroundReference, NativePhysicsPlant
+from transformer_rl.formal.simulation.scene import NativeSceneState
+from transformer_rl.formal.control.actuation import EffectiveDriveResponse, OutputFeedbackController
 
 
 def fixture(period=.005):

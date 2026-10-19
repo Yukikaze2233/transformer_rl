@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 import torch
 
-from transformer_rl import exposure_training as exposure
-from transformer_rl.frame_checkpoint import capture_rng
-from transformer_rl.frame_config import json_bytes
-from transformer_rl.frame_continuation import FrameContinuation
-from transformer_rl.ppo import PPOTrainer
+from transformer_rl.research import exposure_training as exposure
+from transformer_rl.research.frame_checkpoint import capture_rng
+from transformer_rl.research.frame_config import json_bytes
+from transformer_rl.research.frame_continuation import FrameContinuation
+from transformer_rl.research.ppo import PPOTrainer
 from test_exposure_training import config, run_job, same
 from test_exposure_segments import options, pin, stage
 from packed_env import make_env

@@ -19,15 +19,15 @@ import sys
 import pytest
 import torch
 
-from transformer_rl import exposure_campaign as campaign
-from transformer_rl import exposure_evaluation as evaluator
-from transformer_rl import exposure_protocol as protocol
-from transformer_rl import exposure_selection as selection
-from transformer_rl import exposure_training as training
-from transformer_rl import history_study, queue_validation
-from transformer_rl.frame_config import digest, json_bytes
-from transformer_rl.frame_study import grade_report
-from transformer_rl.frame_workflow import evaluate_frame_policy
+from transformer_rl.research import exposure_campaign as campaign
+from transformer_rl.research import exposure_evaluation as evaluator
+from transformer_rl.research import exposure_protocol as protocol
+from transformer_rl.research import exposure_selection as selection
+from transformer_rl.research import exposure_training as training
+from transformer_rl.research import history_study, queue_validation
+from transformer_rl.research.frame_config import digest, json_bytes
+from transformer_rl.research.frame_study import grade_report
+from transformer_rl.research.frame_workflow import evaluate_frame_policy
 from test_exposure_evaluation import (REAL_RUNTIME, SixMotorFixture, configuration,
                                      make_six_motor_env, synthetic_closed)
 from test_exposure_protocol import prepared, freeze, write_json
@@ -238,7 +238,7 @@ def physical_grid(prepared, monkeypatch):
     base = replace(base, environment={"snapshot": str(p["snapshot"]), "snapshot_sha256": snapshot_sha,
                                      **contracts["first"], "control": base.control})
     spec = deepcopy(p["spec"])
-    spec["environment_factory"] = "transformer_rl.chassis_adapter:make_env"
+    spec["environment_factory"] = 'transformer_rl.research.chassis_adapter:make_env'
     spec["variants"] = [
         {"name": "mlp", "policy": {"architecture": "mlp", "history_length": 1, "residual_type": "add"}},
         {"name": "history_mlp", "policy": {"architecture": "history_mlp", "residual_type": "add"}},
@@ -255,8 +255,7 @@ def physical_grid(prepared, monkeypatch):
     spec["selection"]["objectives"][0]["path"] = "metrics.vx_abs_error.mean"
     write_json(p["inputs"] / "base.json", base.to_dict())
     write_json(p["inputs"] / "study.json", spec)
-    fixture_source = ("from copy import deepcopy\nimport json\nfrom pathlib import Path\nimport torch\n"
-        "from transformer_rl.frame_config import digest\nfrom transformer_rl.types import StepResult, VectorObservation\n\n"
+    fixture_source = ('from copy import deepcopy\nimport json\nfrom pathlib import Path\nimport torch\nfrom transformer_rl.research.frame_config import digest\nfrom transformer_rl.research.types import StepResult, VectorObservation\n\n'
         + inspect.getsource(SixMotorFixture) + "\n" + inspect.getsource(make_six_motor_env) + '''
 original_make_env = make_six_motor_env
 def make_six_motor_env(model_config, environment_config, device):
@@ -268,22 +267,7 @@ def make_six_motor_env(model_config, environment_config, device):
     return env
 ''')
     (p["sdk"] / "physical_cpu_fixture.py").write_text(fixture_source)
-    startup = '''
-# ONLY synthetic original closure providers and Isaac factory resolution.
-import json, os
-from copy import deepcopy
-from pathlib import Path
-from transformer_rl import exposure_protocol as protocol, queue_validation, cli
-p = json.loads(Path(os.environ['EXPOSURE_CPU_FIXTURE_PROTOCOL']).read_bytes())
-protocol.predecessors._dependencies = lambda *a: (deepcopy(p['execution']['dependencies']), deepcopy(p['execution']['resource_locks']))
-queue_validation.check_dependency = lambda *a, **k: {'status': 'completed', 'controller_live': False, 'live_workers': [], 'fixture': 'synthetic closure only'}
-import physical_cpu_fixture
-def cpu_factory(reference):
-    if reference != 'transformer_rl.chassis_adapter:make_env':
-        raise ValueError('fixture factory reference differs')
-    return physical_cpu_fixture.make_six_motor_env
-cli._factory = cpu_factory
-'''
+    startup = "\n# ONLY synthetic original closure providers and Isaac factory resolution.\nimport json, os\nfrom copy import deepcopy\nfrom pathlib import Path\nfrom transformer_rl.research import exposure_protocol as protocol, queue_validation, cli\np = json.loads(Path(os.environ['EXPOSURE_CPU_FIXTURE_PROTOCOL']).read_bytes())\nprotocol.predecessors._dependencies = lambda *a: (deepcopy(p['execution']['dependencies']), deepcopy(p['execution']['resource_locks']))\nqueue_validation.check_dependency = lambda *a, **k: {'status': 'completed', 'controller_live': False, 'live_workers': [], 'fixture': 'synthetic closure only'}\nimport physical_cpu_fixture\ndef cpu_factory(reference):\n    if reference != 'transformer_rl.research.chassis_adapter:make_env':\n        raise ValueError('fixture factory reference differs')\n    return physical_cpu_fixture.make_six_motor_env\ncli._factory = cpu_factory\n"
     (p["sdk"] / "sitecustomize.py").write_text("import os\ntry:\n" +
         "".join("    " + line + "\n" for line in startup.splitlines()) + "except BaseException:\n    os._exit(81)\n")
     p["history"] = p["tmp"] / "selection_history"
@@ -378,7 +362,7 @@ def test_actual_full_grid_selection_and_heldout_authorization_without_summary_tr
         phase_observer.setattr(selection, "freeze_selection", observe_real_seal)
         summary = campaign.run_protocol(p["protocol_path"], expected_protocol_sha256=raw["sha256"],
             storage_contract_path=p["storage_path"], expected_storage_sha256=protocol._receipt(p["storage_path"])["sha256"],
-            evaluation_provider="transformer_rl.exposure_evaluation")
+            evaluation_provider='transformer_rl.research.exposure_evaluation')
     assert summary["charged_updates"] == 15 and summary["charged_fresh_transitions"] == 120
     assert summary["verified_successful_updates"] == 14 and len(summary["jobs"]) == 15
     assert summary["status"] == "comparison_closed_deployment_qualification_pending"

@@ -8,7 +8,7 @@ from examples.isaaclab_task import (
     CONTROL_SIGNAL_UNITS, IsaacLabTaskAdapter, control_signals,
     encode_observation, physical_metrics,
 )
-from transformer_rl.config import ModelConfig
+from transformer_rl.research.config import ModelConfig
 
 
 def test_source_layout_uses_latest_noise_and_issued_echo():

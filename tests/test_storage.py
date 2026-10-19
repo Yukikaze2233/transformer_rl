@@ -4,8 +4,8 @@ from dataclasses import fields, replace
 import pytest
 import torch
 
-from transformer_rl.storage import PPOBatch, RolloutBuffer
-from transformer_rl.types import HistoryBatch
+from transformer_rl.research.storage import PPOBatch, RolloutBuffer
+from transformer_rl.research.types import HistoryBatch
 
 
 def make_step(size=4, time=0):

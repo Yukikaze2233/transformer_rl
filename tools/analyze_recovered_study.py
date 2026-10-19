@@ -176,11 +176,11 @@ class RecoveryAnalysis:
 
     def verify_checkpoint(self, path, job, expected_update, config):
         import torch
-        from transformer_rl.checkpoint import (
+        from transformer_rl.research.checkpoint import (
             _DTYPES, _PAYLOAD_KEYS, _json_metadata, _new_model, _parse_config,
             _validate_optimizer_state, _validate_tensor, _validated_components,
         )
-        from transformer_rl.config import ModelConfig, PPOConfig
+        from transformer_rl.research.config import ModelConfig, PPOConfig
 
         data = path.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
@@ -287,7 +287,7 @@ class RecoveryAnalysis:
 
     def analyze(self):
         import torch
-        from transformer_rl.experiments import _report, validate_plan
+        from transformer_rl.research.experiments import _report, validate_plan
 
         torch.set_num_threads(1)
         integrity = self.verify_inventory()

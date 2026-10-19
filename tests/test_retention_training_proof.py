@@ -15,11 +15,11 @@ from pathlib import Path
 import pytest
 import torch
 
-from transformer_rl import retention_campaign as campaign
-from transformer_rl.experiments import source_identity
-from transformer_rl.frame_checkpoint import save_frame_checkpoint
-from transformer_rl.frame_config import digest, json_bytes
-from transformer_rl.ppo import PPOTrainer
+from transformer_rl.research import retention_campaign as campaign
+from transformer_rl.research.experiments import source_identity
+from transformer_rl.research.frame_checkpoint import save_frame_checkpoint
+from transformer_rl.research.frame_config import digest, json_bytes
+from transformer_rl.research.ppo import PPOTrainer
 
 from test_continuation_process import file_sha, reseal, rig as synthetic_rig
 

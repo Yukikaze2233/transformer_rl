@@ -8,8 +8,8 @@ import torch
 
 from test_joint_boundaries import asset_sources, encode, forward_poses
 from test_physical_observation import fixture as physical_fixture
-from transformer_rl._physical_observation import MechanicalBinding
-from transformer_rl._reset_kinematics import AssetResetKinematics
+from transformer_rl.formal.control.observation import MechanicalBinding
+from transformer_rl.formal.tasks.reset_kinematics import AssetResetKinematics
 
 
 def rotation(quaternion):

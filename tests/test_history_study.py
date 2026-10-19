@@ -9,10 +9,10 @@ import py_compile
 import pytest
 import torch
 
-from transformer_rl import frame_study, history_study
-from transformer_rl.config import PPOConfig
-from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig, digest
-from transformer_rl.frame_policy import FramePolicy, FramePolicyConfig
+from transformer_rl.research import frame_study, history_study
+from transformer_rl.research.config import PPOConfig
+from transformer_rl.research.frame_config import FrameModelConfig, FrameTrainConfig, digest
+from transformer_rl.research.frame_policy import FramePolicy, FramePolicyConfig
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def inputs(tmp_path):
                      "retention_coef": .2, "anchor_seeds": [4101], "max_anchors": 13},
         "evaluation": {"validation_seeds": [701], "seeds": [2701, 2801], "steps": 12,
                        "settle_steps": 1, "min_steady_samples": 1, "min_completed_episodes": 6},
-        "execution": {"devices": ["cpu"], "worker_module": "transformer_rl.frame_process",
+        "execution": {"devices": ["cpu"], "worker_module": 'transformer_rl.research.frame_process',
                       "job_timeout_seconds": 60.},
         "selection": {"min_training_seeds": 3, "objectives": [{"path": "metrics.error.mean",
             "direction": "minimize", "scale": 1., "weight": 1.}], "std_penalty": 1.,
@@ -136,7 +136,7 @@ def test_complete_grid_real_study_interface_budget_and_no_execution(inputs, monk
     assert Path(history_study.__file__).read_bytes() == planner_bytes
     assert frame_study.source_identity() == original_source
     assert result["planner_source"]["sha256"] == hashlib.sha256(planner_bytes).hexdigest()
-    assert (root / "study/policy_source/transformer_rl/history_study.py").read_bytes() == planner_bytes
+    assert (root / "study/policy_source/transformer_rl/research/history_study.py").read_bytes() == planner_bytes
 
 
 def test_models_accept_complete_grid_and_align_current_frame_ages(inputs):
@@ -225,7 +225,7 @@ def test_missing_num_envs_is_rejected_without_implicit_defaults(inputs):
 
 @pytest.mark.parametrize("route", ("expanded_spec.json", "inputs/spec.json", "inputs/base.json",
     "study/configs/gated_h3.train.first.json", "study/plan.json",
-    "study/policy_source/transformer_rl/history_study.py"))
+    "study/policy_source/transformer_rl/research/history_study.py"))
 def test_frozen_real_artifact_bytes_detect_tamper(inputs, route):
     prepare(inputs)
     path = inputs[2] / route
@@ -294,7 +294,7 @@ def test_original_runner_lock_and_real_source_bytecode_preserve_static_validatio
     before = prepare(inputs)
     original_bytes = (inputs[2] / "history_plan.json").read_bytes()
     study_root = inputs[2] / "study"
-    source = study_root / "policy_source/transformer_rl/frame_policy.py"
+    source = study_root / "policy_source/transformer_rl/research/frame_policy.py"
     bytecode = Path(py_compile.compile(str(source), doraise=True))
     assert bytecode.is_file() and "__pycache__" in bytecode.parts
     # The original runner uses this exact reusable lock path and flock mode.

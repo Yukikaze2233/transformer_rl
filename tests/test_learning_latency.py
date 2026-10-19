@@ -330,12 +330,12 @@ def test_full_ninety_cell_index_is_accepted_by_independent_selector(producer):
 
 def test_public_cpu_export_benchmark_and_raw_mean_parity_with_tensor_checkpoint(tmp_path):
     import torch
-    from transformer_rl.config import PPOConfig
-    from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig
-    from transformer_rl.frame_policy import FramePolicyConfig
-    from transformer_rl.frame_training import FrameActorCritic
-    from transformer_rl.frame_checkpoint import save_frame_checkpoint
-    from transformer_rl.ppo import PPOTrainer
+    from transformer_rl.research.config import PPOConfig
+    from transformer_rl.research.frame_config import FrameModelConfig, FrameTrainConfig
+    from transformer_rl.research.frame_policy import FramePolicyConfig
+    from transformer_rl.research.frame_training import FrameActorCritic
+    from transformer_rl.research.frame_checkpoint import save_frame_checkpoint
+    from transformer_rl.research.ppo import PPOTrainer
     # Synthetic tensor fixture: the update label is not training consumption evidence.
     control = {"policy_dt_s": .01, "observation_schema": "tensor_fixture",
         "feature_names": [f"feature_{index}" for index in range(5)], "action_names": ["position", "velocity"],

@@ -4,8 +4,8 @@ import math
 import pytest
 import torch
 
-from transformer_rl._terrain_geometry import HeightPatch, TerrainKind, TerrainMesh, TerrainQueryBatch, TerrainSurface
-from transformer_rl._wheel_clearance import CylinderTerrainGap
+from transformer_rl.formal.tasks.geometry import HeightPatch, TerrainKind, TerrainMesh, TerrainQueryBatch, TerrainSurface
+from transformer_rl.formal.control.wheel_clearance import CylinderTerrainGap
 
 
 def plane(sx=0., sy=0., height=0., extent=(-2., 2.)):

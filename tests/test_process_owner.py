@@ -2,7 +2,7 @@
 import pytest
 
 from examples import _isaaclab_process as owner
-from transformer_rl import cli
+from transformer_rl.research import cli
 
 
 @pytest.mark.parametrize("outcome,expected", [(0, 0), (1, 1), (None, 0), ("system_exit", 2),

@@ -9,13 +9,13 @@ import pytest
 import torch
 from torch import nn
 
-from transformer_rl.checkpoint import load_checkpoint, save_checkpoint
-from transformer_rl.config import ModelConfig, PPOConfig
-from transformer_rl.export import (
+from transformer_rl.research.checkpoint import load_checkpoint, save_checkpoint
+from transformer_rl.research.config import ModelConfig, PPOConfig
+from transformer_rl.research.export import (
     _synthetic_history, _tensor_args, _verification_cases, export_policy,
 )
-from transformer_rl.model import ActorCritic
-from transformer_rl.ppo import PPOTrainer
+from transformer_rl.research.model import ActorCritic
+from transformer_rl.research.ppo import PPOTrainer
 
 from test_initialization import _assert_tree_equal, _synthetic_adam_step
 
@@ -62,13 +62,7 @@ def test_stdlib_config_field_parse_and_metadata_roundtrip(tmp_path):
     path.write_text(json.dumps({"model": {"readout_type": "last", "time_encoding": "index"}}))
     source = str(Path(__file__).resolve().parents[1] / "src")
     code = (
-        "import sys; sys.path.insert(0, sys.argv[1]); "
-        "from transformer_rl.config import ModelConfig, load_config, config_dict; "
-        "m, p, e = load_config(sys.argv[2]); "
-        "assert m.readout_type == 'last' and m.time_encoding == 'index'; "
-        "assert ModelConfig().readout_type == 'query'; "
-        "assert config_dict(m, p, e)['model']['readout_type'] == 'last'; "
-        "assert 'torch' not in sys.modules"
+        "import sys; sys.path.insert(0, sys.argv[1]); from transformer_rl.research.config import ModelConfig, load_config, config_dict; m, p, e = load_config(sys.argv[2]); assert m.readout_type == 'last' and m.time_encoding == 'index'; assert ModelConfig().readout_type == 'query'; assert config_dict(m, p, e)['model']['readout_type'] == 'last'; assert 'torch' not in sys.modules"
     )
     subprocess.run([sys.executable, "-S", "-c", code, source, str(path)], check=True)
 

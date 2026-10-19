@@ -8,11 +8,11 @@ import torch
 from torch import nn
 from torch.distributions import Normal, kl_divergence
 
-from transformer_rl.config import PPOConfig
-from transformer_rl.frame_config import FrameModelConfig, FrameTrainConfig, digest
-from transformer_rl.frame_policy import FramePolicyConfig
-from transformer_rl.private_retention import PrivateAnchorRegularizer
-from transformer_rl.retention import AnchorRegularizer, save_anchors
+from transformer_rl.research.config import PPOConfig
+from transformer_rl.research.frame_config import FrameModelConfig, FrameTrainConfig, digest
+from transformer_rl.research.frame_policy import FramePolicyConfig
+from transformer_rl.research.private_retention import PrivateAnchorRegularizer
+from transformer_rl.research.retention import AnchorRegularizer, save_anchors
 
 
 class DeterministicPolicy(nn.Module):

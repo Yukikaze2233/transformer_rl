@@ -6,9 +6,9 @@ import math
 import pytest
 import torch
 
-from transformer_rl._task_curriculum import ContinuousTaskSampler, TaskFamily
-from transformer_rl._terrain_geometry import TerrainKind, TerrainQueryBatch
-from transformer_rl._terrain_tasks import ContinuousTerrainGenerator, TerrainExtent, TerrainRequest, TerrainTuning
+from transformer_rl.formal.tasks.curriculum import ContinuousTaskSampler, TaskFamily
+from transformer_rl.formal.tasks.geometry import TerrainKind, TerrainQueryBatch
+from transformer_rl.formal.tasks.terrain import ContinuousTerrainGenerator, TerrainExtent, TerrainRequest, TerrainTuning
 
 
 def tuning():

@@ -14,10 +14,11 @@ import time
 import pytest
 import torch
 
-from transformer_rl.frame_checkpoint import load_frame_checkpoint
-from transformer_rl.frame_workflow import train_frame_policy
-from transformer_rl.training_cli import main, render
-from transformer_rl.training_control import TrainingSession, read_json, write_json
+from transformer_rl.research.frame_checkpoint import load_frame_checkpoint
+from transformer_rl.research.frame_workflow import train_frame_policy
+from transformer_rl.common.training_cli import main, render
+from transformer_rl.research.session import TrainingSession
+from transformer_rl.common.training_control import read_json, write_json
 
 from test_frame_continuation import assert_same, configuration
 
@@ -142,7 +143,7 @@ def test_changed_boot_never_polls_retired_pid_and_requires_explicit_start(sessio
     wait_for(session, lambda state: state["phase"] == "paused")
     session.command("stop", wait_seconds=20)
     wait_for(session, lambda state: not state["active"])
-    import transformer_rl.training_control as control
+    import transformer_rl.common.training_control as control
     with monkeypatch.context() as changed:
         changed.setattr(control, "boot_id", lambda: "another-boot")
         changed.setattr(control, "process_identity", lambda _: pytest.fail("retired PID was polled"))
@@ -153,7 +154,7 @@ def test_changed_boot_never_polls_retired_pid_and_requires_explicit_start(sessio
 
 def test_changed_source_or_checkpoint_refuses_restart(session_factory):
     session, _ = session_factory()
-    source = session.root / "source" / "transformer_rl" / "training_control.py"
+    source = session.root / "source" / "transformer_rl" / "common/training_control.py"
     original = source.read_bytes()
     source.write_bytes(original + b"\n# changed\n")
     with pytest.raises(ValueError, match="artifact changed"):
@@ -173,7 +174,7 @@ def test_unclean_attempt_cannot_silently_replay_a_periodic_checkpoint(session_fa
     attempt = session.root / "attempts" / "0001-123456789abc"
     attempt.mkdir()
     (attempt / "control").mkdir()
-    from transformer_rl.training_control import boot_id
+    from transformer_rl.common.training_control import boot_id
     write_json(attempt / "request.json", {"token": "fixture", "boot_id": boot_id(), "submitted_epoch": 0})
     write_json(attempt / "control" / "request.json", {"token": "fixture", "operation": "resume", "sequence": 0})
     write_json(session.root / "current.json", {"attempt": attempt.name})
@@ -185,7 +186,7 @@ def test_unclean_attempt_cannot_silently_replay_a_periodic_checkpoint(session_fa
 def test_recipe_pin_cannot_redirect_reads_outside_the_session(session_factory, monkeypatch):
     session, _ = session_factory()
     write_json(session.root / "session.pin.json", {"path": "/outside/forbidden.pt"}, replace=True)
-    import transformer_rl.training_control as control
+    import transformer_rl.common.training_control as control
     monkeypatch.setattr(control, "verify_pin", lambda _: pytest.fail("outside artifact was read"))
     with pytest.raises(ValueError, match="escapes the session"):
         TrainingSession(session.root)
@@ -240,12 +241,11 @@ def test_frontend_is_torch_free_json_and_terminal_safe(session_factory, capsys):
     assert state["phase"] == "ready"
     rendered = render(state, width=64, color=False)
     assert "\x1b" not in rendered and "训练控制" in rendered
-    from transformer_rl.training_cli import _width
+    from transformer_rl.common.training_cli import _width
     assert all(_width(line) == 64 for line in rendered.splitlines())
     assert main(["watch", str(session.root)]) == 0
     assert "\x1b" not in capsys.readouterr().out
     result = subprocess.run([sys.executable, "-c",
-        "import sys; from transformer_rl.training_cli import main; "
-        "assert main([]) == 0; assert 'torch' not in sys.modules"], capture_output=True, text=True,
+        "import sys; from transformer_rl.common.training_cli import main; assert main([]) == 0; assert 'torch' not in sys.modules"], capture_output=True, text=True,
         env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")})
     assert result.returncode == 0, result.stderr

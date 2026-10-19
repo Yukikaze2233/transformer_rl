@@ -10,10 +10,10 @@ import pytest
 import torch
 from torch import nn
 
-from transformer_rl.config import ModelConfig
-from transformer_rl.frame_policy import FramePolicy, FramePolicyConfig
-from transformer_rl.model import TimeAwareActor
-from transformer_rl.types import HistoryBatch
+from transformer_rl.research.config import ModelConfig
+from transformer_rl.research.frame_policy import FramePolicy, FramePolicyConfig
+from transformer_rl.research.model import TimeAwareActor
+from transformer_rl.research.types import HistoryBatch
 
 
 ARCHITECTURES = ("mlp", "frame_stack_mlp", "history_mlp", "transformer")
@@ -343,7 +343,7 @@ def test_current_query_readout_uses_the_complete_observed_history_without_cross_
 
 
 def test_legacy_policy_and_full_training_configuration_keep_canonical_identities():
-    from transformer_rl.frame_config import FrameTrainConfig, digest
+    from transformer_rl.research.frame_config import FrameTrainConfig, digest
     from test_frame_workflow import configuration
 
     policy = small_config("transformer", history_length=31)
@@ -418,10 +418,10 @@ def test_current_shared_frame_ages_match_across_eleven_thirty_one_and_sixty_one_
 
 @pytest.mark.parametrize("position_reference", ("oldest", "current"))
 def test_checkpoint_sidecars_and_anchor_pools_roundtrip_without_relabeling_buffers(tmp_path, position_reference):
-    from transformer_rl.frame_checkpoint import load_frame_checkpoint, save_frame_checkpoint
-    from transformer_rl.frame_training import FrameActorCritic
-    from transformer_rl.ppo import PPOTrainer
-    from transformer_rl.retention import AnchorRegularizer, save_anchors
+    from transformer_rl.research.frame_checkpoint import load_frame_checkpoint, save_frame_checkpoint
+    from transformer_rl.research.frame_training import FrameActorCritic
+    from transformer_rl.research.ppo import PPOTrainer
+    from transformer_rl.research.retention import AnchorRegularizer, save_anchors
     from test_frame_workflow import configuration
 
     config = configuration(position_reference=position_reference)
@@ -464,11 +464,11 @@ def test_checkpoint_sidecars_and_anchor_pools_roundtrip_without_relabeling_buffe
 def test_current_checkpoint_export_bundle_and_runtime_keep_the_position_contract(tmp_path):
     pytest.importorskip("onnx")
     pytest.importorskip("onnxruntime")
-    from transformer_rl.frame_checkpoint import save_frame_checkpoint
-    from transformer_rl.frame_export import export_frame_policy
-    from transformer_rl.frame_runtime import FrameRuntime
-    from transformer_rl.frame_training import FrameActorCritic
-    from transformer_rl.ppo import PPOTrainer
+    from transformer_rl.research.frame_checkpoint import save_frame_checkpoint
+    from transformer_rl.research.frame_export import export_frame_policy
+    from transformer_rl.research.frame_runtime import FrameRuntime
+    from transformer_rl.research.frame_training import FrameActorCritic
+    from transformer_rl.research.ppo import PPOTrainer
     from test_frame_workflow import configuration
 
     config = configuration(position_reference="current", residual_type="gated", readout_type="query", history_length=11)

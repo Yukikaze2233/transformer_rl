@@ -13,8 +13,8 @@ import torch
 
 from test_structured_collection import SyntheticLabeledEnv
 from test_structured_learning import components
-from transformer_rl._structured_session import StructuredTrainingSession
-from transformer_rl.training_queue import open_session
+from transformer_rl.formal.runtime.session import StructuredTrainingSession
+from transformer_rl.common.session_router import open_session
 
 
 @pytest.fixture(autouse=True)
@@ -27,16 +27,12 @@ def seeded_cpu():
     torch.set_num_threads(threads)
 
 
-def session(tmp_path, monkeypatch, *, ready=True):
+def session(tmp_path, monkeypatch, *, ready=True, implicit_source=False):
     import transformer_rl
     package = tmp_path / 'learner/transformer_rl'
     shutil.copytree(Path(transformer_rl.__file__).parent, package,
                     ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-    fixture = '''from contextlib import contextmanager
-import torch
-from transformer_rl._structured_collection import LabeledObservation, LabeledStep, PhysicalLabels
-from transformer_rl.training_control import read_json, write_json
-'''
+    fixture = 'from contextlib import contextmanager\nimport torch\nfrom transformer_rl.formal.learning.collection import LabeledObservation, LabeledStep, PhysicalLabels\nfrom transformer_rl.common.training_control import read_json, write_json\n'
     fixture += inspect.getsource(SyntheticLabeledEnv)
     fixture += '''
 @contextmanager
@@ -68,9 +64,14 @@ def runtime(recipe, components, configuration, *, control):
     resources = {'gpu_uuid': 'GPU-' + 'a' * 36, 'nvidia_smi': sys.executable,
                  'driver_library_directory': str(driver), 'minimum_ram_bytes': 7 * 1024**3,
                  'minimum_vram_mib': 14336, 'minimum_disk_bytes': 10 * 1024**3, 'locks': locks}
+    source_options = {'learner_source': package}
+    if implicit_source:
+        from transformer_rl.formal.runtime import session as session_module
+        monkeypatch.setattr(session_module, '__file__', str(package / 'formal/runtime/session.py'))
+        source_options = {}
     value = StructuredTrainingSession.create(tmp_path / 'session', recipe,
         runtime_factory='transformer_rl._owned_test_runtime:runtime', runtime_configuration={},
-        resources=resources, python=sys.executable, learner_source=package)
+        resources=resources, python=sys.executable, **source_options)
     monkeypatch.setattr(value, '_resources', lambda: (ready, {
         'MemAvailable': 7 * 1024**3, 'minimum_ram_available_bytes': 7 * 1024**3,
         'gpu_free_mib': 14336, 'minimum_gpu_free_mib': 14336}))
@@ -87,8 +88,11 @@ def wait(session, predicate, seconds=25.):
     raise AssertionError('worker did not reach the expected owned boundary: ' + repr(session.status()))
 
 
-def test_structured_session_has_real_parent_receipts_and_cold_resume(tmp_path, monkeypatch):
-    value, _ = session(tmp_path, monkeypatch)
+@pytest.mark.parametrize('implicit_source', [False, True])
+def test_structured_session_has_real_parent_receipts_and_cold_resume(tmp_path, monkeypatch, implicit_source):
+    value, _ = session(tmp_path, monkeypatch, implicit_source=implicit_source)
+    assert (value.root / 'source/transformer_rl/formal/runtime/process.py').is_file()
+    assert (value.root / 'source/transformer_rl/common/training_control.py').is_file()
     assert isinstance(open_session(value.root), StructuredTrainingSession)
     assert not value.spec['automatic_evaluation']
     value.start(paused=True)
@@ -115,7 +119,7 @@ def test_structured_session_has_real_parent_receipts_and_cold_resume(tmp_path, m
 
 
 def test_resource_wait_creates_no_attempt_and_releases_original_leases(tmp_path, monkeypatch):
-    from transformer_rl.training_cli import render
+    from transformer_rl.common.training_cli import render
     value, resources = session(tmp_path, monkeypatch, ready=False)
     state = value.start()
     assert state['phase'] == 'waiting_resources' and not state['active']

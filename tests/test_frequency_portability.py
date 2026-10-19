@@ -9,14 +9,14 @@ from pathlib import Path
 import pytest
 import torch
 
-from transformer_rl.checkpoint import (
+from transformer_rl.research.checkpoint import (
     _validate_time_frequencies,
     load_checkpoint,
     save_checkpoint,
 )
-from transformer_rl.config import ModelConfig, PPOConfig
-from transformer_rl.model import ActorCritic, TimeAwareActor
-from transformer_rl.ppo import PPOTrainer
+from transformer_rl.research.config import ModelConfig, PPOConfig
+from transformer_rl.research.model import ActorCritic, TimeAwareActor
+from transformer_rl.research.ppo import PPOTrainer
 
 
 _DTYPES = [torch.float32, torch.float64, torch.float16, torch.bfloat16]
@@ -216,7 +216,7 @@ def test_double_reconstruction_is_not_the_declared_recipe(tmp_path):
 def test_synthetic_export_uses_saved_frequency_initializers(tmp_path):
     onnx = pytest.importorskip("onnx")
     pytest.importorskip("onnxruntime")
-    from transformer_rl.export import export_policy
+    from transformer_rl.research.export import export_policy
 
     model = ActorCritic(ModelConfig(history_length=2, critic_hidden=(8,)))
     frequencies = model.actor.time_frequencies

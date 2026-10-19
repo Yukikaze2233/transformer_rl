@@ -5,8 +5,8 @@ import pytest
 import torch
 
 from test_native_reward import begin, fixture
-from transformer_rl._native_plant import GroundReference
-from transformer_rl._wheel_clearance import CylinderGap, WheelClearanceSample
+from transformer_rl.formal.simulation.plant import GroundReference
+from transformer_rl.formal.control.wheel_clearance import CylinderGap, WheelClearanceSample
 
 
 def sample(fault=None):

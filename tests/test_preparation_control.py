@@ -9,10 +9,10 @@ from test_control_reward import fixture as reward_fixture, sample, reference, fi
 from test_native_task import fixture as task_fixture, advance
 from test_physical_observation import fixture as physical_fixture
 from test_structured_collection import model as small_model
-from transformer_rl._control_sources import ControlSource, validate_issued_control
-from transformer_rl._output_actuation import OutputFeedbackController, PairTargetDomain
-from transformer_rl._policy_optimization import StructuredPPOConfig, StructuredPPOTrainer
-from transformer_rl._structured_collection import StructuredCollector
+from transformer_rl.formal.control.ownership import ControlSource, validate_issued_control
+from transformer_rl.formal.control.actuation import OutputFeedbackController, PairTargetDomain
+from transformer_rl.formal.learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
+from transformer_rl.formal.learning.collection import StructuredCollector
 
 
 def test_exact_script_hold_and_policy_target_admission_are_independent():

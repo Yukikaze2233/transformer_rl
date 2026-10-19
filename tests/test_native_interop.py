@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from transformer_rl._native_interop import native_process_environment, native_proxy_launch
+from transformer_rl.formal.runtime.interop import native_process_environment, native_proxy_launch
 
 
 def test_driver_path_is_private_to_the_child_environment(tmp_path):

@@ -9,16 +9,16 @@ from test_joint_boundaries import encode
 from test_recovery_poses import tuning as recovery_tuning
 from test_reset_collision import fixture as collision_fixture
 from test_reset_kinematics import rotation
-from transformer_rl._native_episode import TerrainRebuildRequired
-from transformer_rl._output_actuation import OutputFeedbackController
-from transformer_rl._physical_observation import MechanicalBinding
-from transformer_rl._recovery_poses import RecoveryPoseCompiler
-from transformer_rl._reset_collision import AssetCollisionGeometry
-from transformer_rl._reset_kinematics import AssetResetKinematics
-from transformer_rl._reset_program import ResetProgramTuning, TaskResetPreparer
-from transformer_rl._task_curriculum import ContinuousTaskSampler, TaskDraw, TaskFamily
-from transformer_rl._terrain_geometry import TerrainKind
-from transformer_rl._terrain_tasks import ContinuousTerrainGenerator, TerrainTuning
+from transformer_rl.formal.simulation.episode import TerrainRebuildRequired
+from transformer_rl.formal.control.actuation import OutputFeedbackController
+from transformer_rl.formal.control.observation import MechanicalBinding
+from transformer_rl.formal.tasks.recovery import RecoveryPoseCompiler
+from transformer_rl.formal.tasks.reset_collision import AssetCollisionGeometry
+from transformer_rl.formal.tasks.reset_kinematics import AssetResetKinematics
+from transformer_rl.formal.tasks.reset_program import ResetProgramTuning, TaskResetPreparer
+from transformer_rl.formal.tasks.curriculum import ContinuousTaskSampler, TaskDraw, TaskFamily
+from transformer_rl.formal.tasks.geometry import TerrainKind
+from transformer_rl.formal.tasks.terrain import ContinuousTerrainGenerator, TerrainTuning
 
 
 def fixture(count=2):

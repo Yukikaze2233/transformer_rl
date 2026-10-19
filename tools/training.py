@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from transformer_rl.training_cli import main
+from transformer_rl.common.training_cli import main
 
 
 if __name__ == "__main__":

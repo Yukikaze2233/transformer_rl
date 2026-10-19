@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from transformer_rl.training_compat import instrument_package
-from transformer_rl.training_control import (TrainingSession, boot_id, file_pin,
-                                            read_json, write_json)
+from transformer_rl.research.training_compat import instrument_package
+from transformer_rl.research.session import TrainingSession
+from transformer_rl.common.training_control import boot_id, file_pin, read_json, write_json
 from test_frame_continuation import configuration
 from test_training_control import wait_for
 
@@ -34,7 +34,7 @@ def test_frozen_endpoint_accepts_real_stopped_and_resumed_learning(tmp_path, mon
         proof["controlled_files"], sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
     contract = tmp_path / "contract.json"
     contract.write_text('{"fixture":"CPU synthetic provenance"}\n')
-    from transformer_rl.frame_config import digest
+    from transformer_rl.research.frame_config import digest
     config = configuration("mlp")
     provenance = {"identity": "synthetic_tensor_fixture", "policy_hz": 100., "physics_hz": 200.,
                   "contract_sha256": digest(json.loads(contract.read_text())),
@@ -69,7 +69,7 @@ def test_frozen_endpoint_accepts_real_stopped_and_resumed_learning(tmp_path, mon
         "learner_identity": identity, "verifier": file_pin(verifier),
         "runtime": {"checkpoint_runtime": json.loads(runtime.stdout)}},
         parent_manifest={"output_root": str(root), "device": "cpu", "inputs": {"root": str(tmp_path)}})
-    import transformer_rl.training_queue_validation as validation
+    import transformer_rl.research.training_queue_validation as validation
     original_loader = validation.load_helpers
 
     def load_fixture_helpers(pin, dependencies=()):
@@ -110,7 +110,7 @@ def test_frozen_endpoint_accepts_real_stopped_and_resumed_learning(tmp_path, mon
 
 def test_evaluation_pause_preserves_process_and_stop_finishes_window(tmp_path):
     from threading import Thread
-    from transformer_rl.training_control import EvaluationControl, _lease
+    from transformer_rl.common.training_control import EvaluationControl, _lease
     root = tmp_path / "evaluation"
     root.mkdir()
     control = root / "control"

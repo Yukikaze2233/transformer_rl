@@ -5,12 +5,12 @@ import pytest
 import torch
 from torch import nn
 
-from transformer_rl._policy_optimization import StructuredPPOConfig, StructuredPPOTrainer
-from transformer_rl._structured_collection import (
+from transformer_rl.formal.learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
+from transformer_rl.formal.learning.collection import (
     LabeledObservation, LabeledStep, PhysicalLabels, StructuredCollectionConfig, StructuredCollector,
 )
-from transformer_rl._structured_policy import StructuredActorCritic, StructuredPolicyConfig
-from transformer_rl._task_protocol import RequestProtocol
+from transformer_rl.formal.policy import StructuredActorCritic, StructuredPolicyConfig
+from transformer_rl.formal.tasks.protocol import RequestProtocol
 
 
 @pytest.fixture(autouse=True)

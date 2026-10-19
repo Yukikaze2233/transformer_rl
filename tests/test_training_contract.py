@@ -4,7 +4,7 @@ from dataclasses import fields, replace
 import pytest
 import torch
 
-from transformer_rl._training_contract import (
+from transformer_rl.formal.learning.contracts import (
     AuxiliaryLabels, BoundaryMasks, ObservationWindows, auxiliary_losses,
     bounded_task_reward, masked_gae,
 )

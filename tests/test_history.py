@@ -4,9 +4,9 @@ from dataclasses import fields, replace
 import pytest
 import torch
 
-from transformer_rl.config import ModelConfig
-from transformer_rl.history import HistoryBuffer, pack_frame
-from transformer_rl.types import VectorObservation
+from transformer_rl.research.config import ModelConfig
+from transformer_rl.research.history import HistoryBuffer, pack_frame
+from transformer_rl.research.types import VectorObservation
 
 
 def _observation(config, timestamps=(1.0, 2.0), value=1.0, dtype=torch.float32, device="cpu"):

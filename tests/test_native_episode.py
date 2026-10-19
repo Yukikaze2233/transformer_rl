@@ -10,14 +10,14 @@ import torch
 
 from test_native_plant import fixture as plant_fixture
 from test_structured_collection import model as small_model
-from transformer_rl._native_episode import NativeEpisodeLifecycle, TerrainRebuildRequired
-from transformer_rl._native_ground import NativeGroundQuery, WheelCollisionCentres
-from transformer_rl._physical_observation import CommandFeatures
-from transformer_rl._policy_optimization import StructuredPPOConfig, StructuredPPOTrainer
-from transformer_rl._structured_collection import LabeledStep, StructuredCollector
-from transformer_rl._task_protocol import CompletedEstimate, RequestProtocol, RequestResponse
-from transformer_rl._terrain_geometry import TerrainKind
-from transformer_rl._terrain_tasks import ContinuousTerrainGenerator, TerrainExtent, TerrainRequest, TerrainTuning
+from transformer_rl.formal.simulation.episode import NativeEpisodeLifecycle, TerrainRebuildRequired
+from transformer_rl.formal.simulation.ground import NativeGroundQuery, WheelCollisionCentres
+from transformer_rl.formal.control.observation import CommandFeatures
+from transformer_rl.formal.learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
+from transformer_rl.formal.learning.collection import LabeledStep, StructuredCollector
+from transformer_rl.formal.tasks.protocol import CompletedEstimate, RequestProtocol, RequestResponse
+from transformer_rl.formal.tasks.geometry import TerrainKind
+from transformer_rl.formal.tasks.terrain import ContinuousTerrainGenerator, TerrainExtent, TerrainRequest, TerrainTuning
 
 
 def fixture(period=.005):

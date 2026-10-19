@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 import torch
 
-from transformer_rl._task_protocol import (
+from transformer_rl.formal.tasks.protocol import (
     CompletedEstimate, RequestEnd, RequestProtocol, RequestProtocolConfig, RequestResponse,
 )
 

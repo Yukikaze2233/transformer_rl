@@ -17,16 +17,16 @@ import torch
 
 from test_policy_optimization import assert_identical
 from test_structured_collection import SyntheticLabeledEnv, model as small_model
-from transformer_rl._learning_accounting import LearningJournal, RecoveryConsumptionMismatch
-from transformer_rl._policy_optimization import StructuredPPOConfig, StructuredPPOTrainer
-from transformer_rl._structured_checkpoint import LearningComponents, LearningRecipe, StructuredCheckpointStore
-from transformer_rl._structured_collection import StructuredCollectionConfig, StructuredCollector
-from transformer_rl._structured_learning import StageValidationRequired, StructuredLearningLoop, load_stopped_attempt
-from transformer_rl._task_curriculum import ContinuousTaskSampler, CurriculumBudget, TaskDomain
-from transformer_rl._task_protocol import RequestProtocol, RequestProtocolConfig
-from transformer_rl._terrain_tasks import ContinuousTerrainGenerator, TerrainTuning
-from transformer_rl.frame_checkpoint import capture_rng, restore_rng
-from transformer_rl.training_control import PROTOCOL, TrainingControl, boot_id, file_pin, process_identity, read_json, write_json
+from transformer_rl.formal.learning.accounting import LearningJournal, RecoveryConsumptionMismatch
+from transformer_rl.formal.learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
+from transformer_rl.formal.learning.checkpoint import LearningComponents, LearningRecipe, StructuredCheckpointStore
+from transformer_rl.formal.learning.collection import StructuredCollectionConfig, StructuredCollector
+from transformer_rl.formal.learning.loop import StageValidationRequired, StructuredLearningLoop, load_stopped_attempt
+from transformer_rl.formal.tasks.curriculum import ContinuousTaskSampler, CurriculumBudget, TaskDomain
+from transformer_rl.formal.tasks.protocol import RequestProtocol, RequestProtocolConfig
+from transformer_rl.formal.tasks.terrain import ContinuousTerrainGenerator, TerrainTuning
+from transformer_rl.research.frame_checkpoint import capture_rng, restore_rng
+from transformer_rl.common.training_control import PROTOCOL, TrainingControl, boot_id, file_pin, process_identity, read_json, write_json
 
 
 class StopBudget:
@@ -242,7 +242,7 @@ def test_snapshot_io_failure_preserves_spent_work_and_stops_further_sampling(tmp
 
 
 def test_exposure_training_crosses_every_stage_and_finishes_without_any_evaluation(tmp_path, monkeypatch):
-    import transformer_rl._task_curriculum as curriculum_module
+    import transformer_rl.formal.tasks.curriculum as curriculum_module
 
     # Six real synthetic updates exercise the complete control state machine;
     # the separate schedule test covers the unchanged20000 formal budget.

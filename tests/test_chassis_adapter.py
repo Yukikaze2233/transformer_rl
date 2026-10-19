@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from transformer_rl.chassis_adapter import ChassisFrameAdapter
-from transformer_rl.frame_config import FrameModelConfig
+from transformer_rl.research.chassis_adapter import ChassisFrameAdapter
+from transformer_rl.research.frame_config import FrameModelConfig
 
 
 class TensorChassis:
@@ -137,8 +137,8 @@ def test_episode_evidence_without_explicit_task_contract_is_unavailable():
 def test_default_study_contains_only_requested_architecture_families_and_consistent_presets():
     import json
     from pathlib import Path
-    from transformer_rl.frame_policy import FramePolicy, FramePolicyConfig
-    from transformer_rl.chassis_adapter import network_variants
+    from transformer_rl.research.frame_policy import FramePolicy, FramePolicyConfig
+    from transformer_rl.research.chassis_adapter import network_variants
 
     variants = network_variants()
     assert len(variants) == 10 and len({variant["name"] for variant in variants}) == 10
@@ -169,7 +169,7 @@ def test_transfer_reset_profiles_apply_before_observation_and_after_episode_end(
 
 
 def test_transfer_physical_clock_requires_separate_explicit_contract():
-    from transformer_rl.chassis_adapter import _validate_contract
+    from transformer_rl.research.chassis_adapter import _validate_contract
     config = {"contract_id": "packed-transfer-study", "physics_dt": .005, "policy_dt": .01,
               "history_length": 1, "actor_dim": 35, "actor_frame_dim": 35, "critic_dim": 81,
               "action_dim": 6, "v5_control": {"leg_kp": 160., "leg_kd": 2.5},

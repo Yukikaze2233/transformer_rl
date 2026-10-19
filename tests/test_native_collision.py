@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from test_native_ground import fixture
-from transformer_rl._native_collision import verify_wheel_cylinders
+from transformer_rl.formal.simulation.collision import verify_wheel_cylinders
 
 
 class Query:

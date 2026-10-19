@@ -6,10 +6,10 @@ import pytest
 import torch
 from torch import nn
 
-from transformer_rl._structured_policy import (
+from transformer_rl.formal.policy import (
     StructuredActorCritic, StructuredGaussianActor, StructuredPolicy, StructuredPolicyConfig,
 )
-from transformer_rl.types import HistoryBatch
+from transformer_rl.research.types import HistoryBatch
 
 
 @pytest.fixture(autouse=True)
