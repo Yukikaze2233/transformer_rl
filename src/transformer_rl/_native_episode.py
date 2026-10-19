@@ -181,10 +181,13 @@ class NativeEpisodeLifecycle:
         return EpisodeReset(self._last.owned(), pre_reset, aborted.clone(), mask.clone(), self._last_tick)
 
     @torch.no_grad()
-    def advance(self, policy_issued, *, script_issued, motor_strength=None, pressure_strength=None):
+    def advance(self, policy_issued, *, script_issued, motor_strength=None, pressure_strength=None,
+                physical_observer=None):
         self._identity()
         self._actions(policy_issued)
         self._actions(script_issued)
+        if physical_observer is not None and not callable(physical_observer):
+            raise ValueError('physical observer must be a synchronous read-only sample consumer')
         bridge = self._scene.observation
         if (self._last is None or self._stepped or (self.episode_id < 0).any()
                 or bridge.physical_tick != self._last_tick or bridge.model_epoch != self._model_epoch):
@@ -194,6 +197,11 @@ class NativeEpisodeLifecycle:
             self.plant.accept_issued_action(actual)
             for _ in range(self.substeps):
                 tick = self.plant.step_physics(motor_strength=motor_strength, pressure_strength=pressure_strength)
+                if physical_observer is not None:
+                    physical_observer(tick)
+                    self._identity()
+                    if (bridge.physical_tick != tick.physical_tick or bridge.model_epoch != self._model_epoch):
+                        raise RuntimeError('physical observer changed the native model or advanced the clock')
         except BaseException:
             self._faulted = True
             raise

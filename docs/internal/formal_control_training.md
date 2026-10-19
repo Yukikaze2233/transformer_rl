@@ -272,6 +272,8 @@ episode固定的物理量不逐tick跳变。载荷突变、单侧衰减、接地
 
 记表内及当前技能启用的正奖励和为P、成本绝对值和为C，约束`0<=P<=8`、`C>=0`；非终止连续密度采用`rho=P-10*tanh(C/10)`，所以`-10<rho<=8`。原始物理误差和每个未压缩成本均完整记录；平滑有界组合避免无界平方成本与固定终止罚产生“越早失败越划算”，不以奖励截断掩盖物理验收失败。
 
+私有实现明确区分三种组合：普通支撑及地形使用前进3、yaw2、高度2，正密度至多7；跳跃使用前进2、yaw2、世界Z高度2、世界Z速度1、姿态1，正密度至多8。后者将跳跃前进项从普通模式的3调整为2，避免原文字直接叠加时出现上界9的冲突。恢复模式不支付平移/yaw跟踪的正项，采用`2*(1+upright_cosine)`的宽域回正信号及至多2的高度项；高度项权重为`max(upright_cosine,0)`，上界6。恢复姿态成本为宽域`2*sum(H(pose_error/0.8))`，原始高度误差与该权重分别记录；普通高度项不因大误差关闭。这些是新候选的明确权重，尚未经过真实机器人学习效果验收，不热改旧研究reward。
+
 失败按无限时域吸收状态处理，吸收密度为负11/秒，`V_abs=(-11*dt)/(1-gamma)`。真实失败转移奖励为`rho*dt - 4 + gamma*V_abs`，之后value bootstrap为0；不实际追加吸收仿真步，不重复计算这个尾项。任意持续安全行为的连续回报下界高于该吸收尾，不能靠立刻reset逃掉后续成本。技能完整成功事件为正1，同一请求最多一次，未完成或脚本完成不支付。time-limit属于采样截断，使用合法terminal observation bootstrap，不享受失败尾，也不能当作真实失败。
 
 该规则仍须用冻结的“安全保持、努力恢复、立即失败”轨迹对照以及极限/不可达请求逐项验收，包括有限评估时长与无限时域学习目标的区别；未通过则阻止正式启动，不只调大一个终止系数。没有独立alive bonus。
@@ -382,6 +384,14 @@ validation seeds为44101、44102；held-out seeds为44901、44902，held-out在�
 本轮单一policy、机械映射、梯度合同及单轮成本修订见[审查与方案附件](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-contract-review-20261018T235707Z-ea0ccd90/formal_training_proposal.json)，评估清单和完整上限见[评价预算](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-training-contract-review-20261018T235707Z-ea0ccd90/evaluation_schedule_and_cost.json)。
 
 ## 当前实现与验收边界
+
+新增[物理奖励计算器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_control_reward.py)，保持与原奖励统计器分离。native回合接口提供同步的逐物理子步只读observer，奖励端必须消费全部两次200Hz采样或十次1kHz采样后才发布一个100Hz转移；observer失败或改变model/clock后，该物理区间失效且不重放。连续项在每个子区间先按`P-10*tanh(C/10)`计算，再乘真实物理dt积分，不能先平均C再做非线性组合。100Hz已发动作的一阶/二阶差分作为该区间的固定密度，不在每个物理步重复差分或再乘一次策略dt。原始正项、成本、符号误差的一阶/二阶矩及显式gate分别保留；按比例分配的有界成本项之和对应合成密度，日志可与独立事件核对，不以成本非零推断启用率。混合模式的误差必须按对应gate分别统计，不能将未启用的跳跃参考误差充作普通控制指标。
+
+力矩输入明确是原生显式执行器的六轴输出buffer，不是未限幅PC请求；机械功率为输出力矩与采样关节速度的数值代理，不称为电能或精确连续机械功积分。接触成本使用自己地形的正法向载荷，静止漂移使用世界XY速度，跳跃高度/垂速使用世界Z；普通高度仍是base_link相对声明地面的高度。接触滑移必须提供真实接触点相对地面的切向速度，不能用`轮速*半径-body_vx`顶替。边界成本必须提供具名几何被动膝及四输出目标的shortfall，不能用原生关节角直接冒充膝内角。这两份真实SDK附件尚未实现；集成测试只在fixture中显式提供占位附件，没有将它们注册成生产适配器。机器人质量须由所选资产和原生回读绑定；20kg仅是本组CPU fixture值。
+
+失败事件与`gamma*V_abs`只在真实失败端点各支付一次，time-limit不支付吸收尾，并继续使用合法terminal value。全区间或技能被脚本接管时不支付策略成功信用；脚本物理贡献仍可作为单独诊断记录。物理成功请求ID只支付一次，物理reset不退款；冷重建的计算器须从恢复后的协议`max_seen_id`初始化退役ID，不能重发旧技能。这里的成功输入仍要求独立物理技能证据，不能把部署协议的估计完成ID当成成功；跳跃真值分相、可见参考曲线和完整技能评价器尚未接齐，requests阶段继续关闭。实际环境还须把奖励gamma与collector/PPO折扣从同一冻结合同绑定，不能仅因默认值相同而省略配置核验。
+
+Kaiser首先通过[27项奖励检查](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reward-contract-20261019T040122Z-c6dabfad/validation-0001.json)。随后集成检查出现[1项失败、47项通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reward-contract-20261019T040122Z-c6dabfad/validation-0002.json)：奖励端反复累加0.01s得到`0.060000000000000005`，与原生12tick的`0.06`不同，导致严格reset检查误拒绝。现已保留最后一次实际producer timestamp，不再自行累加另一套时钟；没有放宽时间容差或reset检查。修正后[49项全部通过](/home/yukikaze/Documents/workspace/transformer_rl/outputs/audits/formal-reward-contract-20261019T040122Z-c6dabfad/validation-0003.json)，覆盖失败与time-limit的GAE、无重复吸收bootstrap、不同物理率的dt、P上界、逐子步非线性积分、事件去重、脚本mask、完整奖励→reset→collector→PPO及原生回合回归。安全保持和恢复回报超过立即失败的测试验证了所声明奖励代数；不证明近似critic必然学对，也不替代真实困难/不可达轨迹和完整有限时限验收。原失败收据保留，CPU fixture物理调用不计为机器人仿真。
 
 2026年10月19日，已实现独立的[结构化策略](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_policy.py)、[历史与边界合同](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_training_contract.py)及[PPO事务](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_policy_optimization.py)。新增[请求状态机](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_task_protocol.py)、[连续课程与预算](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_task_curriculum.py)、[命令轨迹与准入](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_command_trajectory.py)和[具名标签采样器](/home/yukikaze/Documents/workspace/transformer_rl/src/transformer_rl/_structured_collection.py)，保持职责分离。这些模块仍是私有候选，不加入旧架构枚举，不改变旧PPO、CLI release、配置或checkpoint格式。原测试队列已按用户要求停止，1071更新的可恢复checkpoint和全部既有结果保留，不自动接续剩余48格。
 
