@@ -136,23 +136,27 @@ def test_cold_restore_retains_independent_rng_and_counts_but_discards_physical_c
     second = cold(push(cold, template, value=2.))
     torch.testing.assert_close(first.policy_velocity_rad_s, second.policy_velocity_rad_s)
     assert torch.equal(original.generator.get_state(), cold.generator.get_state())
+    assert torch.equal(original.reset_generator.get_state(), cold.reset_generator.get_state())
     assert original.noise_rows_consumed == cold.noise_rows_consumed
     with pytest.raises(ValueError, match='empty cold cache'):
         cold.load_after_explicit_cold_setup(snapshot)
 
 
-@pytest.mark.parametrize('change', ['seed', 'config', 'rng', 'counter'])
+@pytest.mark.parametrize('change', ['seed', 'config', 'rng', 'reset_rng', 'counter'])
 def test_corrupt_restore_is_rejected_without_advancing_the_new_model_rng(change):
     original, _ = fixture()
     snapshot = original.checkpoint_state_dict()
     if change == 'seed':snapshot['seed'] += 1
     elif change == 'config':snapshot['config']['gyro_halfwidth_rad_s'] *= 2
     elif change == 'rng':snapshot['generator_state'] = torch.zeros(3)
+    elif change == 'reset_rng':snapshot['reset_generator_state'] = torch.zeros(3)
     else:snapshot['noise_rows_consumed'] = -1
     cold = SensorModel(original.num_envs, original.seed, original.config)
     before = cold.generator.get_state()
+    reset_before = cold.reset_generator.get_state()
     with pytest.raises(ValueError):cold.load_after_explicit_cold_setup(snapshot)
     assert torch.equal(before, cold.generator.get_state())
+    assert torch.equal(reset_before, cold.reset_generator.get_state())
 
 
 def test_repeated_or_out_of_order_physical_samples_and_non_policy_reads_are_not_new_observations():
@@ -178,3 +182,21 @@ def test_reference_clock_preserves_delays_in_seconds_without_changing_the_policy
     output = model(state)
     assert model.policy_substeps == 10 and model.capacity == 16
     assert output.sampled_at_s.eq(.005).all() and model.lags.eq(15).all()
+
+
+def test_one_row_reset_does_not_shift_other_rows_future_sensor_noise():
+    config = configuration(nominal_episode_fraction=0., extra_delay_probability=1.)
+    left, template = fixture(config=config)
+    right, _ = fixture(config=config)
+    for _ in range(4):
+        first, second = push(left, template), push(right, template)
+    left(first)
+    right(second)
+    left.reset(torch.tensor([True, False, False, False]), first.timestamp_s)
+    for _ in range(2):
+        first, second = push(left, template), push(right, template)
+    a, b = left(first), right(second)
+    for name in ('policy_position_rad', 'policy_velocity_rad_s', 'angular_velocity_body_rad_s',
+                 'gravity_body', 'sampled_at_s'):
+        assert torch.equal(getattr(a, name)[1:], getattr(b, name)[1:])
+    assert torch.equal(left.generator.get_state(), right.generator.get_state())

@@ -201,6 +201,7 @@ def test_complete_task_source_checkpoint_keeps_sensor_rng_but_not_old_physical_r
     cold_sensor = cold_life.plant.sensor_model = SensorModel(2, 661)
     cold.load_after_explicit_cold_setup(saved)
     assert torch.equal(sensor.generator.get_state(), cold_sensor.generator.get_state())
+    assert torch.equal(sensor.reset_generator.get_state(), cold_sensor.reset_generator.get_state())
     assert cold_sensor.reset_rows_consumed == 2
     assert cold_sensor.count.eq(0).all() and not cold_sensor.initialized.any()
     assert cold_life.episode_id.eq(-1).all()

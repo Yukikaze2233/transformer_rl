@@ -54,6 +54,7 @@ class SensorModel:
             raise ValueError('sensor model needs an explicit batch, independent seed, clock and configuration')
         self.num_envs, self.seed, self.config, self.device = num_envs, seed, config, torch.device(device)
         self.generator = torch.Generator(device=self.device).manual_seed(seed)
+        self.reset_generator = torch.Generator(device=self.device).manual_seed(seed ^ (1 << 32))
         self.policy_substeps = round(config.policy_dt_s / config.physics_dt_s)
         self.delay_choices = torch.tensor([round(v / config.physics_dt_s) for v in config.observation_delays_s],
                                          dtype=torch.long, device=self.device)
@@ -86,16 +87,16 @@ class SensorModel:
         rows = mask.nonzero().flatten()
         if not rows.numel():
             return
-        nominal = torch.rand(rows.numel(), generator=self.generator, device=self.device)
-        extra = torch.rand(rows.numel(), generator=self.generator, device=self.device)
+        nominal = torch.rand(rows.numel(), generator=self.reset_generator, device=self.device)
+        extra = torch.rand(rows.numel(), generator=self.reset_generator, device=self.device)
         choices = torch.randint(len(self.delay_choices), (rows.numel(), 4),
-                                generator=self.generator, device=self.device)
+                                generator=self.reset_generator, device=self.device)
         self.nominal[rows] = nominal < self.config.nominal_episode_fraction
         enabled = ~self.nominal[rows] & (extra < self.config.extra_delay_probability)
         self.lags[rows] = self.delay_choices[choices] * enabled[:, None]
         self.initialized[rows], self.count[rows] = True, 0
         self.reset_rows_consumed += rows.numel()
-        # count=0使同tick旧缓存不可读；未选中行的数据和RNG抽样不变。
+        # 回合抽样不推进噪声RNG，避免一行reset改变其他行后续噪声序列。
 
     @torch.no_grad()
     def push(self, state: MeasuredState, physical_tick):
@@ -153,6 +154,7 @@ class SensorModel:
     def checkpoint_state_dict(self):
         return {'config': asdict(self.config), 'seed': self.seed, 'num_envs': self.num_envs,
                 'generator_state': self.generator.get_state().clone(),
+                'reset_generator_state': self.reset_generator.get_state().clone(),
                 'reset_rows_consumed': self.reset_rows_consumed, 'noise_rows_consumed': self.noise_rows_consumed,
                 'cold_disposition': 'flush physical sensor cache; retain RNG; redraw new physical episodes'}
 
@@ -167,9 +169,12 @@ class SensorModel:
                 or self.initialized.any() or self.count.any() or self._sample is not None):
             raise ValueError('sensor RNG restore requires its exact configuration and an empty cold cache')
         generator = torch.Generator(device=self.device)
+        reset_generator = torch.Generator(device=self.device)
         try:
             generator.set_state(state['generator_state'])
+            reset_generator.set_state(state['reset_generator_state'])
         except (TypeError, RuntimeError) as error:
             raise ValueError('invalid independent sensor RNG state') from error
         self.generator = generator
+        self.reset_generator = reset_generator
         self.reset_rows_consumed, self.noise_rows_consumed = state['reset_rows_consumed'], state['noise_rows_consumed']
