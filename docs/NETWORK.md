@@ -18,20 +18,9 @@ Actor 每10ms读取一帧，输入按旧到新排列的 `B × 5 × 35` 原始观
 
 ## 主干与解码
 
-```mermaid
-flowchart TD
-    A[5 × 35D 原始观测] --> B[每帧6个语义 token · 64D]
-    B --> C[1层空间注意力 · 2头 · FF128]
-    C --> D[拼接6个 token → 96D时间流]
-    D --> E[2层因果时间注意力 · 4头 · FF192]
-    E --> F[4个动作 Query + 1个状态 Query]
-    C --> F
-    F --> G[8D状态估计]
-    F --> H[共享左右腿解码器 / 共享左右轮解码器]
-    G --> H
-    I[当前局部状态 + 机身IMU + 命令] --> H
-    H --> J[4维腿动作 + 2维轮动作]
-```
+![正式单一策略网络框图](figures/formal-policy.png)
+
+[矢量框图](figures/formal-policy.svg) · [绘图源码](figures/formal-policy.py)。版式参考 [Attention Is All You Need, Fig. 1](https://arxiv.org/abs/1706.03762)，模块与连线按本仓库实现绘制。
 
 **空间编码。** 命令、机身、左右腿、左右轮分别成为6个token，加入身体身份嵌入；左右腿共享输入投影，左右轮共享输入投影。图mask允许自身、命令/机身与所有节点、同侧腿轮、左右腿之间、左右轮之间交互。每帧6个64D输出拼接后投影为一个96D时间token。
 

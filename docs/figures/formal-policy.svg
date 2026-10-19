@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1880" height="1770" viewBox="0 0 1880 1770">
+<title>Single control policy: spatial and causal temporal Transformer</title>
+<desc>Bottom-to-top inference, with Pre-LN gated residual encoder blocks, current-state queries, shared actuator decoders, and an independent training critic.</desc>
+<rect width="100%" height="100%" fill="white"/>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#202020"/></marker></defs>
+<text x="940" y="57" text-anchor="middle" font-size="35" font-weight="700" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Single Control Policy · Spatial–Temporal Transformer</text>
+<text x="940" y="101" text-anchor="middle" font-size="23" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">100 Hz · H = 5（含当前）· 40 ms · 单一 Actor / 6D 动作</text>
+<text x="300" y="171" text-anchor="middle" font-size="29" font-weight="700" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Spatial Encoder</text>
+<text x="850" y="171" text-anchor="middle" font-size="29" font-weight="700" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Temporal Encoder</text>
+<text x="1480" y="171" text-anchor="middle" font-size="27" font-weight="700" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Current-State Query Readout</text>
+<rect x="85" y="515" width="430" height="655" rx="18" fill="#f3f3f3" stroke="#202020" stroke-width="1.6"/>
+<rect x="130" y="1070" width="340" height="52" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="300.0" y="1103.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Layer Norm</text>
+<rect x="130" y="940" width="340" height="90" rx="12" fill="#f8cfb6" stroke="#202020" stroke-width="1.6"/>
+<text x="300.0" y="963.79" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Body-Graph Masked</text>
+<text x="300.0" y="992.14" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Multi-Head Attention</text>
+<text x="300.0" y="1020.49" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">64D · 2 heads</text>
+<rect x="130" y="850" width="340" height="60" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="300.0" y="887.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Gated Residual Add</text>
+<rect x="130" y="760" width="340" height="52" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="300.0" y="793.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Layer Norm</text>
+<rect x="130" y="640" width="340" height="85" rx="12" fill="#bad8e8" stroke="#202020" stroke-width="1.6"/>
+<text x="300.0" y="675.13" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Feed Forward · GELU</text>
+<text x="300.0" y="704.83" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">64 → 128 → 64</text>
+<rect x="130" y="550" width="340" height="60" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="300.0" y="587.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Gated Residual Add</text>
+<rect x="130" y="430" width="340" height="52" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="300.0" y="463.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Layer Norm</text>
+<polyline points="300,1211 300,1122" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,1070 300,1050 215,1050 215,1030" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,1050 300,1030" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,1050 385,1050 385,1030" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,940 300,910" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,850 300,812" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,760 300,725" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,640 300,610" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,550 300,482" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,1140 100,1140 100,880 130,880" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,830 110,830 110,580 130,580" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<text x="542" y="850" text-anchor="middle" font-size="30" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">× 1</text>
+<rect x="635" y="515" width="430" height="655" rx="18" fill="#f3f3f3" stroke="#202020" stroke-width="1.6"/>
+<rect x="680" y="1070" width="340" height="52" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="850.0" y="1103.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Layer Norm</text>
+<rect x="680" y="940" width="340" height="90" rx="12" fill="#f8cfb6" stroke="#202020" stroke-width="1.6"/>
+<text x="850.0" y="963.79" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Causal Masked</text>
+<text x="850.0" y="992.14" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Multi-Head Attention</text>
+<text x="850.0" y="1020.49" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">96D · 4 heads</text>
+<rect x="680" y="850" width="340" height="60" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="850.0" y="887.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Gated Residual Add</text>
+<rect x="680" y="760" width="340" height="52" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="850.0" y="793.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Layer Norm</text>
+<rect x="680" y="640" width="340" height="85" rx="12" fill="#bad8e8" stroke="#202020" stroke-width="1.6"/>
+<text x="850.0" y="675.13" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Feed Forward · GELU</text>
+<text x="850.0" y="704.83" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">96 → 192 → 96</text>
+<rect x="680" y="550" width="340" height="60" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="850.0" y="587.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Gated Residual Add</text>
+<rect x="680" y="430" width="340" height="52" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="850.0" y="463.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Layer Norm</text>
+<polyline points="850,1211 850,1122" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,1070 850,1050 765,1050 765,1030" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,1050 850,1030" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,1050 935,1050 935,1030" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,940 850,910" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,850 850,812" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,760 850,725" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,640 850,610" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,550 850,482" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,1140 650,1140 650,880 680,880" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,830 660,830 660,580 680,580" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<text x="1092" y="850" text-anchor="middle" font-size="30" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">× 2</text>
+<rect x="100" y="1425" width="400" height="80" rx="12" fill="white" stroke="#202020" stroke-width="1.6"/>
+<text x="300.0" y="1457.9650000000001" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Observation Window [B, 5, 35]</text>
+<text x="300.0" y="1486.315" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">t−40, t−30, t−20, t−10, t ms</text>
+<rect x="130" y="1290" width="340" height="90" rx="12" fill="#eac7d3" stroke="#202020" stroke-width="1.6"/>
+<text x="300.0" y="1327.9650000000001" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Semantic Embedding</text>
+<text x="300.0" y="1356.315" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">6 body tokens × 64D / frame</text>
+<polyline points="300,1425 300,1380" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="300,1290 300,1249" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<circle cx="300" cy="1230" r="19" fill="#eeeeee" stroke="#202020" stroke-width="1.6"/>
+<text x="300" y="1239" text-anchor="middle" font-size="31" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">+</text>
+<text x="105" y="1238" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Body ID</text>
+<polyline points="165,1230 281,1230" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<text x="300" y="394" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">6 × 64D / frame</text>
+<rect x="650" y="1290" width="400" height="90" rx="12" fill="#eac7d3" stroke="#202020" stroke-width="1.6"/>
+<text x="850.0" y="1327.63" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Concat 6 × 64 → Linear 96</text>
+<text x="850.0" y="1357.3300000000002" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">+ Layer Norm</text>
+<polyline points="300,430 300,350 575,350 575,1335 650,1335" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="850,1290 850,1249" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<circle cx="850" cy="1230" r="19" fill="#eeeeee" stroke="#202020" stroke-width="1.6"/>
+<text x="850" y="1239" text-anchor="middle" font-size="31" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">+</text>
+<text x="1110" y="1207" text-anchor="middle" font-size="20" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Temporal Encoding</text>
+<text x="1110" y="1239" text-anchor="middle" font-size="20" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">sin/cos (−4 … 0)</text>
+<polyline points="1015,1230 869,1230" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<rect x="650" y="290" width="400" height="78" rx="12" fill="white" stroke="#202020" stroke-width="1.6"/>
+<text x="850.0" y="321.295" text-anchor="middle" font-size="23" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Temporal Memory</text>
+<text x="850.0" y="352.345" text-anchor="middle" font-size="23" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">[B, 5, 96]</text>
+<polyline points="850,430 850,368" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<rect x="1190" y="790" width="580" height="410" rx="18" fill="#f3f3f3" stroke="#202020" stroke-width="1.6"/>
+<rect x="1320" y="1040" width="320" height="90" rx="12" fill="#f8cfb6" stroke="#202020" stroke-width="1.6"/>
+<text x="1480.0" y="1077.63" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Multi-Head Attention</text>
+<text x="1480.0" y="1107.3300000000002" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">96D · 4 heads</text>
+<rect x="1320" y="950" width="320" height="60" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="1480.0" y="987.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Add</text>
+<rect x="1320" y="850" width="320" height="52" rx="12" fill="#f3edb9" stroke="#202020" stroke-width="1.6"/>
+<text x="1480.0" y="883.48" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Layer Norm</text>
+<rect x="1280" y="1290" width="400" height="90" rx="12" fill="#eac7d3" stroke="#202020" stroke-width="1.6"/>
+<text x="1480.0" y="1327.63" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Query Projection</text>
+<text x="1480.0" y="1357.3300000000002" text-anchor="middle" font-size="22" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">5 × 96D</text>
+<rect x="1240" y="1425" width="480" height="80" rx="12" fill="white" stroke="#202020" stroke-width="1.6"/>
+<text x="1480.0" y="1458.3" text-anchor="middle" font-size="20" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Current Body Tokens + Command</text>
+<text x="1480.0" y="1485.3" text-anchor="middle" font-size="20" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">当前身体编码（左侧输出）+ 11D 命令</text>
+<polyline points="1480,1425 1480,1380" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="1480,1290 1480,1249" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<circle cx="1480" cy="1230" r="19" fill="#eeeeee" stroke="#202020" stroke-width="1.6"/>
+<text x="1480" y="1239" text-anchor="middle" font-size="31" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">+</text>
+<text x="1695" y="1239" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Query ID</text>
+<polyline points="1630,1230 1499,1230" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="1480,1211 1480,1130" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<text x="1500" y="1167" text-anchor="start" font-size="23" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Q</text>
+<polyline points="1050,329 1120,329 1120,1085 1320,1085" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<text x="1230" y="1070" text-anchor="middle" font-size="23" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">K, V</text>
+<polyline points="1480,1040 1480,1010" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="1480,950 1480,902" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="1480,1165 1240,1165 1240,980 1320,980" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<rect x="1210" y="640" width="260" height="115" rx="12" fill="#cce3cb" stroke="#202020" stroke-width="1.6"/>
+<text x="1340.0" y="678.3100000000001" text-anchor="middle" font-size="19" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">State Head</text>
+<text x="1340.0" y="703.96" text-anchor="middle" font-size="19" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">96 → 64 → 8</text>
+<text x="1340.0" y="729.61" text-anchor="middle" font-size="19" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">μᵥ (3), log σᵥ (3), pcontact (2)</text>
+<rect x="1540" y="640" width="260" height="115" rx="12" fill="#eac7d3" stroke="#202020" stroke-width="1.6"/>
+<text x="1670.0" y="678.3100000000001" text-anchor="middle" font-size="19" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Current Raw Features</text>
+<text x="1670.0" y="703.96" text-anchor="middle" font-size="19" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">IMU + Command</text>
+<text x="1670.0" y="729.61" text-anchor="middle" font-size="19" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Local Leg / Wheel State</text>
+<rect x="1210" y="330" width="590" height="155" rx="12" fill="#bad8e8" stroke="#202020" stroke-width="1.6"/>
+<text x="1505.0" y="373.8" text-anchor="middle" font-size="20" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Shared Actuator Decoders · GELU</text>
+<text x="1505.0" y="400.8" text-anchor="middle" font-size="20" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Leg: 127 → 96 → 64 → 2  (per leg)</text>
+<text x="1505.0" y="427.8" text-anchor="middle" font-size="20" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Wheel: 123 → 64 → 32 → 1  (per wheel)</text>
+<text x="1505.0" y="454.8" text-anchor="middle" font-size="20" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Query + Local State + IMU + Command + Estimate</text>
+<rect x="1280" y="220" width="440" height="64" rx="12" fill="#cce3cb" stroke="#202020" stroke-width="1.6"/>
+<text x="1500.0" y="260.5" text-anchor="middle" font-size="25" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Action Means μₜ ∈ ℝ⁶</text>
+<polyline points="1480,850 1480,805 1340,805 1340,755" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<polyline points="1480,805 1505,805 1505,485" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<text x="1530" y="576" text-anchor="start" font-size="19" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">4 action queries</text>
+<polyline points="1340,640 1340,485" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<text x="1322" y="576" text-anchor="end" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">8D</text>
+<polyline points="1670,640 1670,610 1775,610 1775,485" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<text x="1765" y="520" text-anchor="end" font-size="18" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">直连</text>
+<polyline points="1505,330 1505,284" fill="none" stroke="#202020" stroke-width="1.8" marker-end="url(#arrow)"/>
+<text x="1500" y="309" text-anchor="middle" font-size="17" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">4 leg-position channels + 2 wheel-velocity channels</text>
+<text x="1510" y="788" text-anchor="start" font-size="18" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">1 state query</text>
+<text x="940" y="1551" text-anchor="middle" font-size="23" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Pre-LN gated residual:  y = x + sigmoid(g(LN(x))) ⊙ F(LN(x))</text>
+<text x="940" y="1588" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">无 RNN / 跨调用隐藏状态 / KV cache · dropout = 0 · reset / 控制权边界截断历史</text>
+<rect x="40" y="1620" width="1800" height="105" rx="12" fill="#fafafa" stroke="#202020" stroke-width="1.6" stroke-dasharray="8 6"/>
+<text x="60" y="1649" text-anchor="start" font-size="21" font-weight="700" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Training only</text>
+<text x="60" y="1685" text-anchor="start" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Critic: 81 → 256 → 128 → 64 → 1  (ELU, 独立参数)</text>
+<text x="970" y="1649" text-anchor="start" font-size="20" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Auxiliary prediction: State Query 96 + Issued Action 6 → 102 → 64 → 6</text>
+<text x="970" y="1685" text-anchor="start" font-size="20" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">Diagonal Gaussian sampling · PPO + auxiliary losses · unified KL protection</text>
+<text x="940" y="1753" text-anchor="middle" font-size="21" font-weight="400" fill="#202020" font-family="Times New Roman,Noto Serif CJK SC,serif">部署 Actor: 339,627 参数（保留 8D 估计头） · 训练 Actor + Critic: 408,824 参数</text>
+</svg>
