@@ -1,7 +1,7 @@
 """Private continuous course construction, independent of SDK and policy code."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from functools import cached_property
 import hashlib
 import json
@@ -101,6 +101,14 @@ class TerrainCourse:
     surface: TerrainSurface
     tile_source: SeededRoughGrid | None = None
     resident_tiles: tuple[tuple[int, int], ...] = ()
+
+    def _reuse_resident_surface(self, current):
+        """同一完整源已覆盖reset足迹时，沿用真实驻留面而不重新cook。"""
+        if (not isinstance(current, TerrainCourse) or self.tile_source is None
+                or self.tile_source is not current.tile_source
+                or not self.resident_tiles or not set(self.resident_tiles) <= set(current.resident_tiles)):
+            return self
+        return replace(self, surface=current.surface, resident_tiles=current.resident_tiles)
 
     def with_tiles(self, keys):
         """只改变驻留碰撞块，完整请求、源高度场和课程身份保持不变。"""

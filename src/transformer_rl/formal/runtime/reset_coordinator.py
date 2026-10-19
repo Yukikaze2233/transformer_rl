@@ -185,6 +185,12 @@ class ResetBatchCoordinator:
             fresh, _ = prepared.encode_plan(self.preparer.geometry, controller,
                                              base_com_body_m=local_com[rows].double())
             plan = fresh if previous is None else self._merge(previous, fresh, rows)
+            if previous is not None and self._native_installer is not None:
+                # 新请求和抽样保留；相同完整源不因reset把已铺好的面拆小再重建。
+                courses = list(plan.source_courses)
+                for row in rows.tolist():
+                    courses[row] = courses[row]._reuse_resident_surface(life._courses[row])
+                plan = replace(plan, source_courses=tuple(courses))
         except Exception as problem:
             error = type(problem).__name__ + ': ' + str(problem)
         self._issued = ResetProposal(*args, prepared, plan, error)

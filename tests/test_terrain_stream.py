@@ -91,6 +91,36 @@ def test_metadata_only_reset_preserves_the_authored_tile_objects_before_live_str
     assert result.scene.readback['terrain_reset_required_rows'] == ()
 
 
+def test_new_flat_request_reuses_existing_covered_tiles_without_native_edit_or_rng_replay():
+    env, _, sim, _, editor, storage, installer = admitted_rough(flat())
+    initial = env.lifecycle.ground.courses
+    keys = set(initial[0].resident_tiles)
+    last = max(j for _, j in keys)
+    expanded = initial[0].with_tiles(keys | {(i, last + 1) for i, _ in keys})
+    result = editor.replace_courses(env.lifecycle.ground, (expanded, initial[1]), torch.tensor([True, False]),
+                                    protected_xy_m=torch.tensor([[[-1., 1.], [-1., 1.]]] * 2))
+    installer.adopt(result)
+    fresh = replace(initial[0], geometry_seed=initial[0].geometry_seed + 1)
+    admitted = fresh._reuse_resident_surface(expanded)
+    count = len(storage.writes)
+    unchanged = editor.replace_courses(env.lifecycle.ground, (admitted, initial[1]), torch.tensor([True, False]))
+    assert not unchanged.receipt['native_edit'] and not unchanged.changed_rows
+    assert len(storage.writes) == count and sim.steps == 0
+    env.lifecycle.ground.replace_same_surface_courses((admitted, initial[1]), torch.tensor([True, False]))
+    assert admitted.sha256 == fresh.sha256 != initial[0].sha256
+    assert admitted.surface is expanded.surface and admitted.resident_tiles == expanded.resident_tiles
+    assert admitted.request == fresh.request and admitted.geometry_seed == fresh.geometry_seed
+
+
+@pytest.mark.parametrize('fault', ['new_source', 'uncovered_reset'])
+def test_reset_cannot_reuse_a_different_full_source_or_an_uncovered_spawn(fault):
+    fresh = flat()
+    current = (replace(fresh, tile_source=replace(fresh.tile_source, geometry_seed=19))
+               if fault == 'new_source' else fresh.with_tiles(
+                   fresh.tile_source.tile_keys((120., 121.), (70., 71.), cells=8, halo=0)))
+    assert fresh._reuse_resident_surface(current) is fresh
+
+
 @pytest.mark.parametrize('kind', ['rough', 'flat'])
 def test_live_tiles_preserve_protected_prims_and_never_request_a_reset(kind):
     env, _, sim, writes, editor, storage, installer = admitted_rough(flat() if kind == 'flat' else None)

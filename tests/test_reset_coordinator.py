@@ -96,6 +96,35 @@ def test_partial_resets_draw_only_selected_rows_and_keep_every_other_plan_field_
     assert second.course_sha256[0] == first.course_sha256[0] and second.course_sha256[1] != first.course_sha256[1]
 
 
+def test_native_reset_preserves_residency_but_keeps_new_requests_and_rng_sequence():
+    coordinator, life, clock, sizes = fixture()
+    reference, reference_life, reference_clock, reference_sizes = fixture()
+    first, original = request(coordinator, life), request(reference, reference_life)
+    apply(life, first)
+    apply(reference_life, original)
+    keys = set(first.source_courses[0].resident_tiles)
+    last = max(j for _, j in keys)
+    expanded = first.source_courses[0].with_tiles(keys | {(i, last + 1) for i, _ in keys})
+    life._courses = (expanded, first.source_courses[1])
+    installed = []
+    coordinator._native_installer = lambda plan, mask: installed.append(plan)
+    clock += .1
+    reference_clock += .1
+    mask = torch.tensor([True, False])
+    actual, expected = request(coordinator, life, mask), request(reference, reference_life, mask)
+    assert installed == [actual] and coordinator._issued.plan is actual
+    assert actual.source_courses[0].surface is expanded.surface
+    assert actual.source_courses[0].resident_tiles == expanded.resident_tiles
+    assert actual.source_courses[1] is first.source_courses[1]
+    assert actual.course_sha256 == expected.course_sha256
+    assert sizes == reference_sizes == [2, 1]
+    assert torch.equal(actual.root_pose_xyzw, expected.root_pose_xyzw)
+    assert torch.equal(actual.commands.trajectory.end, expected.commands.trajectory.end)
+    assert torch.equal(coordinator.preparer.generator.get_state(), reference.preparer.generator.get_state())
+    assert torch.equal(coordinator.preparer.terrain.generator.get_state(),
+                       reference.preparer.terrain.generator.get_state())
+
+
 def test_already_applied_same_tick_reset_cannot_consume_another_task_or_start_another_edit():
     coordinator, life, _, sizes = fixture()
     first = request(coordinator, life)
