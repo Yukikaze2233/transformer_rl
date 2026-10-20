@@ -48,28 +48,24 @@ def test_completed_estimate_does_not_use_privileged_values():
 
 
 def test_no_success_for_airborne_timer_without_ascent():
-    tasks, _ = fixture()
-    tasks.active_id[:] = 1
-    tasks.rise[:] = .1
+    tasks = supported_jump()
     for _ in range(10):
-        tasks.observe_physics(torch.zeros(2, 2), torch.zeros(2), torch.zeros(2), torch.full((2,), .32))
+        tasks.observe_physics(torch.zeros(2, 2), torch.zeros(2), torch.zeros(2), torch.full((2,), .32), angular_speed_rad_s=torch.zeros(2))
     for _ in range(500):
-        tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .32))
+        tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .32), angular_speed_rad_s=torch.zeros(2))
     assert tasks.success_id.eq(-1).all()
 
 
 def test_physical_success_is_ready_in_current_interval_and_paid_once():
-    tasks, _ = fixture()
-    tasks.active_id[:] = 1
-    tasks.rise[:] = .1
+    tasks = supported_jump()
     for _ in range(3):
-        tasks.observe_physics(torch.zeros(2, 2), torch.ones(2), torch.zeros(2), torch.full((2,), .42))
+        tasks.observe_physics(torch.zeros(2, 2), torch.ones(2), torch.zeros(2), torch.full((2,), .42), angular_speed_rad_s=torch.zeros(2))
     for _ in range(401):
-        tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .32))
+        tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .32), angular_speed_rad_s=torch.zeros(2))
     assert tasks.success_id.eq(1).all()
     assert tasks.paid_id.eq(1).all()
     tasks.success_id.fill_(-1)
-    tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .32))
+    tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .32), angular_speed_rad_s=torch.zeros(2))
     assert tasks.success_id.eq(-1).all()
 
 
@@ -161,8 +157,8 @@ def test_external_request_height_drives_reference_and_success_not_sampled_rise()
     torch.testing.assert_close(reference.target_apex_world_z_m - tasks.ground_anchor - tasks.latched_height,
                                torch.full((2,), .20))
     # A 0.10m physical rise must not satisfy a 0.20m external request.
-    tasks.observe_physics(torch.zeros(2, 2), torch.ones(2), torch.zeros(2), torch.full((2,), .42))
-    tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .42))
+    tasks.observe_physics(torch.zeros(2, 2), torch.ones(2), torch.zeros(2), torch.full((2,), .42), angular_speed_rad_s=torch.zeros(2))
+    tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .42), angular_speed_rad_s=torch.zeros(2))
     assert tasks.success_id.eq(-1).all()
 
 
@@ -214,3 +210,63 @@ def test_external_id_state_survives_reset_and_cold_restore_without_auto_replay()
     restored.step(torch.zeros(2, dtype=torch.float64),
                   _touch_estimate(torch.full((2,), -.01, dtype=torch.float64)), torch.zeros(2))
     assert restored.protocol.active_id.ge(101).all()
+
+
+def supported_jump(*, actual_start_support=True):
+    tasks, _ = fixture()
+    tasks.family.fill_(4)
+    tasks.next_request_s.zero_()
+    tasks.next_id.fill_(1)
+    tasks.rise.fill_(.1)
+    tasks.trajectory.start[:, 3] = .32
+    tasks.trajectory.end[:, 3] = .32
+    tasks.stream.current[:, 3] = .32
+    if actual_start_support:
+        tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2),
+                              torch.full((2,), .32), angular_speed_rad_s=torch.zeros(2))
+    now = torch.zeros(2, dtype=torch.float64)
+    tasks.step(now, _touch_estimate(now - .01), torch.zeros(2))
+    assert tasks.active_id.eq(1).all()
+    return tasks
+
+
+@pytest.mark.parametrize('problem', ('bad_start', 'overshoot', 'spinning'))
+def test_jump_evidence_rejects_unsupported_start_overshoot_or_spinning_landing(problem):
+    tasks = supported_jump(actual_start_support=problem != 'bad_start')
+    apex = .60 if problem == 'overshoot' else .42
+    for _ in range(3):
+        tasks.observe_physics(torch.zeros(2, 2), torch.ones(2), torch.zeros(2),
+                              torch.full((2,), apex), angular_speed_rad_s=torch.zeros(2))
+    for _ in range(401):
+        tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2),
+                              torch.full((2,), .32), angular_speed_rad_s=torch.full((2,),
+                                  1.0 if problem == 'spinning' else 0.0))
+    assert tasks.success_id.eq(-1).all()
+    assert tasks.paid_id.eq(-1).all()
+
+
+def test_early_estimated_completion_does_not_retire_unfinished_physical_evidence():
+    from transformer_rl.formal.tasks.protocol import RequestEnd
+    tasks = supported_jump()
+    tasks.next_request_s.fill_(999)
+    estimate_ended = None
+    physical_successes = []
+    for tick in range(1, 251):
+        actual_air = tick <= 30
+        for _ in range(2):
+            tasks.observe_physics(
+                torch.full((2, 2), 0. if actual_air else 100.),
+                torch.full((2,), 1. if actual_air else 0.), torch.zeros(2),
+                torch.full((2,), .42 if actual_air else .32), angular_speed_rad_s=torch.zeros(2))
+        if tasks.success_id.ge(0).any():
+            physical_successes.append(tick * .01)
+        now = torch.full((2,), tick * .01, dtype=torch.float64)
+        estimate = _touch_estimate(now - .01)
+        if tick <= 2:
+            estimate = replace(estimate, wheel_contact_probability=torch.zeros(2, 2))
+        tasks.step(now, estimate, torch.zeros(2))
+        if estimate_ended is None and tasks.protocol.active_id.eq(-1).all():
+            estimate_ended = tick * .01
+    assert estimate_ended is not None
+    assert len(physical_successes) == 1 and physical_successes[0] > estimate_ended
+    assert tasks.paid_id.eq(1).all() and tasks.physical_id.eq(-1).all()

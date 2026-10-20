@@ -51,7 +51,7 @@ atlas 的 `material_parameters` 按 `[静摩擦, 动摩擦, 恢复系数]` 保�
 
 Critic 的六维轮体材料由 `WheelMaterialReader` 读取 PhysX 实际 shape 属性，按左／右轮各自的静摩擦、动摩擦、恢复系数排列。当前无材质随机事件，初始化时读取并缓存；未来若显式改写物理材质，必须随后按受影响行 `refresh`。一轮多个碰撞 shape 的材质不一致时明确拒绝，不平均、不用地表摩擦替代；managed 的 `lab_setup.json` 保留 shape 映射来源。
 
-Lab 快速采样的受控入口使用 `transformer_rl.formal.lab_env.runtime:runtime`，由现有 `StructuredTrainingSession` 管理进程、资源准入和完整学习 checkpoint；不把诊断入口的 `lab_ppo_v1` 当成可直接转换的正式端点。`managed_lab_runtime_v2` 私有配置冻结当前 boot、机械资产目录、响应记录与 atlas 的文件 pin、环境间距、完整 `FlatTaskSpec`、显式 `NativeTaskLimits`、`PairTargetDomain`、五项 PhysX 容量和诊断开关。旧 v1 不隐式升级。 静态 course 的接触载荷来自原生 contact patch：各体正法向标量相加，轮支撑只累计向上分量；水平立面碰撞不算落地。reset 行在下一个真实物理步前的接触标签标为无效，PRE-reset 标签保留自己的有效性快照。`contact_slip` 仍显式缺失，不能用轮心速度代替。M1 简化失败阈值不能作为正式训练的终止合同；正式路径复用逐物理步失败锁存，包括接触确认时间、被动膝越界、闭链残差与气弹簧行程，BODY_BUMP 仅豁免允许的机身接触。课程与 learner 共用 sampler、预算和请求去重状态；地形路由、任务独立 RNG 和 reward 缺失原因存入完整 checkpoint 的 task source。冷恢复在新回合采样前恢复这些状态，再由 worker 在物理准备后恢复全局 RNG；活动物理请求不重放。低频 reward 投影只描述最后一个完整策略区间，不称为整轮汇总，也不触发评价或课程晋级。此入口仍须完成原生场地、全规模更新与实际控制边界验收后，才能用于正式长训。
+Lab 快速采样的受控入口使用 `transformer_rl.formal.lab_env.runtime:runtime`，由现有 `StructuredTrainingSession` 管理进程、资源准入和完整学习 checkpoint；不把诊断入口的 `lab_ppo_v1` 当成可直接转换的正式端点。`managed_lab_runtime_v2` 私有配置冻结当前 boot、机械资产目录、响应记录与 atlas 的文件 pin、环境间距、完整 `FlatTaskSpec`、显式 `NativeTaskLimits`、`PairTargetDomain`、五项 PhysX 容量和诊断开关。旧 v1 不隐式升级。静态 course 的接触载荷来自原生 contact patch：各体正法向标量相加，轮支撑只累计向上分量；水平立面碰撞不算落地。reset 行在下一个真实物理步前的接触标签标为无效，PRE-reset 标签保留自己的有效性快照。`contact_slip` 仍显式缺失，不能用轮心速度代替。M1 简化失败阈值不能作为正式训练的终止合同；正式路径复用逐物理步失败锁存，包括接触确认时间、被动膝越界、闭链残差与气弹簧行程，BODY_BUMP 仅豁免允许的机身接触。课程与 learner 共用 sampler、预算和请求去重状态；地形路由、任务独立 RNG 和 reward 缺失原因存入完整 checkpoint 的 task source。冷恢复在新回合采样前恢复这些状态，再由 worker 在物理准备后恢复全局 RNG；活动物理请求不重放。低频 reward 投影只描述最后一个完整策略区间，不称为整轮汇总，也不触发评价或课程晋级。此入口仍须完成原生场地、全规模更新与实际控制边界验收后，才能用于正式长训。
 
 阶段覆盖诊断的日志和 checkpoint 保留 `validation_only`、`diagnostic_stage` 与 `budget_scope`；预填的阶段偏移不代表实际 PPO 消费，不能作为学习 resume 的来源。旧未标记的 Lab 端点仍须核对课程累计消费与实际 update，不能用诊断偏移扩充预算。warm start 与 resume 必须二选一；完整正式恢复继续使用 managed checkpoint 与 journal。
 
@@ -60,3 +60,5 @@ Lab 快速采样的受控入口使用 `transformer_rl.formal.lab_env.runtime:run
 新监督进程在 exec 后两次核对实际 boot、start 和完整 argv，再保存启动身份。父进程退出后，即使收据身份不一致也不再轮询该 PID；界面明确报错并拒绝恢复。不用后来的 status 修补旧收据或补造启动身份。
 
 直接 Lab 诊断与 managed 路径复用 `NativePhysicsHealth`：绑定当前进程继承的独占 stdout/stderr 文件，每轮采样返回后、PPO 更新前只读取新追加部分，不从仿真线程同步回调 Python。managed worker 已由父进程重定向；直接诊断需把两路输出重定向到该验证目录的文件。容量溢出或漏交互区间不能变成有效学习结果；这项检查不在逐 step 路径重做所有权或协议校验。
+
+跳跃的估计协议与物理奖励证据分别持有活动 ID。估计完成不能提前撤销待验的物理尝试；取消、超时、新请求及冷物理重置仍明确结束旧尝试。物理成功要求真实支撑起始、离地与上升、目标高度容差、落地和持续稳定；稳定性含角速度，过高和过低都不算目标高度成功。该证据只影响 reward，不改变部署请求准入或 Actor 命令。

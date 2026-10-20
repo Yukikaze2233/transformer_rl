@@ -219,10 +219,16 @@ class LabCourseTasks:
         self.ground_anchor = torch.zeros_like(self.elapsed)
         self.request_clock = torch.zeros_like(self.elapsed)
         self.active_id = torch.full_like(self.family, -1)
+        self.physical_id = torch.full_like(self.family, -1)
+        self._physical_accepted_at_s = torch.zeros(num_envs, dtype=torch.float64, device=self.device)
+        self._physical_cancelled = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         self.phase = torch.zeros_like(self.family)
         self.flight_seen = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         self.air_ticks = torch.zeros_like(self.family)
         self.ascent_seen = torch.zeros_like(self.flight_seen)
+        self.supported_start = torch.zeros_like(self.flight_seen)
+        self._last_supported = torch.zeros_like(self.flight_seen)
+        self._last_world_height = torch.zeros_like(self.elapsed)
         self.peak_rise = torch.zeros_like(self.elapsed)
         self.landed_s = torch.zeros_like(self.elapsed)
         self.success_id = torch.full_like(self.family, -1)
@@ -259,10 +265,15 @@ class LabCourseTasks:
         mask[ids] = True
         self.protocol.reset(mask, now)
         self.active_id[ids] = -1
+        self.physical_id[ids] = -1
+        self._physical_accepted_at_s[ids] = 0
+        self._physical_cancelled[ids] = False
         self.request_clock[ids] = 0
         self.flight_seen[ids] = False
         self.air_ticks[ids] = 0
         self.ascent_seen[ids] = False
+        self.supported_start[ids] = False
+        self._last_supported[ids] = False
         self.peak_rise[ids] = 0
         self.landed_s[ids] = 0
         self.phase[ids] = 0
@@ -316,12 +327,29 @@ class LabCourseTasks:
         # the highest consumed ID, otherwise its next ID is a replay.
         self.next_id.copy_(torch.maximum(self.next_id, self.protocol.max_seen_id + 1))
         accepted = condition.response == int(RequestResponse.ACCEPTED)
+        matching = condition.finished_id == self.physical_id
+        closed = ((matching & (condition.end_reason != int(RequestEnd.ESTIMATED_COMPLETE))
+                   & (condition.end_reason != int(RequestEnd.NONE)))
+                  | ((self.physical_id >= 0)
+                     & (now - self._physical_accepted_at_s >= self.protocol.config.timeout_s)))
+        self.physical_id.masked_fill_(closed, -1)
+        self.physical_id.copy_(torch.where(accepted, condition.active_id, self.physical_id))
+        self._physical_accepted_at_s.copy_(torch.where(accepted, now, self._physical_accepted_at_s))
+        self._physical_cancelled |= ((self.physical_id == self.protocol.active_id)
+                                     & self.protocol.cancelled)
+        self._physical_cancelled |= (self.physical_id >= 0) & blocked
+        self._physical_cancelled.masked_fill_(accepted, False)
         self.request_counters.add_(torch.bincount(condition.response, minlength=9))
         if command is not None:
             self.external_request_counters.add_(torch.bincount(condition.response, minlength=9))
         self.latched_height.copy_(torch.where(accepted, admission.admitted[:, 3], self.latched_height))
         self.active_rise.copy_(torch.where(accepted, condition.height_m, self.active_rise))
         self.ground_anchor.copy_(torch.where(accepted, ground, self.ground_anchor))
+        # Truth certifies reward evidence only; it cannot accept/reject a
+        # deployable request or select a command on the policy's behalf.
+        supported = (self._last_supported
+                     & (self._last_world_height - ground - admission.admitted[:, 3]).abs().le(.015))
+        self.supported_start.copy_(torch.where(accepted, supported, self.supported_start))
         self.flight_seen.masked_fill_(accepted, False)
         self.air_ticks.masked_fill_(accepted, 0)
         self.ascent_seen.masked_fill_(accepted, False)
@@ -337,29 +365,35 @@ class LabCourseTasks:
         admission = replace(admission, admitted=self.stream.current.clone())
         return admission, mode, condition.height_m, condition.clock_s
 
-    def observe_physics(self, force, velocity_z, tilt, world_height, dt=.005):
-        active = self.active_id >= 0
-        air = (force < 2).all(-1)
+    def observe_physics(self, force, velocity_z, tilt, world_height, *, angular_speed_rad_s, dt=.005):
+        active = self.physical_id >= 0
+        air = (force <= 2).all(-1)
         self.air_ticks.copy_(torch.where(active & air, self.air_ticks + 1, 0))
         self.flight_seen |= active & (self.air_ticks >= 2)
         actual_rise = world_height - self.ground_anchor - self.latched_height
         self.ascent_seen |= active & (velocity_z > .15) & (actual_rise > .01)
         self.peak_rise.copy_(torch.where(active, torch.maximum(self.peak_rise, actual_rise), self.peak_rise))
-        contact = (force > 2).all(-1)
-        achieved = self.peak_rise >= (self.active_rise - .02).clamp_min(.01)
-        stable = (active & self.flight_seen & self.ascent_seen & achieved & contact
-                  & (velocity_z.abs() <= .15) & (tilt <= .25)
+        contact = (force >= 5).all(-1)
+        tolerance = torch.minimum(torch.full_like(self.active_rise, .03), self.active_rise * .5)
+        achieved = (self.peak_rise - self.active_rise).abs() <= tolerance + 1e-6
+        quiet = (velocity_z.abs() <= .15) & (tilt <= .25) & (angular_speed_rad_s <= .5)
+        self._last_supported.copy_(contact & quiet)
+        self._last_world_height.copy_(world_height)
+        stable = (active & self.supported_start & self.flight_seen & self.ascent_seen & achieved & contact
+                  & quiet
                   & (actual_rise.abs() <= .05))
         self.landed_s.copy_(torch.where(stable, self.landed_s + dt, 0))
         self.phase.copy_(torch.where(
-            active, torch.where(air & self.flight_seen, int(RewardPhase.FLIGHT),
+            self.active_id >= 0, torch.where(air & self.flight_seen, int(RewardPhase.FLIGHT),
                                 torch.where(self.flight_seen, int(RewardPhase.LANDING), int(RewardPhase.TAKEOFF))),
             torch.where(self.base_mode == int(CommandMode.RECOVERY), int(RewardPhase.RECOVERY), int(RewardPhase.SUPPORT))))
         # Physical truth acceptance is reward-only. The deployment FSM may
         # leave FLIGHT on a timer, but it cannot manufacture this event.
-        success = stable & (self.landed_s >= 2.) & (self.active_id > self.paid_id)
-        self.success_id.copy_(torch.where(success, self.active_id, self.success_id))
-        self.paid_id.copy_(torch.where(success, self.active_id, self.paid_id))
+        success = (stable & ~self._physical_cancelled & (self.landed_s >= 2.)
+                   & (self.physical_id > self.paid_id))
+        self.success_id.copy_(torch.where(success, self.physical_id, self.success_id))
+        self.paid_id.copy_(torch.where(success, self.physical_id, self.paid_id))
+        self.physical_id.masked_fill_(success, -1)
 
     def jump_reference(self):
         return self.reference.sample(self.latched_height, self.active_rise, self.request_clock.double(),
@@ -392,6 +426,11 @@ class LabCourseTasks:
         for name in self._COUNTERS:
             getattr(self, name).copy_(state[name])
         self.generator = generator
+        self.active_id.fill_(-1)
+        self.physical_id.fill_(-1)
+        self.supported_start.zero_()
+        self._last_supported.zero_()
+        self.success_id.fill_(-1)
 
 
 def completed_policy_estimate(frame, raw_state, timestamp):

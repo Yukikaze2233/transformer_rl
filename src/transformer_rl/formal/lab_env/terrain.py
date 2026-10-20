@@ -261,7 +261,9 @@ class LabTerrainCourse:
     def observe_reward(self, sample, state, boundary):
         env = self.env
         self.tasks.observe_physics(state.wheel_ground_force_n, sample.root_com_velocity_world_m_s[:, 2],
-                                   env._last_tilt, sample.root_link_position_world_m[:, 2])
+                                   env._last_tilt, sample.root_link_position_world_m[:, 2],
+                                   angular_speed_rad_s=state.angular_velocity_body_rad_s.norm(dim=-1),
+                                   dt=float(env.physics_dt))
         env._reward_phase.copy_(self.tasks.phase)
         curve = self.tasks.jump_reference()
         landing = ((self.tasks.phase == int(RewardPhase.LANDING))
