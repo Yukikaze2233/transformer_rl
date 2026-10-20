@@ -386,7 +386,8 @@ class LabCourseTasks:
         generator = torch.Generator(device=self.device)
         generator.set_state(state['rng'].cpu())
         self.protocol.restore_after_physical_reset(state['protocol'], now)
-        self.next_id.copy_(torch.maximum(state['next_id'], self.protocol.max_seen_id + 1))
+        self.next_id.copy_(torch.maximum(state['next_id'].to(self.device),
+                                        self.protocol.max_seen_id + 1))
         self.paid_id.copy_(state['paid_id'])
         for name in self._COUNTERS:
             getattr(self, name).copy_(state[name])
