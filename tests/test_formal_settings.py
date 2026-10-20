@@ -18,6 +18,10 @@ def test_complete_plan_keeps_rollout_duration_and_accounts_all_three_training_se
     settings = FormalTrainingSettings.load(PROFILE)
     assert settings.num_envs == 8192 and settings.rollout_steps == 48
     assert settings.policy.history_length == 5
+    assert settings.policy.body_width == 32 and settings.policy.temporal_width == 64
+    assert settings.policy.leg_hidden_dims == settings.policy.wheel_hidden_dims == (64, 32)
+    assert settings.policy.critic_input_dim == 191
+    assert settings.policy.critic_hidden_dims == (256, 128, 64)
     assert settings.collection.gamma**2 == pytest.approx(.99)
     assert settings.collection.gae_lambda**2 == pytest.approx(.95)
     assert settings.budget() == {

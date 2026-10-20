@@ -94,7 +94,7 @@ class StructuredBatch:
         for name in ('critic', 'raw_action', 'issued_action', 'old_mean', 'old_log_std',
                      'old_log_prob', 'old_value', 'advantages', 'returns'):
             value = getattr(self, name)
-            width = 81 if name == 'critic' else 6 if name in (
+            width = model.config.critic_input_dim if name == 'critic' else 6 if name in (
                 'raw_action', 'issued_action', 'old_mean', 'old_log_std') else None
             shape = (count, width) if width is not None else (count,)
             if value.shape != shape or value.dtype != reference.dtype or value.device != reference.device:

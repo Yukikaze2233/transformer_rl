@@ -25,10 +25,11 @@ def seeded_cpu():
 
 def model(*, full_width=False):
     if full_width:
-        return StructuredActorCritic()
+        return StructuredActorCritic(StructuredPolicyConfig(critic_input_dim=81))
     return StructuredActorCritic(StructuredPolicyConfig(body_width=8, body_heads=2, body_ffn=16,
                                                        temporal_width=16, temporal_heads=4,
-                                                       temporal_layers=1, temporal_ffn=32))
+                                                       temporal_layers=1, temporal_ffn=32,
+                                                       critic_input_dim=81))
 
 
 def test_request_vertical_velocity_projects_predicted_body_velocity_using_current_imu_gravity():

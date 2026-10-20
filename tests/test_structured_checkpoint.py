@@ -161,9 +161,10 @@ def test_real_width_candidate_and_initialized_adams_roundtrip(tmp_path):
         update(state, journal)
         receipt = store.save('full.pt', state)
         loaded = store.load('full.pt')
-        assert sum(p.numel() for p in loaded.components.model.parameters()) == 408824
+        assert sum(p.numel() for p in loaded.components.model.parameters()) == 235256
         assert loaded.components.trainer.actor_optimizer.state and loaded.components.trainer.critic_optimizer.state
-        assert receipt['bytes'] > 3_000_000
+        assert receipt['bytes'] > 2 * sum(p.numel() * p.element_size()
+                                         for p in loaded.components.model.parameters())
 
 
 def test_new_consumption_or_pending_reservation_refuses_checkpoint_rollback(tmp_path):
@@ -188,7 +189,8 @@ def test_no_clobber_and_missing_completion_marker_are_not_restorable(tmp_path):
             store.load('../other.pt')
 
 
-@pytest.mark.parametrize('change', ['fixed_mask', 'actor_moment', 'critic_moment', 'recipe', 'budget', 'fresh_count', 'protocol'])
+@pytest.mark.parametrize('change', ['fixed_mask', 'actor_moment', 'critic_moment', 'recipe', 'budget',
+                                  'fresh_count', 'protocol', 'normalization'])
 def test_invalid_complete_payload_is_rejected_without_touching_live_model_or_rng(tmp_path, change):
     _, state, journal, store = fixture(tmp_path)
     with journal:
@@ -207,6 +209,8 @@ def test_invalid_complete_payload_is_rejected_without_touching_live_model_or_rng
             payload['curriculum']['consumed'][0] += 1
         elif change == 'fresh_count':
             payload['trainer']['consumed']['fresh_endpoints'] += 1
+        elif change == 'normalization':
+            payload['normalization'] = 'fixed_manual35_81_no_running_statistics'
         else:
             payload['protocol']['tensors']['max_seen_id'][0] = -2
         before, weights = capture_rng(), deepcopy(state.model.state_dict())

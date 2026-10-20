@@ -253,7 +253,7 @@ class StructuredCheckpointStore:
                                   'task_source': task_source},
                    'curriculum': components.curriculum.state_dict(), 'sampler': _cpu_snapshot(components.sampler.state_dict()),
                    'terrain': _cpu_snapshot(components.terrain.state_dict()), 'protocol': _cpu_snapshot(components.protocol.state_dict()),
-                   'global_rng': rng, 'normalization': 'fixed_manual35_81_no_running_statistics',
+                   'global_rng': rng, 'normalization': self.recipe.policy.normalization_contract,
                    'metadata': _json_metadata({} if metadata is None else metadata)}
         return self._publish_payload(name, payload)
 
@@ -279,7 +279,7 @@ class StructuredCheckpointStore:
                     'curriculum', 'sampler', 'terrain', 'protocol', 'global_rng', 'normalization', 'metadata'}
         if (not isinstance(payload, dict) or set(payload) != expected or payload['format'] != self._FORMAT
                 or LearningRecipe.from_dict(payload['recipe']) != self.recipe
-                or payload['normalization'] != 'fixed_manual35_81_no_running_statistics'):
+                or payload['normalization'] != self.recipe.policy.normalization_contract):
             raise ValueError('structured snapshot recipe, format or fields differ')
         self.journal.require_exact_boundary(payload['boundary'])
         _validate_rng(payload['global_rng'])

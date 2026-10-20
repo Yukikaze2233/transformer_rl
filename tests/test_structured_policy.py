@@ -1,6 +1,7 @@
 """Synthetic policy-contract checks; run on the designated remote machine."""
-from dataclasses import replace
+from dataclasses import asdict, replace
 import io
+import json
 
 import pytest
 import torch
@@ -34,13 +35,64 @@ def test_actual_parameter_counts_and_deployment_head_removal():
     model = StructuredActorCritic()
     deployed = model.actor.policy.for_deployment()
     count = lambda module: sum(p.numel() for p in module.parameters())
-    assert count(model.actor) == 346615
-    assert count(model.critic) == 62209
-    assert count(model) == 408824 < 450000
-    assert count(deployed) == 339627
+    assert count(model.actor) == 144887
+    assert count(model.critic) == 90369
+    assert count(model) == 235256 < 450000
+    assert count(deployed) == 142411
     assert deployed.prediction_head is None
     assert not any(isinstance(module, (nn.GRU, nn.LSTM, nn.Dropout)) for module in model.modules())
     assert not ({id(p) for p in model.actor.parameters()} & {id(p) for p in model.critic.parameters()})
+
+
+def test_configured_widths_keep_spatial_temporal_gates_queries_and_local_decoders():
+    policy = StructuredPolicy()
+    assert policy.body_width == 32 and policy.time_width == 64
+    assert len(policy.temporal_blocks) == 2
+    assert policy.spatial_block.attention_gate.weight.shape == (32, 32)
+    assert all(block.attention_gate.weight.shape == (64, 64) for block in policy.temporal_blocks)
+    assert all(block.ffn_gate.weight.shape == (64, 64) for block in policy.temporal_blocks)
+    assert policy.readout.query_identity.shape == (5, 64)
+    assert policy.leg_decoder[0].in_features == 95
+    assert policy.wheel_decoder[0].in_features == 91
+    mean, state, context = policy.outputs(observation().frames)
+    assert (mean.shape, state.shape, context.shape) == ((4, 6), (4, 8), (4, 64))
+
+
+def test_json_roundtrip_preserves_all_hidden_widths_and_critic_contract():
+    config = StructuredPolicyConfig()
+    encoded = json.loads(json.dumps(asdict(config)))
+    assert StructuredPolicyConfig(**encoded) == config
+    assert config.normalization_contract == 'fixed_manual35_191_no_running_statistics'
+
+
+def test_critic_feature_assembly_preserves_fields_and_detaches_actor_estimation():
+    model = StructuredActorCritic()
+    environment = torch.randn(4, 188, requires_grad=True)
+    _, raw_state, _ = model.actor.policy.outputs(observation().frames)
+    features = model.critic_features(environment, raw_state)
+    assert features.shape == (4, 191) and not features.requires_grad
+    torch.testing.assert_close(features[:, :188], environment)
+    torch.testing.assert_close(features[:, 188:], raw_state[:, :3])
+    model.critic(features).square().mean().backward()
+    assert environment.grad is None
+    assert all(p.grad is None for p in model.actor.parameters())
+    assert any(p.grad is not None for p in model.critic.parameters())
+    with pytest.raises(ValueError, match='physical inputs'):
+        model.critic_features(environment[:, :81], raw_state)
+    with pytest.raises(ValueError, match='physical inputs'):
+        model.critic_features(environment, raw_state.double())
+
+
+def test_explicit_old_dimensions_remain_representable_without_silent_weight_migration():
+    old = StructuredActorCritic(StructuredPolicyConfig(
+        body_width=64, body_ffn=128, temporal_width=96, temporal_ffn=192,
+        state_hidden_dim=64, leg_hidden_dims=(96, 64), prediction_hidden_dim=64,
+        critic_input_dim=81,
+    ))
+    assert sum(parameter.numel() for parameter in old.parameters()) == 408824
+    assert old.config.normalization_contract == 'fixed_manual35_81_no_running_statistics'
+    with pytest.raises(RuntimeError, match='size mismatch'):
+        StructuredActorCritic().load_state_dict(old.state_dict(), strict=True)
 
 
 def test_temporal_prefix_is_causal_in_values_and_gradients():
@@ -72,14 +124,15 @@ def test_wheel_angles_are_excluded_and_wheel_speeds_remain_observable():
 
 def test_mask_semantics_match_explicit_attention_reference():
     policy = StructuredPolicy()
-    tokens = torch.randn(2, 5, 96)
+    width = policy.time_width
     block = policy.temporal_blocks[0]
+    tokens = torch.randn(2, 5, width)
     normalized = block.attention_norm(tokens)
-    qkv = block.qkv(normalized).reshape(2, 5, 3, 4, 24)
+    qkv = block.qkv(normalized).reshape(2, 5, 3, block.heads, block.head_width)
     q, k, v = [part.transpose(1, 2) for part in qkv.unbind(2)]
-    scores = (q @ k.transpose(-2, -1)) * 24**-0.5
+    scores = (q @ k.transpose(-2, -1)) * block.head_width**-0.5
     weights = scores.masked_fill(~policy.time_allowed, float('-inf')).softmax(-1)
-    attended = (weights @ v).transpose(1, 2).reshape(2, 5, 96)
+    attended = (weights @ v).transpose(1, 2).reshape(2, 5, width)
     expected = tokens + block.attention_gate(normalized).sigmoid() * block.attention_output(attended)
     normalized = block.ffn_norm(expected)
     expected = expected + block.ffn_gate(normalized).sigmoid() * block.ffn(normalized)
@@ -113,7 +166,7 @@ def test_shared_parameters_receive_ppo_and_auxiliary_gradients_without_critic_le
         assert torch.isfinite(parameter.grad).all(), name
     assert all(parameter.grad is None for parameter in model.critic.parameters())
     model.zero_grad(set_to_none=True)
-    model.critic(torch.randn(4, 81)).square().mean().backward()
+    model.critic(torch.randn(4, model.config.critic_input_dim)).square().mean().backward()
     assert all(parameter.grad is None for parameter in model.actor.parameters())
 
 
@@ -200,6 +253,9 @@ def test_onnx_export_keeps_dynamic_batch_and_training_heads_out():
     {'history_length': 0}, {'body_width': 63}, {'temporal_width': 95},
     {'temporal_layers': True}, {'gate_bias': float('nan')},
     {'estimate_log_std_min': 2}, {'mean_init_scale': -1},
+    {'critic_input_dim': 0}, {'critic_input_dim': True}, {'state_hidden_dim': 0},
+    {'prediction_hidden_dim': False}, {'leg_hidden_dims': [64]},
+    {'wheel_hidden_dims': [64, 0]}, {'critic_hidden_dims': [256, 128, True]},
 ])
 def test_invalid_configuration_is_rejected_before_allocation(changes):
     with pytest.raises(ValueError):

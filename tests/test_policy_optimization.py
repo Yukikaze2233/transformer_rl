@@ -34,7 +34,7 @@ def batch_for(network, *, owned=True):
     prefix[..., 14:16] = observations[..., 14:16] = 0
     windows = ObservationWindows(prefix, observations, torch.zeros(8, 4, dtype=torch.bool))
     count = len(windows)
-    critic = torch.randn(count, 81)
+    critic = torch.randn(count, network.config.critic_input_dim)
     with torch.no_grad():
         mean = network.actor.policy(windows.gather(torch.arange(count)))
         old_log_std = network.actor.log_std.clamp(-4, 1).expand_as(mean).clone()
@@ -63,6 +63,15 @@ def assert_identical(actual, expected):
             assert_identical(left, right)
     else:
         assert actual == expected
+
+
+def test_batch_uses_configured_critic_width_and_rejects_old_observations():
+    network = model()
+    batch = batch_for(network)
+    assert batch.critic.shape == (len(batch), 191)
+    batch.validate(network)
+    with pytest.raises(ValueError, match='critic'):
+        replace(batch, critic=batch.critic[:, :81]).validate(network)
 
 
 def test_default_complete_minibatches_have_64_steps_and_no_sample_refund():

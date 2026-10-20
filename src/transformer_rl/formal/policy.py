@@ -21,13 +21,19 @@ from ..common.types import ActionSample, HistoryBatch, PolicyEvaluation
 @dataclass(frozen=True)
 class StructuredPolicyConfig:
     history_length: int = 5
-    body_width: int = 64
+    body_width: int = 32
     body_heads: int = 2
-    body_ffn: int = 128
-    temporal_width: int = 96
+    body_ffn: int = 64
+    temporal_width: int = 64
     temporal_heads: int = 4
     temporal_layers: int = 2
-    temporal_ffn: int = 192
+    temporal_ffn: int = 128
+    state_hidden_dim: int = 32
+    leg_hidden_dims: tuple[int, int] = (64, 32)
+    wheel_hidden_dims: tuple[int, int] = (64, 32)
+    prediction_hidden_dim: int = 32
+    critic_input_dim: int = 191
+    critic_hidden_dims: tuple[int, int, int] = (256, 128, 64)
     gate_bias: float = -2.0
     mean_init_scale: float = 0.01
     estimate_log_std_min: float = -4.0
@@ -35,9 +41,17 @@ class StructuredPolicyConfig:
 
     def __post_init__(self):
         for name in ("history_length", "body_width", "body_heads", "body_ffn",
-                     "temporal_width", "temporal_heads", "temporal_layers", "temporal_ffn"):
+                     "temporal_width", "temporal_heads", "temporal_layers", "temporal_ffn",
+                     "state_hidden_dim", "prediction_hidden_dim", "critic_input_dim"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f"{name} must be a positive integer")
+        for name, depth in (("leg_hidden_dims", 2), ("wheel_hidden_dims", 2),
+                            ("critic_hidden_dims", 3)):
+            value = getattr(self, name)
+            if (not isinstance(value, (tuple, list)) or len(value) != depth
+                    or any(type(width) is not int or width < 1 for width in value)):
+                raise ValueError(f"{name} requires {depth} positive integer widths")
+            object.__setattr__(self, name, tuple(value))
         if (self.body_width % self.body_heads or self.temporal_width % self.temporal_heads
                 or self.temporal_width % 2):
             raise ValueError("attention widths must divide their head counts; time width must be even")
@@ -47,6 +61,10 @@ class StructuredPolicyConfig:
                 raise ValueError(f"{name} must be finite")
         if self.mean_init_scale < 0 or self.estimate_log_std_min >= self.estimate_log_std_max:
             raise ValueError("invalid mean initialization or estimation scale bounds")
+
+    @property
+    def normalization_contract(self):
+        return f"fixed_manual35_{self.critic_input_dim}_no_running_statistics"
 
 
 class _GatedAttentionBlock(nn.Module):
@@ -174,12 +192,16 @@ class StructuredPolicy(nn.Module):
         ])
         self.time_norm = nn.LayerNorm(self.time_width)
         self.readout = _CurrentReadout(config)
-        self.state_head = nn.Sequential(nn.Linear(self.time_width, 64), nn.GELU(), nn.Linear(64, 8))
-        self.leg_decoder = nn.Sequential(nn.Linear(self.time_width + 31, 96), nn.GELU(),
-                                         nn.Linear(96, 64), nn.GELU(), nn.Linear(64, 2))
-        self.wheel_decoder = nn.Sequential(nn.Linear(self.time_width + 27, 64), nn.GELU(),
-                                           nn.Linear(64, 32), nn.GELU(), nn.Linear(32, 1))
-        self.prediction_head = (nn.Sequential(nn.Linear(self.time_width + 6, 64), nn.GELU(), nn.Linear(64, 6))
+        leg_first, leg_second = config.leg_hidden_dims
+        wheel_first, wheel_second = config.wheel_hidden_dims
+        self.state_head = nn.Sequential(nn.Linear(self.time_width, config.state_hidden_dim), nn.GELU(),
+                                         nn.Linear(config.state_hidden_dim, 8))
+        self.leg_decoder = nn.Sequential(nn.Linear(self.time_width + 31, leg_first), nn.GELU(),
+                                         nn.Linear(leg_first, leg_second), nn.GELU(), nn.Linear(leg_second, 2))
+        self.wheel_decoder = nn.Sequential(nn.Linear(self.time_width + 27, wheel_first), nn.GELU(),
+                                           nn.Linear(wheel_first, wheel_second), nn.GELU(), nn.Linear(wheel_second, 1))
+        self.prediction_head = (nn.Sequential(nn.Linear(self.time_width + 6, config.prediction_hidden_dim),
+                                               nn.GELU(), nn.Linear(config.prediction_hidden_dim, 6))
                                 if prediction_head else None)
         with torch.no_grad():
             for head in (self.leg_decoder[-1], self.wheel_decoder[-1]):
@@ -295,5 +317,19 @@ class StructuredActorCritic(nn.Module):
         super().__init__()
         self.config = config
         self.actor = StructuredGaussianActor(config)
-        self.critic = nn.Sequential(nn.Linear(81, 256), nn.ELU(), nn.Linear(256, 128), nn.ELU(),
-                                    nn.Linear(128, 64), nn.ELU(), nn.Linear(64, 1), nn.Flatten(0))
+        first, second, third = config.critic_hidden_dims
+        self.critic = nn.Sequential(nn.Linear(config.critic_input_dim, first), nn.ELU(),
+                                    nn.Linear(first, second), nn.ELU(), nn.Linear(second, third), nn.ELU(),
+                                    nn.Linear(third, 1), nn.Flatten(0))
+
+    def critic_features(self, environment_features: torch.Tensor, raw_state: torch.Tensor) -> torch.Tensor:
+        """188D物理特权量 + 本次Actor速度估计3D；价值梯度不进入Actor。"""
+        if self.config.critic_input_dim != 191:
+            raise ValueError('critic feature assembly requires the 191D observation contract')
+        if (environment_features.ndim != 2 or environment_features.shape[1] != 188
+                or raw_state.shape != (environment_features.shape[0], 8)
+                or environment_features.device != raw_state.device
+                or environment_features.dtype != raw_state.dtype
+                or not environment_features.is_floating_point()):
+            raise ValueError('critic features require matching [B,188] physical inputs and [B,8] actor state')
+        return torch.cat((environment_features.detach(), raw_state[:, :3].detach()), -1)
