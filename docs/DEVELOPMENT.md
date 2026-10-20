@@ -41,6 +41,8 @@ git diff --check
 
 场地派生资产可在 Kaiser 完成原资源准入并持有四个 lease 后，用 `tools/check_terrain_assets.py --manifest <prepared/manifest.json> --output <new-directory>` 检查原生碰撞。工具核对输入 SHA、组合后的顶点与物理材质，再比较逐面射线和新增前立面网格；结果必须有 `completed=true`、`passed=true`，不能只看进程 exit 0。同时记录命中距离换算点误差和返回坐标偏离射线的误差，区分几何差异与字段数值问题；诊断不改变通过阈值。`--disable-mesh-welding` 只在独立检查场景覆盖焊接容差，供保留基线的 A/B 排查使用，不改源资产。静态射线通过仍不等于动态接触、整车或8192环境训练验收。
 
+碰撞预处理对每个三角形只循环重排顶点起始顺序，选取入射边长乘积最小的角作为求交基底，避免狭长面使用近乎平行的两条长边。坐标、绕向、面数与逐面来源保持不变；`collision.npz` 的 `cyclic_corner_offset` 记录可逆偏移。该处理不删除有效薄面、不填洞、不改变焊接容差；新派生版本仍须独立通过原生查询检查。
+
 atlas 的 `material_parameters` 按 `[静摩擦, 动摩擦, 恢复系数]` 保存每个物理材质，真实场地继承源 manifest，参数化地形明确采用静／动摩擦相等、恢复系数为零。旧 `material_coefficients` 只保留静摩擦查询语义；不能据此重建完整材质，也不能把轮下地表摩擦冒充 Critic 的轮体材料。派生时另建输出目录，保留原资产和旧 atlas 的身份；未实测标定的摩擦仍不称为标定值。
 
 Critic 的六维轮体材料由 `WheelMaterialReader` 读取 PhysX 实际 shape 属性，按左／右轮各自的静摩擦、动摩擦、恢复系数排列。当前无材质随机事件，初始化时读取并缓存；未来若显式改写物理材质，必须随后按受影响行 `refresh`。一轮多个碰撞 shape 的材质不一致时明确拒绝，不平均、不用地表摩擦替代；managed 的 `lab_setup.json` 保留 shape 映射来源。

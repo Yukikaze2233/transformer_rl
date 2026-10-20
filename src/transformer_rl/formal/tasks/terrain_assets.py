@@ -179,6 +179,31 @@ def extend_front_contact(source_vertices, source_faces, specification):
     }
 
 
+def stable_triangle_corners(vertices, faces):
+    """Choose a better-conditioned edge basis without changing any surface.
+
+    Cyclic permutations preserve the oriented triangle exactly. Minimize the
+    product of the two incident edge lengths at corner zero: for fixed area,
+    this maximizes the sine of their angle and avoids a nearly parallel basis.
+    No vertex is moved, split, welded or removed.
+    """
+    vertices, faces = np.asarray(vertices, dtype=float), np.asarray(faces)
+    if (vertices.ndim != 2 or vertices.shape[1] != 3 or not np.isfinite(vertices).all()
+            or faces.ndim != 2 or faces.shape[1] != 3 or not len(faces)
+            or not np.issubdtype(faces.dtype, np.integer)
+            or (faces < 0).any() or (faces >= len(vertices)).any()):
+        raise ValueError('triangle corner selection requires finite indexed geometry')
+    triangles = vertices[faces]
+    area = np.linalg.norm(np.cross(triangles[:, 1] - triangles[:, 0],
+                                   triangles[:, 2] - triangles[:, 0]), axis=-1)
+    if not np.isfinite(area).all() or (area == 0).any():
+        raise ValueError('remove truly degenerate faces before choosing their corner basis')
+    lengths = np.linalg.norm(triangles - np.roll(triangles, -1, axis=1), axis=-1)
+    offsets = (lengths * np.roll(lengths, 1, axis=1)).argmin(-1).astype(np.uint8)
+    order = (offsets[:, None] + np.arange(3)[None]) % 3
+    return np.take_along_axis(faces, order, axis=1), offsets
+
+
 def write_collision_usda(path, vertices, faces, *, static_friction, dynamic_friction,
                          restitution=0.0, visual_reference=None, face_material=None,
                          material_coefficients=None, material_parameters=None):
@@ -318,9 +343,19 @@ def prepare_assets(archive, configuration, output):
                     report['cleanup_filled_holes'] = False
                     report['filled_holes'] = bool(additions)
                     report['filled_holes_scope'] = 'approved_front_lower_gap_only' if additions else None
+                faces, corner_offsets = stable_triangle_corners(vertices, faces)
+                report['triangle_corner_order'] = {
+                    'rule': 'cyclic_corner_with_minimum_incident_edge_product',
+                    'reordered_faces': int((corner_offsets != 0).sum()),
+                    'offset_array': 'cyclic_corner_offset',
+                    'offset_reference': 'post_cleanup_or_training_addition_face_order',
+                    'vertices_moved': False, 'winding_changed': False,
+                    'triangles_added_or_removed': False, 'lineage_changed': False,
+                }
                 np.savez_compressed(folder / "collision.npz", vertices_m=vertices, triangles=faces,
                                     output_to_input_face=lineage, source_mesh_index=source_mesh,
-                                    source_triangle_index=source_triangle, derived_face_kind=face_kind)
+                                    source_triangle_index=source_triangle, derived_face_kind=face_kind,
+                                    cyclic_corner_offset=corner_offsets)
                 (folder / "source.usdc").write_bytes(source.read(root + "/terrain.usdc"))
                 (folder / "source_manifest.json").write_bytes(raw_manifest)
                 (folder / "NOTICE.md").write_bytes(source.read(root + "/NOTICE.md"))
