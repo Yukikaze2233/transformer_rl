@@ -23,6 +23,7 @@ from ..control.observation import CommandFeatures, CommandMode, MechanicalBindin
 from ..control.pressure import NativeSliderPressure, PressureParameters
 from .actuator import WheeledControlCore
 from .cfg import WheeledLabEnvCfg
+from .contact_mapping import contact_body_mapping
 from .contract import ACTION_DIM, CRITIC182_DIM, FlatTaskSpec, flat_reward, flat_termination
 from .formal_curriculum import LabTaskSample
 from .formal_reward import FormalRewardConfig, LabFormalReward
@@ -226,17 +227,25 @@ class WheeledLabEnv(DirectRLEnv):
         parameters = PressureParameters.from_asset(self._asset.manifest, model, fit)
         return NativeSliderPressure(parameters, self.num_envs, device=str(self._device))
 
+    @property
+    def contact_mapping_receipt(self):
+        return dict(self._contact_mapping_receipt)
+
+
     def _contact_mapping(self):
-        names = tuple(self.contact_sensor.body_names)
-        source, target = [], []
-        for index, name in enumerate(self._binding.native_body_names):
-            if name in names:
-                target.append(index)
-                source.append(names.index(name))
-        if not target:
-            raise RuntimeError("接触传感器未覆盖任何 native body")
+        source, target, required = contact_body_mapping(
+            self._binding.native_body_names, self.contact_sensor.body_names,
+            self._wheel_body_indices.tolist(), require_all=self._formal_reward is not None)
+        self._contact_required_bodies = required
+        self._contact_mapping_receipt = {
+            'native_bodies': tuple(self._binding.native_body_names),
+            'sensor_bodies': tuple(self.contact_sensor.body_names),
+            'required_bodies': tuple(required),
+            'source_indices': tuple(source), 'target_indices': tuple(target),
+        }
         return (torch.tensor(source, dtype=torch.long, device=self._device),
                 torch.tensor(target, dtype=torch.long, device=self._device))
+
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
