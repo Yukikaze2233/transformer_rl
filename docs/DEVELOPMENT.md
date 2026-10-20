@@ -47,6 +47,8 @@ atlas 平移后的 float32 坐标另做一次精确零面积检查，仅移除�
 
 atlas 的 `material_parameters` 按 `[静摩擦, 动摩擦, 恢复系数]` 保存每个物理材质，真实场地继承源 manifest，参数化地形明确采用静／动摩擦相等、恢复系数为零。旧 `material_coefficients` 只保留静摩擦查询语义；不能据此重建完整材质，也不能把轮下地表摩擦冒充 Critic 的轮体材料。派生时另建输出目录，保留原资产和旧 atlas 的身份；未实测标定的摩擦仍不称为标定值。
 
+大批量共享地形使用 `lab_env.isolation`：当前场景的单一、连续 env_0…env_N 克隆计划启用 PhysX Env ID，在 broadphase 早期隔离机器人；USD 碰撞组另保留全局地面可接触关系并逐组回读。异构或部分克隆计划明确拒绝，不修改安装的 SDK，也不把 `env_spacing` 当作碰撞过滤开关。回调安装与实际完成复制分开记录，managed `lab_setup.json` 保存完成收据。共用地形原点不等于碰撞隔离失效，原生容量错误仍须判失败；8192×48 验收不能由该配置或 CPU 检查代替。
+
 Critic 的六维轮体材料由 `WheelMaterialReader` 读取 PhysX 实际 shape 属性，按左／右轮各自的静摩擦、动摩擦、恢复系数排列。当前无材质随机事件，初始化时读取并缓存；未来若显式改写物理材质，必须随后按受影响行 `refresh`。一轮多个碰撞 shape 的材质不一致时明确拒绝，不平均、不用地表摩擦替代；managed 的 `lab_setup.json` 保留 shape 映射来源。
 
 Lab 快速采样的受控入口使用 `transformer_rl.formal.lab_env.runtime:runtime`，由现有 `StructuredTrainingSession` 管理进程、资源准入和完整学习 checkpoint；不把诊断入口的 `lab_ppo_v1` 当成可直接转换的正式端点。`managed_lab_runtime_v1` 私有配置冻结当前 boot、机械资产目录、响应记录与 atlas 的文件 pin、环境间距、完整 `FlatTaskSpec`、`PairTargetDomain`、五项 PhysX 容量和诊断开关。课程与 learner 共用 sampler、预算和请求去重状态；地形路由、任务独立 RNG 和 reward 缺失原因存入完整 checkpoint 的 task source。冷恢复在新回合采样前恢复这些状态，再由 worker 在物理准备后恢复全局 RNG；活动物理请求不重放。低频 reward 投影只描述最后一个完整策略区间，不称为整轮汇总，也不触发评价或课程晋级。此入口仍须完成原生场地、全规模更新与实际控制边界验收后，才能用于正式长训。

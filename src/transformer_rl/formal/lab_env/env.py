@@ -33,6 +33,7 @@ from ..tasks.reward import RewardPhase
 from .recover import LabRecoverTask, RecoverTaskSpec
 from .recovery import LabRecoveryReset
 from .materials import WheelMaterialReader
+from .isolation import author_shared_ground_groups, isolate_scene
 from .observations import LabObservationBuilder
 from .settings import LabEnvSettings, load_asset_description
 
@@ -44,6 +45,8 @@ class WheeledLabEnv(DirectRLEnv):
 
     def __init__(self, cfg: WheeledLabEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
+        if self._collision_isolation is not None:
+            self._collision_isolation.require_applied()
         self._task = getattr(cfg, "task_spec", FlatTaskSpec())
         if not isinstance(self._task, FlatTaskSpec):
             raise TypeError("cfg.task_spec 必须是 FlatTaskSpec")
@@ -210,6 +213,12 @@ class WheeledLabEnv(DirectRLEnv):
     def wheel_material_receipt(self):
         return self._wheel_materials.receipt
 
+    @property
+    def collision_isolation_receipt(self):
+        return {'groups': dict(self._collision_group_receipt),
+                'native': (self._collision_isolation.receipt
+                           if self._collision_isolation is not None else None)}
+
     def _build_pressure(self):
         asset = self._asset.directory
         model = json.loads((asset / "model_spec.json").read_text())
@@ -248,9 +257,9 @@ class WheeledLabEnv(DirectRLEnv):
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
         self.terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+        self._collision_isolation = isolate_scene(self.scene)
         self.scene.clone_environments(copy_from_source=False)
-        if self.device == "cpu":
-            self.scene.filter_collisions(global_prim_paths=[])
+        self._collision_group_receipt = author_shared_ground_groups(self.scene)
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
