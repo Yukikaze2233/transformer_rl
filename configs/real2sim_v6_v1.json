@@ -22,7 +22,8 @@
     "single_step_rise_m": 0.2,
     "double_step_rise_m": 0.2,
     "double_step_platform_depth_m": 0.8,
-    "source": "user_confirmed_20261020"
+    "source": "user_confirmed_20261020",
+    "depth_interpretation": "platform_depth_not_step_height"
   },
   "controller_baseline": {
     "leg": {

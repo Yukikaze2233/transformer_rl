@@ -18,6 +18,7 @@ def test_shared_asset_and_platform_contract():
     assert asset["spring_free_length_mm"] == 232
     assert asset["spring_stroke_mm"] == 80
     assert data["terrain"]["double_step_platform_depth_m"] == .80
+    assert data["terrain"]["depth_interpretation"] == "platform_depth_not_step_height"
     assert data["terrain"]["single_step_rise_m"] == data["terrain"]["double_step_rise_m"] == .20
 
 
