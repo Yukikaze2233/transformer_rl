@@ -1,8 +1,7 @@
 """把 LabEnv 的物理采样接入正式 PhysicalRewardComposer。
 
-只转换数据，不重写 reward 数学。当前 LabEnv 能提供接触净力、关节/底座
-运动、执行器输出和高度；尚未提供真实接触点切向滑移与被动膝边界短路，
-因此默认把这两项声明为不可用，而不是填零冒充正式 reward。
+只转换数据，不重写 reward 数学。轮底切向速度由环境显式提供；被动膝
+边界仍由边界 producer 提供。缺失的正式项不会被悄悄填零。
 """
 from __future__ import annotations
 
@@ -18,10 +17,9 @@ from ..tasks.reward import (
 )
 
 
-# LabEnv 当前没有 contact-point slip / knee boundary 的正式生产者。
 LAB_AVAILABLE_TERMS = tuple(dict.fromkeys(
     name for name in REWARD_POSITIVE_TERMS + REWARD_COST_TERMS
-    if name not in ("contact_slip", "joint_boundary")
+    if name != "joint_boundary"
 ))
 
 
@@ -73,6 +71,7 @@ def reward_physics_from_lab(sample: NativePhysicalSample, state: MeasuredState, 
                             control_epoch: torch.Tensor, policy_owned: torch.Tensor,
                             available_terms: tuple[str, ...],
                             joint_boundary_shortfall_rad: torch.Tensor | None = None,
+                            wheel_contact_tangent_speed_m_s: torch.Tensor | None = None,
                             normal_load_source: str = "contact_force_world_z_abs") -> RewardPhysics:
     """构造正式 reward 的物理端点；不推断缺失的 slip/boundary。"""
     if not isinstance(sample, NativePhysicalSample) or not isinstance(state, MeasuredState):
@@ -98,6 +97,15 @@ def reward_physics_from_lab(sample: NativePhysicalSample, state: MeasuredState, 
                 else joint_boundary_shortfall_rad)
     if boundary.shape != (n, 6) or boundary.device != device or not torch.isfinite(boundary).all():
         raise ValueError("joint boundary shortfall 需要有限 [N,6]")
+    if wheel_contact_tangent_speed_m_s is None:
+        if "contact_slip" in available_terms:
+            raise ValueError("formal reward 缺少轮底切向速度 producer")
+        wheel_speed = torch.zeros(n, 2, device=device)
+    else:
+        wheel_speed = wheel_contact_tangent_speed_m_s
+        if (wheel_speed.shape != (n, 2) or wheel_speed.device != device
+                or not torch.isfinite(wheel_speed).all() or (wheel_speed < 0).any()):
+            raise ValueError("wheel contact tangent speed 需要有限非负 [N,2]")
     return RewardPhysics(
         sample.timestamp_s.clone(), episode_id.clone(), control_epoch.clone(), policy_owned.clone(),
         state.velocity_origin_body_m_s.clone(),
@@ -106,7 +114,7 @@ def reward_physics_from_lab(sample: NativePhysicalSample, state: MeasuredState, 
         state.height_above_ground_m.clone(), _roll_pitch(sample.root_link_orientation_xyzw),
         state.gravity_body.clone(), state.angular_velocity_body_rad_s.clone(),
         state.policy_velocity_rad_s.clone(), effort_nm.clone(), body_load,
-        torch.zeros(n, 2, device=device), boundary,
+        wheel_speed.clone(), boundary,
         available_terms=available_terms,
     )
 
@@ -172,16 +180,19 @@ class LabFormalReward:
     def observe(self, sample, state, *, effort_nm, episode_id, control_epoch,
                 command, mode, policy_owned=None, phase=None, jump_height_world_z_m=None,
                 jump_velocity_world_z_m_s=None, target_roll_pitch_rad=None,
-                joint_boundary_shortfall_rad=None):
+                joint_boundary_shortfall_rad=None, wheel_contact_tangent_speed_m_s=None):
         owned = (torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
                  if policy_owned is None else policy_owned)
         if "joint_boundary" in self.config.available_terms and joint_boundary_shortfall_rad is None:
             raise ValueError("formal reward 缺少 joint_boundary shortfall producer")
+        if "contact_slip" in self.config.available_terms and wheel_contact_tangent_speed_m_s is None:
+            raise ValueError("formal reward 缺少轮底切向速度 producer")
         physics = reward_physics_from_lab(
             sample, state, effort_nm=effort_nm, episode_id=episode_id,
             control_epoch=control_epoch, policy_owned=owned,
             available_terms=self.config.available_terms,
             joint_boundary_shortfall_rad=joint_boundary_shortfall_rad,
+            wheel_contact_tangent_speed_m_s=wheel_contact_tangent_speed_m_s,
             normal_load_source=self.config.normal_load_source)
         reference = reward_reference_from_command(
             command, mode, phase=phase, jump_height_world_z_m=jump_height_world_z_m,

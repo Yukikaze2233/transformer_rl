@@ -38,7 +38,8 @@ def test_lab_formal_reward_keeps_formal_terms_and_omits_unavailable_ones():
         reward.observe(value, current, effort_nm=torch.zeros(2, 6), episode_id=episode,
                        control_epoch=control, command=command.admitted_body_command,
                        mode=command.mode, phase=torch.full((2,), int(RewardPhase.SUPPORT),
-                                                          dtype=torch.long))
+                                                          dtype=torch.long),
+                       wheel_contact_tangent_speed_m_s=torch.zeros(2, 2))
     result = reward.finish(terminated=torch.zeros(2, dtype=torch.bool),
                            truncated=torch.zeros(2, dtype=torch.bool))
     assert torch.isfinite(result.learning_reward).all()
@@ -55,7 +56,8 @@ def test_unavailable_terms_are_removed_from_composition_not_just_logged():
         sample, state, effort_nm=torch.zeros(2, 6),
         episode_id=torch.zeros(2, dtype=torch.long),
         control_epoch=torch.zeros(2, dtype=torch.long),
-        policy_owned=torch.ones(2, dtype=torch.bool), available_terms=terms)
+        policy_owned=torch.ones(2, dtype=torch.bool), available_terms=terms,
+        wheel_contact_tangent_speed_m_s=torch.zeros(2, 2))
     assert physics.available_terms == terms
     assert physics.body_normal_load_n.shape == (2, 19)
     assert physics.wheel_contact_tangent_speed_m_s.eq(0).all()
