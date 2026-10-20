@@ -281,10 +281,12 @@ class WheeledLabEnv(DirectRLEnv):
             raise ValueError(f"terrain scanner 需要 [N,{TERRAIN_SCAN_DIM},3] hits")
         root_z = self._root_link_position()[:, 2]
         center = hits[:, hits.shape[1] // 2, 2]
-        terrain = (5 * (root_z[:, None] - hits[..., 2] - self._task.nominal_height_m)).clamp(-1, 1)
-        if not torch.isfinite(terrain).all():
-            raise ValueError("terrain scanner 返回非有限 ray hit")
-        return terrain, center
+        height = root_z[:, None] - hits[..., 2] - self._task.nominal_height_m
+        finite = torch.isfinite(height)
+        if not finite.all():
+            count = int((~finite).sum())
+            raise ValueError(f"terrain scanner 有 {count} 个未命中")
+        return (5 * height).clamp(-1, 1), center
 
     def _wheel_velocity_body(self):
         body_velocity = getattr(self.robot.data, "body_lin_vel_w", None)
