@@ -57,6 +57,10 @@ def _parse_args(argv=None):
                         help="使用正式 PhysicalRewardComposer")
     parser.add_argument("--formal-curriculum", action="store_true",
                         help="使用正式 6-stage TaskDraw 课程；当前只支持 height/motion/rotation/recovery")
+    parser.add_argument("--recover", action="store_true",
+                        help="使用华南虎式 recover task：随机翻倒 reset + action hold + 5s episode")
+    parser.add_argument("--recover-hold-s", type=float, default=.5)
+    parser.add_argument("--recover-height", type=float, default=.25)
     return parser.parse_args(argv)
 
 
@@ -69,6 +73,12 @@ def main(argv=None):
     if args.formal_curriculum:
         # 正式课程必须使用正式 reward，不能退回 M1 flat_reward。
         args.formal_reward = True
+    if args.recover:
+        args.formal_reward = True
+    if args.formal_curriculum and args.recover:
+        raise ValueError("formal-curriculum 与 recover 是不同任务，不能同时启用")
+    if args.recover and args.stage not in (None, 0):
+        raise ValueError("recover task 不使用 command curriculum stage")
     if not args.formal_curriculum and args.stage is not None and args.stage > 3:
         raise ValueError("M1 command 课程只有 stage 0-3；完整课程请用 --formal-curriculum")
     if args.formal_curriculum and args.stage not in (None, 0) and args.resume is None:
@@ -96,6 +106,7 @@ def main(argv=None):
             FormalCurriculumCapabilities, FormalTaskCurriculum, LabTaskDrawSampler,
         )
         from .formal_reward import FormalRewardConfig
+        from .recover import RecoverTaskSpec
         from .settings import load_asset_description
 
         settings = SettingsManager.instance()
@@ -161,9 +172,12 @@ def main(argv=None):
         if args.formal_reward:
             description = load_asset_description(asset, expected_manifest_sha256=expected_asset)
             formal_reward = FormalRewardConfig.from_manifest(description.manifest)
+        recover_spec = (RecoverTaskSpec(policy_dt_s=.01, action_hold_s=args.recover_hold_s,
+                                        height_command_m=args.recover_height)
+                        if args.recover else None)
         cfg = build_env_cfg(asset, num_envs=args.num_envs, env_spacing_m=args.env_spacing,
                             device=args.device, response=response, pair_domain=pair,
-                            formal_reward=formal_reward,
+                            formal_reward=formal_reward, recover=recover_spec,
                             expected_manifest_sha256=expected_asset)
         cfg.sim.enable_scene_query_support = True
         cfg.sim.physics = PhysxCfg(
@@ -175,7 +189,9 @@ def main(argv=None):
         )
         env = WheeledLabEnv(cfg)
         formal_task_sampler = None
-        if args.formal_curriculum:
+        if args.recover:
+            stage = 0
+        elif args.formal_curriculum:
             capabilities = FormalCurriculumCapabilities(recovery=True)
             formal_curriculum = FormalTaskCurriculum(
                 args.num_envs, device=args.device, seed=args.seed,
@@ -197,7 +213,7 @@ def main(argv=None):
         args.output.mkdir(parents=True, exist_ok=True)
         metrics_path = args.output / "metrics.jsonl"
         collector.reset()
-        print(f"LAB PPO start update={trainer.update_index} envs={args.num_envs} steps={args.rollout_steps} stage={stage} formal_reward={args.formal_reward} formal_curriculum={args.formal_curriculum}", flush=True)
+        print(f"LAB PPO start update={trainer.update_index} envs={args.num_envs} steps={args.rollout_steps} stage={stage} formal_reward={args.formal_reward} formal_curriculum={args.formal_curriculum} recover={args.recover}", flush=True)
         if args.formal_curriculum:
             print("FORMAL curriculum", formal_task_sampler.curriculum.snapshot(), flush=True)
         if args.formal_reward:
@@ -221,6 +237,8 @@ def main(argv=None):
                 "optimization_s": updated - collected,
                 "stage": stage,
                 "formal_reward": args.formal_reward,
+                "recover": args.recover,
+                "recover": args.recover,
                 "collector": collector.last_metrics,
                 "ppo": update_metrics,
             }
@@ -237,6 +255,7 @@ def main(argv=None):
                 "rolled_back": update_metrics.get("whole_actor_update_rolled_back"),
                 "stage": stage,
                 "formal_reward": args.formal_reward,
+                "recover": args.recover,
             }, ensure_ascii=False), flush=True)
             if trainer.update_index % args.checkpoint_interval == 0:
                 checkpoint = args.output / f"update_{trainer.update_index:05d}.pt"
@@ -252,6 +271,7 @@ def main(argv=None):
                     "stage": stage,
                     "formal_reward": args.formal_reward,
                     "formal_curriculum": args.formal_curriculum,
+                    "recover": args.recover,
                     "curriculum": (None if formal_task_sampler is None
                                    else _cpu(formal_task_sampler.state_dict())),
                     "formal_reward_available_terms": (

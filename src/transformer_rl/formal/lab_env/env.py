@@ -7,6 +7,7 @@ PhysicalRewardComposer。100Hz 策略/200Hz 反馈的边界保持不变。
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import time
 
@@ -17,6 +18,7 @@ from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import ContactSensor
 import isaaclab.sim as sim_utils
 
+from ..control.joints import LegBoundaryGeometry
 from ..control.observation import CommandFeatures, CommandMode, MechanicalBinding, NativePhysicalSample
 from ..control.pressure import NativeSliderPressure, PressureParameters
 from .actuator import WheeledControlCore
@@ -24,6 +26,8 @@ from .cfg import WheeledLabEnvCfg
 from .contract import ACTION_DIM, FlatTaskSpec, flat_reward, flat_termination
 from .formal_curriculum import LabTaskSample
 from .formal_reward import FormalRewardConfig, LabFormalReward
+from ..tasks.reward import RewardPhase
+from .recover import LabRecoverTask, RecoverTaskSpec
 from .recovery import LabRecoveryReset
 from .observations import LabObservationBuilder
 from .settings import LabEnvSettings, load_asset_description
@@ -79,11 +83,22 @@ class WheeledLabEnv(DirectRLEnv):
                                                    history_length=self.cfg.history_length)
         formal_config = getattr(cfg, "formal_reward_spec", None)
         self._formal_reward = None
+        self._boundary_geometry = None
         if formal_config is not None:
             if not isinstance(formal_config, FormalRewardConfig):
                 raise TypeError("cfg.formal_reward_spec 必须是 FormalRewardConfig")
-            self._formal_reward = LabFormalReward(self._binding, self.num_envs, formal_config,
-                                                 device=str(self._device))
+            raw = (self._asset.directory / "manifest.json").read_bytes()
+            spec = (self._asset.directory / "model_spec.json").read_bytes()
+            self._boundary_geometry = LegBoundaryGeometry.from_asset_sources(raw, spec, self._binding)
+            if "joint_boundary" not in formal_config.available_terms:
+                formal_config = replace(
+                    formal_config,
+                    available_terms=tuple(dict.fromkeys((*formal_config.available_terms, "joint_boundary"))),
+                )
+            self._formal_reward = LabFormalReward(
+                self._binding, self.num_envs, formal_config, device=str(self._device),
+                boundary_geometry=self._boundary_geometry,
+            )
             self._episode_id = torch.zeros(self.num_envs, dtype=torch.long, device=self._device)
             self._control_epoch = torch.zeros_like(self._episode_id)
             self._formal_initialized = torch.zeros(self.num_envs, dtype=torch.bool,
@@ -102,6 +117,18 @@ class WheeledLabEnv(DirectRLEnv):
         self._command_sampler = None
         self._task_sampler = None
         self._recovery_reset = None
+        recover_spec = getattr(cfg, "recover_spec", None)
+        self._recover_task = None
+        self._recover_initial_leg = None
+        if recover_spec is not None:
+            if not isinstance(recover_spec, RecoverTaskSpec):
+                raise TypeError("cfg.recover_spec 必须是 RecoverTaskSpec")
+            if self._formal_reward is None:
+                raise ValueError("recover task 必须同时启用 formal reward")
+            self._recover_task = LabRecoverTask(
+                self.num_envs, recover_spec, device=str(self._device), seed=int(getattr(cfg, "seed", 0) or 0))
+            self._recover_initial_leg = torch.zeros(self.num_envs, 4, dtype=torch.float32,
+                                                    device=self._device)
         self._issued_action = torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32,
                                           device=self._device)
         self._previous_action = torch.zeros_like(self._issued_action)
@@ -249,6 +276,25 @@ class WheeledLabEnv(DirectRLEnv):
         self._issued_action.copy_(actions.clamp(-self._action_bounds, self._action_bounds))
         q = self._as_torch(self.robot.data.joint_pos).index_select(1, self._active_indices)
         self._targets = self._control.decode(self._issued_action, q, self._clock())
+        if self._recover_task is not None:
+            hold = self._recover_task.hold_mask
+            self._command_mode.copy_(self._recover_task.task_mode(
+                int(CommandMode.RECOVERY), int(CommandMode.NORMAL)))
+            self._reward_phase.copy_(torch.where(
+                hold, torch.full_like(hold, int(RewardPhase.SUPPORT), dtype=torch.long),
+                torch.full_like(hold, int(RewardPhase.RECOVERY), dtype=torch.long)))
+            if hold.any():
+                zeros_wheel = torch.zeros(self.num_envs, 2, dtype=torch.float32, device=self._device)
+                self._targets = replace(
+                    self._targets,
+                    raw_leg_position_rad=torch.where(
+                        hold[:, None], self._recover_initial_leg, self._targets.raw_leg_position_rad),
+                    admitted_leg_position_rad=torch.where(
+                        hold[:, None], self._recover_initial_leg,
+                        self._targets.admitted_leg_position_rad),
+                    wheel_velocity_rad_s=torch.where(
+                        hold[:, None], zeros_wheel, self._targets.wheel_velocity_rad_s),
+                )
         if self._formal_reward is not None:
             dq = self._as_torch(self.robot.data.joint_vel).index_select(1, self._active_indices)
             self._formal_reward.begin(
@@ -300,10 +346,24 @@ class WheeledLabEnv(DirectRLEnv):
         self._last_tilt = tilt
         self._last_base_contact = base_contact
         if self._formal_reward is not None:
+            boundary = None
+            if self._boundary_geometry is not None and self._targets is not None:
+                boundary = self._boundary_geometry.evaluate(
+                    self._as_torch(self.robot.data.body_link_pose_w),
+                    self._as_torch(self.robot.data.joint_pos),
+                    self._targets, knee_margin_rad=.05,
+                ).shortfall_rad
             self._formal_reward.observe(
                 sample, state, effort_nm=self._last_effort, episode_id=self._episode_id,
                 control_epoch=self._control_epoch, command=self._command,
                 mode=self._command_mode, phase=self._reward_phase,
+                joint_boundary_shortfall_rad=boundary,
+            )
+        if self._recover_task is not None:
+            base_load = sample.terrain_contact_force_world_n[:, self._base_body_index].norm(dim=-1)
+            self._recover_task.success_mask(
+                wheel_force_n=state.wheel_ground_force_n, base_load_n=base_load,
+                height_m=state.height_above_ground_m, gravity_body=state.gravity_body,
             )
 
     def _reward_policy_step(self) -> torch.Tensor:
@@ -351,6 +411,11 @@ class WheeledLabEnv(DirectRLEnv):
             )
             self._last_reward.copy_(self._formal_result.learning_reward)
             self._reward_terms = self._formal_result.component_densities
+            if self._recover_task is not None:
+                self._last_reward.add_(self._recover_task.reward_bonus())
+                if self._recover_task.spec.hold_reward_zero:
+                    self._last_reward[self._recover_task.hold_mask] = 0.0
+                self._recover_task.advance()
         else:
             self._last_reward.copy_(self._reward_policy_step())
         self._last_truncated.copy_(truncated & ~self._terminated)
@@ -379,7 +444,14 @@ class WheeledLabEnv(DirectRLEnv):
         self._command_mode[ids] = int(CommandMode.NORMAL)
         self._reward_phase[ids] = 0
         self._recovery_posture[ids] = 0
-        if self._task_sampler is not None:
+        recover_plan = None
+        if self._recover_task is not None:
+            self._command[ids].zero_()
+            self._command[ids, 3] = self._recover_task.spec.height_command_m
+            recover_plan = self._recover_task.reset(
+                ids, self.scene.env_origins.index_select(0, ids),
+                self._as_torch(self.robot.data.default_joint_pos).index_select(0, ids))
+        elif self._task_sampler is not None:
             task_sample = self._task_sampler(ids)
             if (not isinstance(task_sample, LabTaskSample) or task_sample.command.shape != (count, 4)
                     or task_sample.mode.shape != (count,) or task_sample.phase.shape != (count,)
@@ -405,6 +477,11 @@ class WheeledLabEnv(DirectRLEnv):
         root_velocity = torch.zeros(count, 6, dtype=torch.float32, device=self._device)
         joint_position = self._as_torch(self.robot.data.default_joint_pos).index_select(0, ids).clone()
         joint_velocity = torch.zeros_like(joint_position)
+        if recover_plan is not None:
+            root_pose = recover_plan.root_pose_xyzw
+            root_velocity = recover_plan.root_velocity
+            joint_position = recover_plan.joint_position
+            joint_velocity = recover_plan.joint_velocity
         if task_sample is not None:
             recovery_rows = task_sample.mode == int(CommandMode.RECOVERY)
             if recovery_rows.any():
@@ -452,6 +529,9 @@ class WheeledLabEnv(DirectRLEnv):
                     (ids,), torch.ones(ids.numel(), dtype=torch.bool, device=self._device)),
                 self._clock(), self._episode_id, self._control_epoch,
             )
+        if self._recover_task is not None and recover_plan is not None:
+            self._recover_initial_leg[ids] = joint_position[
+                :, self._active_indices[:4]]
         q = self._as_torch(self.robot.data.joint_pos).index_select(1, self._active_indices)
         self._targets = self._control.decode(
             torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32, device=self._device),

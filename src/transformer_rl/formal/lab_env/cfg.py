@@ -13,6 +13,7 @@ from ..control.actuation import PairTargetDomain, ResponseParameters
 from .contract import ACTION_DIM, ACTOR_DIM, CRITIC_DIM, HISTORY_LENGTH, POLICY_DT_S, PHYSICS_DT_S
 from .contract import FlatTaskSpec
 from .formal_reward import FormalRewardConfig
+from .recover import RecoverTaskSpec
 from .settings import AssetDescription, load_asset_description
 
 from isaaclab.actuators import IdealPDActuatorCfg
@@ -193,6 +194,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
                   pair_domain: PairTargetDomain | None = None,
                   task: FlatTaskSpec | None = None,
                   formal_reward: FormalRewardConfig | None = None,
+                  recover: RecoverTaskSpec | None = None,
                   seed: int | None = 0,
                   expected_manifest_sha256: str | None = None) -> WheeledLabEnvCfg:
     """从资产目录构造可直接交给 WheeledLabEnv 的配置。"""
@@ -215,6 +217,9 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     object.__setattr__(cfg, "response_spec", response)
     object.__setattr__(cfg, "pair_domain_spec", pair_domain)
     object.__setattr__(cfg, "formal_reward_spec", formal_reward)
+    object.__setattr__(cfg, "recover_spec", recover)
+    if recover is not None:
+        cfg.episode_length_s = recover.episode_length_s
     cfg.robot_cfg = build_robot_cfg(asset, response=response)
     cfg.contact_sensor = build_contact_sensor_cfg()
     cfg.terrain = build_terrain_cfg()

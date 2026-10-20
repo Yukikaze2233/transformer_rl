@@ -33,7 +33,7 @@ class FormalRewardConfig:
     gamma: float = 0.99498743710662
     physics_dt_s: float = 0.005
     available_terms: tuple[str, ...] = LAB_AVAILABLE_TERMS
-    normal_load_source: str = "contact_force_norm"
+    normal_load_source: str = "contact_force_world_z_abs"
 
     @classmethod
     def from_manifest(cls, manifest):
@@ -50,7 +50,7 @@ class FormalRewardConfig:
                 or len(set(self.available_terms)) != len(self.available_terms)
                 or any(name not in REWARD_POSITIVE_TERMS + REWARD_COST_TERMS
                        for name in self.available_terms)
-                or self.normal_load_source != "contact_force_norm"):
+                or self.normal_load_source not in ("contact_force_norm", "contact_force_world_z_abs")):
             raise ValueError("正式 reward 配置的 mass/clock/term/source 不一致")
 
 
@@ -72,7 +72,8 @@ def reward_physics_from_lab(sample: NativePhysicalSample, state: MeasuredState, 
                             effort_nm: torch.Tensor, episode_id: torch.Tensor,
                             control_epoch: torch.Tensor, policy_owned: torch.Tensor,
                             available_terms: tuple[str, ...],
-                            normal_load_source: str = "contact_force_norm") -> RewardPhysics:
+                            joint_boundary_shortfall_rad: torch.Tensor | None = None,
+                            normal_load_source: str = "contact_force_world_z_abs") -> RewardPhysics:
     """构造正式 reward 的物理端点；不推断缺失的 slip/boundary。"""
     if not isinstance(sample, NativePhysicalSample) or not isinstance(state, MeasuredState):
         raise TypeError("正式 reward 需要 native sample 与 measured state")
@@ -82,11 +83,21 @@ def reward_physics_from_lab(sample: NativePhysicalSample, state: MeasuredState, 
             or policy_owned.shape != (n,) or policy_owned.dtype != torch.bool
             or not isinstance(available_terms, tuple)):
         raise ValueError("正式 reward 的 action/id/availability 张量布局不一致")
-    if normal_load_source != "contact_force_norm":
-        raise ValueError("LabEnv 只实现 contact force norm 来源")
-    body_load = sample.terrain_contact_force_world_n.norm(dim=-1)
+    force = sample.terrain_contact_force_world_n
+    if normal_load_source == "contact_force_norm":
+        body_load = force.norm(dim=-1)
+    elif normal_load_source == "contact_force_world_z_abs":
+        # 平地/当前 LabEnv 的地面法向是世界 Z；保存按体表分离的法向载荷，
+        # 不用三轴合力范数冒充 normal load。
+        body_load = force[..., 2].abs()
+    else:
+        raise ValueError("未知的 LabEnv normal load 来源")
     if not torch.isfinite(body_load).all():
         raise ValueError("接触力净范数必须有限")
+    boundary = (torch.zeros(n, 6, device=device) if joint_boundary_shortfall_rad is None
+                else joint_boundary_shortfall_rad)
+    if boundary.shape != (n, 6) or boundary.device != device or not torch.isfinite(boundary).all():
+        raise ValueError("joint boundary shortfall 需要有限 [N,6]")
     return RewardPhysics(
         sample.timestamp_s.clone(), episode_id.clone(), control_epoch.clone(), policy_owned.clone(),
         state.velocity_origin_body_m_s.clone(),
@@ -95,7 +106,7 @@ def reward_physics_from_lab(sample: NativePhysicalSample, state: MeasuredState, 
         state.height_above_ground_m.clone(), _roll_pitch(sample.root_link_orientation_xyzw),
         state.gravity_body.clone(), state.angular_velocity_body_rad_s.clone(),
         state.policy_velocity_rad_s.clone(), effort_nm.clone(), body_load,
-        torch.zeros(n, 2, device=device), torch.zeros(n, 6, device=device),
+        torch.zeros(n, 2, device=device), boundary,
         available_terms=available_terms,
     )
 
@@ -121,14 +132,16 @@ class LabFormalReward:
     """正式 reward composer 的 LabEnv 适配器；每个策略区间 begin→observe×2→finish。"""
 
     def __init__(self, binding: MechanicalBinding, num_envs: int, config: FormalRewardConfig,
-                 *, device="cpu"):
+                 *, device="cpu", boundary_geometry=None):
         if not isinstance(binding, MechanicalBinding) or type(num_envs) is not int or num_envs < 1:
             raise ValueError("正式 reward 需要 binding 和正整数环境数")
         if not isinstance(config, FormalRewardConfig):
             raise TypeError("config 必须是 FormalRewardConfig")
         tuning = RewardTuning(config.robot_mass_kg, gamma=config.gamma,
                               policy_dt_s=0.01, gravity_m_s2=9.81)
-        self.config, self.binding = config, binding
+        if "joint_boundary" in config.available_terms and boundary_geometry is None:
+            raise ValueError("formal reward 请求 joint_boundary 但没有提供 LegBoundaryGeometry")
+        self.config, self.binding, self.boundary_geometry = config, binding, boundary_geometry
         self.composer = PhysicalRewardComposer(
             binding, num_envs, tuning, device=device, physics_dt_s=config.physics_dt_s)
         self.num_envs, self.device = num_envs, torch.device(device)
@@ -158,13 +171,17 @@ class LabFormalReward:
 
     def observe(self, sample, state, *, effort_nm, episode_id, control_epoch,
                 command, mode, policy_owned=None, phase=None, jump_height_world_z_m=None,
-                jump_velocity_world_z_m_s=None, target_roll_pitch_rad=None):
+                jump_velocity_world_z_m_s=None, target_roll_pitch_rad=None,
+                joint_boundary_shortfall_rad=None):
         owned = (torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
                  if policy_owned is None else policy_owned)
+        if "joint_boundary" in self.config.available_terms and joint_boundary_shortfall_rad is None:
+            raise ValueError("formal reward 缺少 joint_boundary shortfall producer")
         physics = reward_physics_from_lab(
             sample, state, effort_nm=effort_nm, episode_id=episode_id,
             control_epoch=control_epoch, policy_owned=owned,
             available_terms=self.config.available_terms,
+            joint_boundary_shortfall_rad=joint_boundary_shortfall_rad,
             normal_load_source=self.config.normal_load_source)
         reference = reward_reference_from_command(
             command, mode, phase=phase, jump_height_world_z_m=jump_height_world_z_m,

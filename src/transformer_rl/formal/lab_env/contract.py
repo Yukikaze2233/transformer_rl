@@ -28,7 +28,7 @@ class FlatTaskSpec:
     action_bounds: tuple[float, ...] = (3.0, 3.0, 3.0, 3.0, 9.0, 9.0)
     nominal_height_m: float = 0.305
     minimum_height_m: float = 0.08
-    minimum_recovery_height_m: float = 0.04
+    minimum_recovery_height_m: float = 0.01
     failure_tilt_rad: float = 1.2
     base_contact_force_n: float = 30.0
     forward_sigma_m_s: float = 0.35

@@ -6,5 +6,5 @@ from __future__ import annotations
 
 __all__ = [
     "contract", "actuator", "observations", "settings",
-    "formal_curriculum", "formal_reward",
+    "formal_curriculum", "formal_reward", "recover",
 ]
