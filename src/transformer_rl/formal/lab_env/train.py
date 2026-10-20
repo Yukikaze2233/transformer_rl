@@ -1,10 +1,8 @@
-"""LabEnv 正式 PPO 入口。
+"""LabEnv 的直接采样/PPO诊断入口。
 
-默认使用 M1 平地 command 课程和 flat_reward；``--formal-reward`` 切换到
-PhysicalRewardComposer。PPO/auxiliary 数学仍复用 StructuredPPOTrainer。
-完整 3-phase 课程还需要 terrain/jump request 能力；当前入口只开放
-height/motion/rotation/recovery，未实现项会显式拒绝。
-进程启动必须设置与正式 run 相同的 CUDA/WSL 环境变量。
+PPO/auxiliary 数学复用 StructuredPPOTrainer。这里的 lab_ppo_v1 端点不具备
+完整正式 journal/control 合同；正式长训使用 lab_env.prepare 和 trainctl。
+阶段覆盖产生的验证偏移不能被解释为学习消费或用于正式恢复。
 """
 from __future__ import annotations
 
@@ -35,6 +33,43 @@ def _jsonable(value):
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+def _invocation_scope(args):
+    diagnostic = getattr(args, 'diagnostic_only', False)
+    stage = getattr(args, 'diagnostic_stage', None)
+    if args.resume is not None and args.init_checkpoint is not None:
+        raise ValueError('resume and warm start are distinct; choose only one checkpoint source')
+    if type(diagnostic) is not bool or (stage is not None and type(stage) is not int):
+        raise ValueError('diagnostic scope must be an explicit flag and integer stage')
+    if diagnostic != (stage is not None):
+        raise ValueError('diagnostic-only and diagnostic-stage must be supplied together')
+    if diagnostic and (not args.formal_curriculum or args.resume is not None
+                       or not 0 <= stage < (4 if args.include_jump else 3)):
+        raise ValueError('diagnostic stage requires a fresh formal curriculum and an available stage')
+    return {'validation_only': diagnostic, 'diagnostic_stage': stage,
+            'budget_scope': 'diagnostic_stage_offset' if diagnostic else 'lab_learning_updates',
+            'initialization': ('resume' if args.resume is not None else
+                               'warm_start' if args.init_checkpoint is not None else 'fresh')}
+
+
+def _require_resume_scope(payload):
+    if not isinstance(payload, dict) or payload.get('format') != 'lab_ppo_v1':
+        raise ValueError('Lab resume requires lab_ppo_v1; managed learning resumes through trainctl')
+    if (payload.get('validation_only', False) is not False or payload.get('diagnostic_stage') is not None
+            or payload.get('budget_scope') == 'diagnostic_stage_offset'):
+        raise ValueError('validation-only stage checkpoints cannot become learning resume points')
+    update = payload.get('update')
+    if type(update) is not int or update < 0:
+        raise ValueError('Lab resume requires its nonnegative completed update count')
+    if payload.get('formal_curriculum'):
+        curriculum = payload.get('curriculum')
+        budget = curriculum.get('budget') if isinstance(curriculum, dict) else None
+        consumed = budget.get('consumed') if isinstance(budget, dict) else None
+        if (not isinstance(consumed, (list, tuple)) or len(consumed) not in (3, 4)
+                or any(type(value) is not int or value < 0 for value in consumed)
+                or sum(consumed) != update):
+            raise ValueError('Lab curriculum consumption differs from actual completed PPO updates')
 
 
 def _parse_args(argv=None):
@@ -80,6 +115,7 @@ def _parse_args(argv=None):
 
 def main(argv=None):
     args = _parse_args(argv)
+    scope = _invocation_scope(args)
     if args.terrain_profile == 'course' and (args.terrain_atlas is None or not args.formal_curriculum):
         raise ValueError('course requires --terrain-atlas and --formal-curriculum')
     if args.terrain_atlas is not None and args.terrain_profile != 'course':
@@ -152,6 +188,8 @@ def main(argv=None):
         payload = None
         if source is not None:
             payload = torch.load(source, map_location="cpu", weights_only=False)
+            if args.resume is not None:
+                _require_resume_scope(payload)
         expected_asset = None
         if payload is not None:
             expected_asset = payload.get("asset_manifest_sha256")
@@ -269,6 +307,7 @@ def main(argv=None):
                 torch.cuda.synchronize()
             updated = time.perf_counter()
             record = {
+                **scope,
                 "update": trainer.update_index,
                 "collection_s": collected - collection_started,
                 "optimization_s": updated - collected,
@@ -303,6 +342,7 @@ def main(argv=None):
                 checkpoint = args.output / f"update_{trainer.update_index:05d}.pt"
                 temporary = checkpoint.with_suffix(".tmp")
                 torch.save({
+                    **scope,
                     "format": "lab_ppo_v1",
                     "policy": asdict(policy),
                     "ppo": asdict(ppo),
