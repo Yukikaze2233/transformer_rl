@@ -141,6 +141,7 @@ def runtime(recipe, components, configuration, *, control):
             'physics_capacity': configuration['physics'],
             'reward_contract': value.checkpoint_state_dict()['reward_contract'],
             'contact_mapping': getattr(env, 'contact_mapping_receipt', None),
+            'wheel_material': env.wheel_material_receipt,
             'cold_physical_state_restored': False, 'automatic_evaluation': False,
             'hardware_qualified': False, 'full_task_health_qualified': False})
         yield value

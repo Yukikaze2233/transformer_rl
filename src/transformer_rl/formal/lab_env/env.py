@@ -32,6 +32,7 @@ from .skill_fsm import JumpState, SkillFSM
 from ..tasks.reward import RewardPhase
 from .recover import LabRecoverTask, RecoverTaskSpec
 from .recovery import LabRecoveryReset
+from .materials import WheelMaterialReader
 from .observations import LabObservationBuilder
 from .settings import LabEnvSettings, load_asset_description
 
@@ -73,6 +74,9 @@ class WheeledLabEnv(DirectRLEnv):
         self._base_body_index = self._binding.native_body_names.index("base_link")
         self._wheel_body_indices = torch.tensor(
             self._binding.wheel_body_indices, dtype=torch.long, device=self._device)
+        self._wheel_materials = WheelMaterialReader(
+            self.robot, self._binding.wheel_body_indices,
+            num_envs=self.num_envs, device=self._device)
         self._action_bounds = torch.tensor(self._task.action_bounds, dtype=torch.float32,
                                            device=self._device)
         self._physics_dt_tensor = torch.full((self.num_envs,), float(self.physics_dt),
@@ -202,6 +206,10 @@ class WheeledLabEnv(DirectRLEnv):
                 from .terrain import LabTerrainCourse
                 self._terrain_course = LabTerrainCourse(self, self.cfg.course_manifest)
 
+    @property
+    def wheel_material_receipt(self):
+        return self._wheel_materials.receipt
+
     def _build_pressure(self):
         asset = self._asset.directory
         model = json.loads((asset / "model_spec.json").read_text())
@@ -324,8 +332,7 @@ class WheeledLabEnv(DirectRLEnv):
             self._observations.assembler.clean_sensors(state), commands, now_s=state.timestamp_s)
         if joint_acceleration is None:
             joint_acceleration = self._last_joint_acceleration
-        friction = state.wheel_friction
-        wheel_material = torch.stack((friction, friction, torch.zeros_like(friction)), -1).flatten(1)
+        wheel_material = self._wheel_materials.features()
         com_offset = self._observations.assembler._inverse_rotate(
             sample.root_link_orientation_xyzw,
             sample.root_com_position_world_m - sample.root_link_position_world_m)
