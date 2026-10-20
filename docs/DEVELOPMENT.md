@@ -38,3 +38,5 @@ git diff --check
 ```
 
 模型、unit/interface、性能和仿真检查在 Kaiser 已配置的环境执行，不在本机建 venv、下载依赖或启动模型测试。GitHub 的静态检查通过不代表 Kaiser 数值、闭链、物理或部署检查通过。新提交完成相关检查后再冻结新训练 release；训练期间保持该 release 不变。
+
+场地派生资产可在 Kaiser 完成原资源准入并持有四个 lease 后，用 `tools/check_terrain_assets.py --manifest <prepared/manifest.json> --output <new-directory>` 检查原生碰撞。工具核对输入 SHA、组合后的顶点与物理材质，再比较逐面射线和新增前立面网格；结果必须有 `completed=true`、`passed=true`，不能只看进程 exit 0。`--disable-mesh-welding` 只在独立检查场景覆盖焊接容差，供保留基线的 A/B 排查使用，不改源资产。静态射线通过仍不等于动态接触、整车或8192环境训练验收。
