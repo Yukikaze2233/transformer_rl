@@ -29,7 +29,9 @@ class LearningJournalSpec:
     rollout_steps: int
     epochs: int
     minibatches: int
-    target_rollouts: int = 35000
+    # Legacy journals omitted an explicit schedule extension. New complete
+    # runs pass 35000 through FormalTrainingSettings rather than reinterpret it.
+    target_rollouts: int = 30000
 
     def __post_init__(self):
         if (not isinstance(self.run_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', self.run_id)

@@ -55,6 +55,20 @@ def update(components, journal, index=1):
     journal.finish(components.observed_consumption(4), active_elapsed_s=2 * index)
 
 
+def test_legacy_recipe_keeps_identity_and_complete_schedule_is_explicit(tmp_path):
+    recipe, _, journal, _ = fixture(tmp_path)
+    with journal:
+        legacy = recipe.to_dict()
+        assert 'target_rollouts' not in legacy
+        restored = LearningRecipe.from_dict(legacy)
+        assert restored.sha256 == recipe.sha256
+        assert restored.journal_spec().target_rollouts == 30000
+        complete = replace(recipe, target_rollouts=35000)
+        assert complete.to_dict()['target_rollouts'] == 35000
+        assert complete.sha256 != recipe.sha256
+        assert LearningRecipe.from_dict(complete.to_dict()) == complete
+
+
 def test_complete_state_preserves_both_adams_quota_rng_and_nonrefundable_counts(tmp_path):
     recipe, state, journal, store = fixture(tmp_path)
     with journal:

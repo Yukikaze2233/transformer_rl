@@ -79,11 +79,17 @@ class LearningRecipe:
                 'domain': TaskDomain, 'protocol': RequestProtocolConfig, 'terrain': TerrainTuning}
 
     def to_dict(self):
-        return _document(asdict(self))
+        value = asdict(self)
+        # Preserve the canonical identity of existing 30k recipes. An explicit
+        # 35k field creates a different recipe; loading never extends an old run.
+        if self.target_rollouts == 30000:
+            value.pop('target_rollouts')
+        return _document(value)
 
     @classmethod
     def from_dict(cls, value):
-        if not isinstance(value, dict) or set(value) != {field.name for field in fields(cls)}:
+        expected = {field.name for field in fields(cls)}
+        if not isinstance(value, dict) or set(value) not in (expected, expected - {'target_rollouts'}):
             raise ValueError('learning recipe fields differ')
         arguments = dict(value)
         try:
