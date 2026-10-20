@@ -77,6 +77,17 @@ def test_fresh_worker_refuses_a_different_frozen_initialization():
         fresh_components(replace(recipe, initial_model_sha256='f' * 64))
 
 
+def test_fresh_complete_worker_constructs_the_jump_stage_without_changing_initial_weights():
+    recipe, state = components()
+    complete = fresh_components(replace(recipe, target_rollouts=35000))
+    assert complete.curriculum.stage_names == ('warmup', 'rough', 'hard', 'jump')
+    assert complete.curriculum.stage_budgets == (5000, 20000, 5000, 5000)
+    assert len(complete.sampler.stage_weights) == 4
+    assert complete.trainer.update_index == 0
+    assert all(torch.equal(value, state.model.state_dict()[name])
+               for name, value in complete.model.state_dict().items())
+
+
 def test_admitted_cuda_context_is_initialized_before_state_construction(tmp_path, monkeypatch):
     from transformer_rl.formal.runtime import process
 

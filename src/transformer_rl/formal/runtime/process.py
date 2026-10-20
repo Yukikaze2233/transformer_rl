@@ -24,7 +24,6 @@ from ..learning.checkpoint import LearningComponents, LearningRecipe, Structured
 from ..learning.collection import StructuredCollector
 from ..learning.loop import StructuredLearningLoop, load_stopped_attempt
 from ..policy import StructuredActorCritic
-from ..tasks.curriculum import ContinuousTaskSampler, CurriculumBudget
 from ..tasks.protocol import RequestProtocol
 from ..tasks.terrain import ContinuousTerrainGenerator
 from ...common.termination import _StopBudget
@@ -41,8 +40,7 @@ def fresh_components(recipe: LearningRecipe):
         raise ValueError('fresh learner differs from its frozen initial model')
     return LearningComponents(
         model, StructuredPPOTrainer(model, recipe.ppo),
-        CurriculumBudget(promotion=recipe.curriculum_promotion),
-        ContinuousTaskSampler(recipe.training_seed, device=recipe.device, domain=recipe.domain),
+        recipe.make_curriculum(), recipe.make_sampler(),
         ContinuousTerrainGenerator(recipe.training_seed, recipe.terrain),
         RequestProtocol(recipe.num_envs, device=recipe.device, config=recipe.protocol))
 

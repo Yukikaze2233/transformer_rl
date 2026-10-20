@@ -24,6 +24,7 @@ from .accounting import LearningJournal, LearningJournalSpec
 from .optimization import StructuredPPOConfig, StructuredPPOTrainer
 from ..contracts import StructuredCollectionConfig
 from ..policy import StructuredActorCritic, StructuredPolicyConfig
+from ..tasks import curriculum as task_curriculum
 from ..tasks.curriculum import ContinuousTaskSampler, CurriculumBudget, TaskDomain
 from ..tasks.protocol import RequestProtocol, RequestProtocolConfig
 from ..tasks.terrain import ContinuousTerrainGenerator, TerrainTuning
@@ -111,6 +112,23 @@ class LearningRecipe:
                                    self.ppo.epochs, self.ppo.minibatches,
                                    target_rollouts=self.target_rollouts)
 
+    @property
+    def stage_schedule(self):
+        """The explicit extension selects four stages; legacy recipes stay three."""
+        if self.target_rollouts > task_curriculum.TOTAL_BUDGET:
+            return (task_curriculum.COMPLETE_STAGE_NAMES, task_curriculum.COMPLETE_STAGE_BUDGETS,
+                    task_curriculum.COMPLETE_STAGE_WEIGHTS)
+        return task_curriculum.STAGE_NAMES, task_curriculum.STAGE_BUDGETS, task_curriculum.STAGE_WEIGHTS
+
+    def make_curriculum(self):
+        names, budgets, _weights = self.stage_schedule
+        return CurriculumBudget(promotion=self.curriculum_promotion,
+                                stage_names=names, stage_budgets=budgets)
+
+    def make_sampler(self):
+        return ContinuousTaskSampler(self.training_seed, device=self.device, domain=self.domain,
+                                     stage_weights=self.stage_schedule[2])
+
 
 @dataclass
 class LearningComponents:
@@ -133,11 +151,14 @@ class LearningComponents:
                 **{key: self.trainer.consumed[key] for key in LearningJournal._ACTUAL[4:]}}
 
     def validate_binding(self, recipe, journal):
+        names, budgets, weights = recipe.stage_schedule
         if (self.trainer.model is not self.model or self.model.config != recipe.policy
                 or self.trainer.config != recipe.ppo or self.sampler.domain != recipe.domain
                 or self.terrain.tuning != recipe.terrain or self.protocol.config != recipe.protocol
                 or self.protocol.num_envs != recipe.num_envs or self.protocol.device != torch.device(recipe.device)
                 or self.curriculum.promotion != recipe.curriculum_promotion
+                or self.curriculum.stage_names != names or self.curriculum.stage_budgets != budgets
+                or self.sampler.stage_weights != weights
                 or self.sampler.device != torch.device(recipe.device)
                 or any(type(v) is not int or v < 0 for v in
                        (self.attempted_vector_steps, self.returned_vector_steps, self.trainer.update_index))
@@ -314,9 +335,9 @@ class StructuredCheckpointStore:
         trainer.actor_optimizer.load_state_dict(payload['actor_adam'])
         trainer.critic_optimizer.load_state_dict(payload['critic_adam'])
         trainer.update_index, trainer.consumed = stats['update_index'], dict(stats['consumed'])
-        budget = CurriculumBudget(promotion=self.recipe.curriculum_promotion)
+        budget = self.recipe.make_curriculum()
         budget.load_state_dict(payload['curriculum'])
-        sampler = ContinuousTaskSampler(self.recipe.training_seed, device=self.recipe.device, domain=self.recipe.domain)
+        sampler = self.recipe.make_sampler()
         sampler.load_state_dict(payload['sampler'])
         terrain = ContinuousTerrainGenerator(self.recipe.training_seed, self.recipe.terrain)
         terrain.load_state_dict(payload['terrain'])

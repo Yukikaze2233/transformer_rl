@@ -29,16 +29,17 @@ def rng_and_threads():
     torch.set_num_threads(threads)
 
 
-def fixture(tmp_path, full=False):
+def fixture(tmp_path, full=False, target_rollouts=30000):
     network = StructuredActorCritic() if full else small_model()
     ppo = replace(StructuredPPOConfig(), epochs=1, minibatches=1, probe_endpoints=16,
                   evaluation_chunk=32, learning_rate=1e-6)
     terrain = TerrainTuning(.7, (.2, 1.1), .25)
     recipe = LearningRecipe('fixture', 2101, 4, 8, 'a' * 64, 'b' * 64, 'c' * 64,
                             StructuredCheckpointStore.model_sha256(network), network.config,
-                            ppo, StructuredCollectionConfig(), TaskDomain(), RequestProtocolConfig(), terrain)
-    components = LearningComponents(network, StructuredPPOTrainer(network, ppo), CurriculumBudget(),
-                                    ContinuousTaskSampler(2101), ContinuousTerrainGenerator(2101, terrain), RequestProtocol(4))
+                            ppo, StructuredCollectionConfig(), TaskDomain(), RequestProtocolConfig(), terrain,
+                            target_rollouts=target_rollouts)
+    components = LearningComponents(network, StructuredPPOTrainer(network, ppo), recipe.make_curriculum(),
+                                    recipe.make_sampler(), ContinuousTerrainGenerator(2101, terrain), RequestProtocol(4))
     journal = LearningJournal.create(tmp_path / 'journal', recipe.journal_spec(), authorized_boot=boot_id())
     directory = tmp_path / 'checkpoints'
     directory.mkdir()
@@ -88,6 +89,32 @@ def test_complete_state_preserves_both_adams_quota_rng_and_nonrefundable_counts(
         assert loaded.components.curriculum.state_dict() == state.curriculum.state_dict()
         assert loaded.components.trainer.consumed == state.trainer.consumed
         assert receipt['boundary']['reserved_transitions'] == 32 and not receipt['cold_physical_state_restored']
+
+
+def test_explicit_35k_snapshot_restores_four_stage_budget_and_jump_sampler(tmp_path):
+    recipe, state, journal, store = fixture(tmp_path, target_rollouts=35000)
+    with journal:
+        update(state, journal)
+        store.save('complete_course.pt', state)
+        restored = store.load('complete_course.pt').components
+        assert restored.curriculum.stage_names == ('warmup', 'rough', 'hard', 'jump')
+        assert restored.curriculum.stage_budgets == (5000, 20000, 5000, 5000)
+        assert restored.curriculum.consumed == [1, 0, 0, 0]
+        assert restored.trainer.consumed == state.trainer.consumed
+        assert len(journal.summary()['reserved_by_stage']) == 4
+        draw = restored.sampler.sample(1000, 3)
+        assert torch.bincount(draw.family, minlength=6).tolist() == [200, 100, 100, 100, 500, 0]
+        assert recipe.journal_spec().target_rollouts == 35000
+
+
+def test_35k_recipe_does_not_accept_legacy_three_stage_components(tmp_path):
+    recipe, state, journal, store = fixture(tmp_path, target_rollouts=35000)
+    with journal:
+        state.curriculum = CurriculumBudget()
+        state.sampler = ContinuousTaskSampler(2101)
+        with pytest.raises(ValueError, match='source-bound recipe'):
+            store.save('wrong_course.pt', state)
+        assert not (store.directory / 'wrong_course.pt').exists()
 
 
 def test_extra_task_rng_survives_snapshot_and_must_restore_before_cold_sampling(tmp_path):
