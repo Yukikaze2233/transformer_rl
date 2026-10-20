@@ -138,7 +138,8 @@ class LabRecoveryReset:
         patch = self._patch(ids, origins)
         placement = self.geometry.place(
             candidate.closure.tree_position, candidate.requested_root_orientation_xyzw,
-            origins[:, :2], patch, clearance_m=self.config.clearance_m,
+            origins[:, :2], patch,
+            clearance_m=self.config.clearance_m + candidate.release_clearance_m,
             loop_tolerance_m=self.config.loop_tolerance_m,
             wheel_support_tolerance_m=self.config.wheel_support_tolerance_m)
         if not placement.geometry_ready.all():
@@ -147,9 +148,15 @@ class LabRecoveryReset:
         native_order = [self.kinematics.binding.tree_joint_names.index(name)
                         for name in self.kinematics.binding.native_joint_names]
         joints = placement.tree_position[:, native_order].float()
-        # root_com_velocity 留零：release 姿态的向下速度由任务阶段另行施加；不能把
-        # 未实现的 release 脚本偷偷塞进 reset。
+        # The compiler expresses release velocity in the link body frame.
+        # With zero angular velocity, link-origin and CoM velocities agree.
+        # Applying it at reset needs no scripted action or policy handoff.
+        if candidate.angular_velocity_body_rad_s.any():
+            raise ValueError("recovery reset requires the compiler's zero angular velocity")
+        rotation = self.geometry._rotation(placement.root_pose_xyzw[:, 3:])
         velocity = torch.zeros(n, 6, dtype=torch.float32, device=self.device)
+        velocity[:, :3] = (rotation @ candidate.origin_velocity_body_m_s[..., None]).squeeze(-1).to(
+            device=self.device, dtype=torch.float32)
         joint_velocity = torch.zeros_like(joints).to(self.device)
         return RecoveryResetPose(root, joints.to(self.device), velocity, joint_velocity,
                                  posture_id.to(self.device), placement.geometry_ready.to(self.device))
