@@ -206,7 +206,7 @@ class LabTerrainCourse:
         for a completed estimate before issuing a new course request; do not
         consume an ID merely because the reset endpoint has no valid estimate.
         """
-        external = (request_id >= 0) | (cancel_id >= 0) | safety_abort
+        external = (request_id != -1) | (cancel_id != -1) | safety_abort
         self._course_stair_pending &= ~external
         issue = (self._course_stair_pending & ready & (self.tasks.active_id < 0)
                  & (self.stair_requests.active_id < 0))

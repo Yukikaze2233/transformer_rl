@@ -314,3 +314,15 @@ def test_downward_or_subcurb_courses_do_not_fabricate_upward_requests():
     course.advance_skill()
     assert course.stair_requests.active_id.eq(-1).all()
     assert not course._course_stair_pending.any()
+
+
+def test_invalid_external_id_is_not_overwritten_by_a_sampled_course_command():
+    from transformer_rl.formal.lab_env.course_tasks import RequestCommand
+    from transformer_rl.formal.tasks.protocol import RequestResponse
+
+    course = _sampled_stair_course()
+    course.submit_request('stair', RequestCommand(torch.tensor([-2, -1]), torch.tensor([.1, 0.])))
+    course.advance_skill()
+    assert course._last_stair_response[0] == int(RequestResponse.INVALID)
+    assert course.stair_requests.active_id[0] == -1
+    assert not course._course_stair_pending[0]
