@@ -8,6 +8,7 @@ import torch
 from ..control.observation import CommandMode
 from ..simulation.ground import WheelCollisionCentres
 from ..tasks.reward import RewardPhase
+from ..tasks.geometry import TerrainKind
 from ..tasks.terrain_courses import TerrainCourseRouter
 from ..tasks.terrain_query import StaticTerrainQuery
 from ..tasks.trajectory import DriveEnvelope
@@ -53,6 +54,11 @@ class LabTerrainCourse:
         self.tof_step_height_m = torch.zeros(env.num_envs, dtype=torch.float32, device=env._device)
         self.tof_request_id = torch.full((env.num_envs,), -1, dtype=torch.long, device=env._device)
         self._pending_requests = {'jump': None, 'stair': None}
+        # Training commands are sampled task intent, never inferred from scan
+        # or contact truth. A new physical episode supplies at most one request.
+        self._course_stair_pending = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
+        self._course_stair_height = torch.zeros(env.num_envs, device=env._device)
+        self._last_stair_response = torch.zeros(env.num_envs, dtype=torch.long, device=env._device)
 
     def _wheel_centres(self):
         env = self.env
@@ -175,6 +181,14 @@ class LabTerrainCourse:
         self.tof_step_height_m[ids] = 0
         self.tof_request_id[ids] = -1
         self.stair_requests.reset(ids, env._clock())
+        upward_course = ((task.mode == int(CommandMode.STAIR))
+                         & (task.terrain_kind != int(TerrainKind.STEP_DOWN)))
+        height = task.draw.step_up_m
+        self._course_stair_pending[ids] = (upward_course
+            & (height >= self.stair_requests.config.min_height_m)
+            & (height <= self.stair_requests.config.max_height_m))
+        self._course_stair_height[ids] = torch.where(upward_course, height, 0.)
+        self._last_stair_response[ids] = 0
         # A physical reset cancels only these rows, not another row's packet.
         for packet in self._pending_requests.values():
             if packet is not None:
@@ -184,6 +198,23 @@ class LabTerrainCourse:
                     packet.cancel_id[ids] = -1
                 if packet.safety_abort is not None:
                     packet.safety_abort[ids] = False
+
+    def _course_stair_command(self, request_id, height_m, cancel_id, safety_abort, ready):
+        """Fill vacant command rows from the sampled episode, exactly once.
+
+        An external request/cancel owns its row even if invalid or BUSY. Wait
+        for a completed estimate before issuing a new course request; do not
+        consume an ID merely because the reset endpoint has no valid estimate.
+        """
+        external = (request_id >= 0) | (cancel_id >= 0) | safety_abort
+        self._course_stair_pending &= ~external
+        issue = (self._course_stair_pending & ready & (self.tasks.active_id < 0)
+                 & (self.stair_requests.active_id < 0))
+        next_id = torch.maximum(self.stair_next_id, self.stair_requests.max_seen_id + 1)
+        request_id = torch.where(issue, next_id, request_id)
+        height_m = torch.where(issue, self._course_stair_height, height_m)
+        self._course_stair_pending &= ~issue
+        return request_id, height_m
 
     def advance_skill(self):
         # Deployment-visible request decision: env._completed_estimate comes
@@ -229,10 +260,13 @@ class LabTerrainCourse:
             # These inactive placeholders never become observations or labels.
             contact_probability = torch.where(ready[:, None], contact_probability, 0.)
             tilt = torch.where(ready, tilt, 0.)
+        request_id, height_request = self._course_stair_command(
+            request_id, height_request, cancel_id, safety_abort, ready)
         condition = self.stair_requests.step(
             now_s=env._clock(), request_id=request_id, height_m=height_request,
             cancel_id=cancel_id, jump_active=self.tasks.active_id >= 0,
             ready=ready & ~safety_abort)
+        self._last_stair_response.copy_(condition.response)
         # Each submitted packet is consumed once, including BUSY/invalid IDs.
         self.manual_stair_request.zero_()
         self.manual_stair_request_id.fill_(-1)
@@ -314,5 +348,8 @@ class LabTerrainCourse:
                 'tile_histogram': torch.bincount(self.router.tile, minlength=len(self.router.kinds)).tolist(),
                 'course_exits': int(self.router.course_exits.sum()),
                 'scan_queries': self.query.queries, 'scan_misses': int(self.query.misses),
+                'stair_response_last_interval': torch.bincount(
+                    self._last_stair_response, minlength=9).tolist(),
+                'stair_command_source': 'external packet or sampled episode command; no terrain sensing',
                 'request_responses': self.tasks.request_counters.tolist(),
                 'external_request_responses': self.tasks.external_request_counters.tolist()}

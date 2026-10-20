@@ -176,6 +176,9 @@ def _stair_command_with_truth(truth_height, *, return_course=False):
     course.tof_request_id = torch.full((n,), -1, dtype=torch.long)
     course.stair_next_id = torch.ones(n, dtype=torch.long)
     course._pending_requests = {'jump': None, 'stair': None}
+    course._course_stair_pending = torch.zeros(n, dtype=torch.bool)
+    course._course_stair_height = torch.zeros(n)
+    course._last_stair_response = torch.zeros(n, dtype=torch.long)
     course.advance_skill()
     if return_course:
         return course
@@ -252,3 +255,62 @@ def test_partial_reset_cancels_only_its_queued_external_request_rows():
     course.reset_commands(torch.tensor([0]), row)
     assert course._pending_requests['jump'].request_id.tolist() == [-1, 23]
     assert caller_packet.request_id.tolist() == [17, 23]
+
+
+def _sampled_stair_course(heights=(.08, .18), kinds=(3, 7)):
+    from dataclasses import replace
+    from test_lab_course_tasks import fixture
+    from transformer_rl.formal.control.observation import CommandMode
+
+    course = _stair_command_with_truth(0., return_course=True)
+    course.tasks, sample = fixture()
+    kind = torch.tensor(kinds, dtype=torch.long)
+    draw = replace(sample.draw, family=torch.full((2,), int(TaskFamily.TERRAIN)),
+                   terrain_kind=kind, step_up_m=torch.tensor(heights))
+    sample = replace(sample, draw=draw, terrain_kind=kind,
+                     mode=torch.full((2,), int(CommandMode.STAIR)))
+    course.env._skill_fsm.reset(torch.arange(2))
+    course.reset_commands(torch.arange(2), sample)
+    return course
+
+
+def test_sampled_stair_commands_reach_the_same_request_port_once():
+    from transformer_rl.formal.lab_env.skill_fsm import StairState
+
+    course = _sampled_stair_course()
+    course.advance_skill()
+    accepted = course.stair_requests.active_id.clone()
+    assert (accepted >= 0).all() and not course._course_stair_pending.any()
+    torch.testing.assert_close(course.stair_requests.height_m, torch.tensor([.08, .18]))
+    assert course.env._skill_fsm.stair.state.tolist() == [int(StairState.STEP_UP), int(StairState.BODY_BUMP)]
+    course.env._clock = lambda: torch.full((2,), .01, dtype=torch.float64)
+    course.advance_skill()
+    torch.testing.assert_close(course.stair_requests.max_seen_id, accepted)
+
+
+def test_sampled_stair_waits_for_estimate_and_external_request_owns_its_row():
+    from dataclasses import replace
+    from transformer_rl.formal.lab_env.course_tasks import RequestCommand
+
+    course = _sampled_stair_course()
+    course.env._completed_estimate = replace(course.env._completed_estimate,
+                                             valid=torch.tensor([False, True]))
+    course.advance_skill()
+    assert course._course_stair_pending.tolist() == [True, False]
+    assert course.stair_requests.active_id[0] == -1
+    course.env._clock = lambda: torch.full((2,), .01, dtype=torch.float64)
+    course.env._completed_estimate = replace(course.env._completed_estimate,
+                                             valid=torch.ones(2, dtype=torch.bool))
+    course.submit_request('stair', RequestCommand(torch.tensor([900, -1]), torch.tensor([.15, 0.])))
+    course.advance_skill()
+    assert course.stair_requests.active_id[0] == 900
+    assert not course._course_stair_pending.any()
+    assert course.stair_next_id[0] == 901
+    torch.testing.assert_close(course.stair_requests.height_m[0], torch.tensor(.15))
+
+
+def test_downward_or_subcurb_courses_do_not_fabricate_upward_requests():
+    course = _sampled_stair_course(heights=(.02, .18), kinds=(3, 4))
+    course.advance_skill()
+    assert course.stair_requests.active_id.eq(-1).all()
+    assert not course._course_stair_pending.any()

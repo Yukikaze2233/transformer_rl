@@ -34,6 +34,7 @@ def scene(tmp_path, components, *, seed=13):
     course.tasks = LabCourseTasks(4, DriveEnvelope(.06, .4), seed=seed)
     course.stair_requests = StairRequestProtocol(4)
     course.stair_next_id = torch.zeros(4, dtype=torch.long)
+    course._last_stair_response = torch.zeros(4, dtype=torch.long)
     reward = SimpleNamespace(config=FormalRewardConfig(16.),
                              missing_term_reasons={'contact_slip': 'No verified contact-point relative tangent velocity producer',
                                                    'joint_boundary': 'No selected-asset geometric boundary producer'})
