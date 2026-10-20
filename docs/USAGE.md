@@ -43,6 +43,8 @@ Lab 正式接入使用经过验收的源码和两个已审核 JSON：runtime 绑
 
 默认冻结35k四阶段；`--no-jump`显式创建不同的30k三阶段会话，不能用于扩容旧运行。原生场地、完整更新及控制边界验收齐备后，用 `/home/kaiser/.local/bin/trainctl start <new-session-directory>` 启动，再按上面的 pause/resume/stop 控制。已有会话只能走其正常保存端点恢复，不再次执行 prepare；冷恢复不会清零预算。源码必须来自已部署的审核版本，不能混用本机工作区与旧冻结 release。
 
+外部技能命令统一通过 `LabTerrainCourse.submit_request(skill, RequestCommand(...))` 提交：`skill` 为 `jump` 或 `stair`，`source` 为 `manual` 或 `tof`。ID、增高米数和可选 cancel/safety-abort 均为按环境行排列的张量，命令提交后由环境持有副本；每个技能每个边界只接受一个未消费的数据包。BUSY 或 NOT_READY 也会消费新 ID，重试须使用更大的 ID。两个新请求同时到达时 jump 优先，已活动的技能保留仲裁权。物理 reset 只清本行待处理命令，冷恢复不重放物理动作；此接口不改变训练的暂停状态。
+
 资源等待、失败与运行状态以看板和本次运行收据为准；不重复启动第二个控制器。跨boot恢复先核验并取得对应授权，旧PID和旧数值游标不再复用。
 
 ## 正式训练与人工评价

@@ -33,6 +33,11 @@ class RequestCommand:
     safety_abort: torch.Tensor | None = None
     source: str = 'manual'
 
+    def owned(self):
+        return replace(self, request_id=self.request_id.clone(), height_m=self.height_m.clone(),
+                       cancel_id=None if self.cancel_id is None else self.cancel_id.clone(),
+                       safety_abort=None if self.safety_abort is None else self.safety_abort.clone())
+
     def validate(self, count, device):
         if self.source not in ('manual', 'tof'):
             raise ValueError('request source must be manual or tof')
@@ -301,9 +306,11 @@ class LabCourseTasks:
                          else command.cancel_id)
             safety_abort = (torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
                             if command.safety_abort is None else command.safety_abort)
+        allowed_family = ((self.family == int(TaskFamily.REQUEST)) if command is None
+                          else (self.base_mode != int(CommandMode.RECOVERY)))
         condition = self.protocol.step(
             now_s=now, estimate=estimate, request_id=request_id, requested_height_m=requested_height,
-            cancel_id=cancel_id, allow_new=(self.family == int(TaskFamily.REQUEST)) & ~blocked,
+            cancel_id=cancel_id, allow_new=allowed_family & ~blocked,
             safety_abort=safety_abort)
         # External IDs may skip far ahead. Auto scheduling must resume above
         # the highest consumed ID, otherwise its next ID is a replay.

@@ -11,8 +11,7 @@ from ..tasks.reward import RewardPhase
 from ..tasks.terrain_courses import TerrainCourseRouter
 from ..tasks.terrain_query import StaticTerrainQuery
 from ..tasks.trajectory import DriveEnvelope
-from .course_tasks import LabCourseTasks, RequestResponse, StairRequestProtocol
-from .skill_fsm import StairState
+from .course_tasks import LabCourseTasks, RequestCommand, StairRequestProtocol
 
 
 class LabTerrainCourse:
@@ -53,6 +52,7 @@ class LabTerrainCourse:
         self.stair_next_id = torch.zeros(env.num_envs, dtype=torch.long, device=env._device)
         self.tof_step_height_m = torch.zeros(env.num_envs, dtype=torch.float32, device=env._device)
         self.tof_request_id = torch.full((env.num_envs,), -1, dtype=torch.long, device=env._device)
+        self._pending_requests = {'jump': None, 'stair': None}
 
     def _wheel_centres(self):
         env = self.env
@@ -124,6 +124,15 @@ class LabTerrainCourse:
             raise ValueError('stair cancel requires matching row IDs')
         self.stair_cancel_id[ids] = request_id
 
+    def submit_request(self, skill, command):
+        """One boundary packet per skill; manual and future ToF use the same port."""
+        if skill not in self._pending_requests or not isinstance(command, RequestCommand):
+            raise ValueError('external request requires jump/stair and a RequestCommand')
+        command.validate(self.env.num_envs, self.env._device)
+        if self._pending_requests[skill] is not None:
+            raise RuntimeError('unconsumed external request already owns this skill boundary')
+        self._pending_requests[skill] = command.owned()
+
     def submit_tof_step_height(self, height_m, request_id):
         value = torch.as_tensor(height_m, dtype=torch.float32, device=self.env._device)
         ids = torch.as_tensor(request_id, dtype=torch.long, device=self.env._device)
@@ -166,6 +175,15 @@ class LabTerrainCourse:
         self.tof_step_height_m[ids] = 0
         self.tof_request_id[ids] = -1
         self.stair_requests.reset(ids, env._clock())
+        # A physical reset cancels only these rows, not another row's packet.
+        for packet in self._pending_requests.values():
+            if packet is not None:
+                packet.request_id[ids] = -1
+                packet.height_m[ids] = 0
+                if packet.cancel_id is not None:
+                    packet.cancel_id[ids] = -1
+                if packet.safety_abort is not None:
+                    packet.safety_abort[ids] = False
 
     def advance_skill(self):
         # Deployment-visible request decision: env._completed_estimate comes
@@ -173,8 +191,11 @@ class LabTerrainCourse:
         # sensor; manual/ToF input is latched in the fields below.
         env = self.env
         blocked = self.stair_requests.active_id >= 0
+        jump_packet = self._pending_requests['jump']
+        self._pending_requests['jump'] = None
         admission, mode, rise, _ = self.tasks.step(
-            env._clock(), env._completed_estimate, env._ground_at_root, blocked_by_stair=blocked)
+            env._clock(), env._completed_estimate, env._ground_at_root,
+            command=jump_packet, blocked_by_stair=blocked)
         env._command_base.copy_(admission.admitted)
         env._base_command_mode.copy_(mode)
         # One-shot manual/ToF stair requests; jump has arbitration priority.
@@ -182,6 +203,16 @@ class LabTerrainCourse:
                                  self.tof_request_id)
         height_request = torch.where(self.manual_stair_request, self.manual_stair_height_m,
                                      self.tof_step_height_m)
+        stair_packet = self._pending_requests['stair']
+        self._pending_requests['stair'] = None
+        cancel_id = self.stair_cancel_id
+        safety_abort = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
+        if stair_packet is not None:
+            request_id, height_request = stair_packet.request_id, stair_packet.height_m
+            cancel_id = (torch.full_like(request_id, -1) if stair_packet.cancel_id is None
+                         else stair_packet.cancel_id)
+            if stair_packet.safety_abort is not None:
+                safety_abort = stair_packet.safety_abort
         estimate = env._completed_estimate
         if estimate is None:
             ready = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
@@ -200,7 +231,8 @@ class LabTerrainCourse:
             tilt = torch.where(ready, tilt, 0.)
         condition = self.stair_requests.step(
             now_s=env._clock(), request_id=request_id, height_m=height_request,
-            cancel_id=self.stair_cancel_id, jump_active=self.tasks.active_id >= 0, ready=ready)
+            cancel_id=cancel_id, jump_active=self.tasks.active_id >= 0,
+            ready=ready & ~safety_abort)
         # Each submitted packet is consumed once, including BUSY/invalid IDs.
         self.manual_stair_request.zero_()
         self.manual_stair_request_id.fill_(-1)
@@ -208,7 +240,7 @@ class LabTerrainCourse:
         self.stair_next_id.copy_(torch.maximum(
             self.stair_next_id, self.stair_requests.max_seen_id + 1))
         finished = condition.finished_id >= 0
-        self.stair_cancel_id.masked_fill_(finished, -1)
+        self.stair_cancel_id.fill_(-1)
         if finished.any():
             env._skill_fsm.stair.reset(finished.nonzero().flatten())
         stair = env._skill_fsm.stair.deployment_step(

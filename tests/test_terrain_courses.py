@@ -175,6 +175,7 @@ def _stair_command_with_truth(truth_height, *, return_course=False):
     course.tof_step_height_m = torch.zeros(n)
     course.tof_request_id = torch.full((n,), -1, dtype=torch.long)
     course.stair_next_id = torch.ones(n, dtype=torch.long)
+    course._pending_requests = {'jump': None, 'stair': None}
     course.advance_skill()
     if return_course:
         return course
@@ -205,3 +206,49 @@ def test_stale_completed_estimate_aborts_stair_without_using_simulator_truth():
     course.advance_skill()
     assert course.env._command_mode.eq(0).all()
     assert course.stair_requests.active_id.eq(-1).all()
+
+
+def test_common_request_port_owns_packets_and_arbitrates_jump_before_new_stair():
+    from test_lab_course_tasks import fixture
+    from transformer_rl.formal.lab_env.course_tasks import RequestCommand
+
+    course = _stair_command_with_truth(0., return_course=True)
+    course.stair_requests.clear(torch.ones(2, dtype=torch.bool))
+    course.env._skill_fsm.stair.reset()
+    course.tasks, _ = fixture()
+    course.tasks.family.zero_()
+    course.tasks.base_mode.zero_()
+    course.tasks.step(torch.zeros(2, dtype=torch.float64), course.env._completed_estimate,
+                      torch.zeros(2))
+    course.env._clock = lambda: torch.full((2,), .01, dtype=torch.float64)
+    caller_packet = RequestCommand(torch.tensor([17, 23]), torch.full((2,), .1), source='tof')
+    course.submit_request('jump', caller_packet)
+    caller_packet.height_m.fill_(.3)
+    course.submit_request('stair', RequestCommand(torch.tensor([31, 37]), torch.full((2,), .2)))
+    with pytest.raises(RuntimeError, match='unconsumed'):
+        course.submit_request('jump', caller_packet)
+    course.advance_skill()
+    assert course.tasks.protocol.active_id.tolist() == [17, 23]
+    torch.testing.assert_close(course.tasks.active_rise, torch.full((2,), .1))
+    assert course.stair_requests.active_id.eq(-1).all()
+    assert course.stair_requests.max_seen_id.tolist() == [31, 37]
+    assert course.env._command_mode.eq(4).all()
+    assert all(packet is None for packet in course._pending_requests.values())
+
+
+def test_partial_reset_cancels_only_its_queued_external_request_rows():
+    from dataclasses import fields, replace
+    from test_lab_course_tasks import fixture
+    from transformer_rl.formal.lab_env.course_tasks import RequestCommand
+
+    course = _stair_command_with_truth(0., return_course=True)
+    course.tasks, sample = fixture()
+    caller_packet = RequestCommand(torch.tensor([17, 23]), torch.full((2,), .1), source='manual')
+    course.submit_request('jump', caller_packet)
+    draw = replace(sample.draw, **{field.name: getattr(sample.draw, field.name)[:1]
+                                  for field in fields(sample.draw)})
+    row = replace(sample, draw=draw, command=sample.command[:1], request_height_m=sample.request_height_m[:1],
+                  terrain_kind=sample.terrain_kind[:1], mode=sample.mode[:1], phase=sample.phase[:1])
+    course.reset_commands(torch.tensor([0]), row)
+    assert course._pending_requests['jump'].request_id.tolist() == [-1, 23]
+    assert caller_packet.request_id.tolist() == [17, 23]

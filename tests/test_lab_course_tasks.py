@@ -97,6 +97,20 @@ def _touch_estimate(t, valid=True):
                              t.clone(), torch.full((2,), valid, dtype=torch.bool))
 
 
+def test_external_jump_request_is_not_gated_by_training_task_family():
+    from transformer_rl.formal.lab_env.course_tasks import RequestCommand
+
+    tasks, _ = fixture()
+    tasks.family.zero_()
+    tasks.base_mode.zero_()
+    now = torch.zeros(2, dtype=torch.float64)
+    command = RequestCommand(torch.tensor([17, 23]), torch.full((2,), .1))
+    _, mode, rise, _ = tasks.step(now, _touch_estimate(now - .01), torch.zeros(2), command=command)
+    assert tasks.protocol.active_id.tolist() == [17, 23]
+    assert mode.eq(4).all()
+    torch.testing.assert_close(rise, torch.full((2,), .1))
+
+
 def test_manual_and_tof_requests_share_busy_cancel_and_timeout_protocol():
     from transformer_rl.formal.lab_env.course_tasks import RequestCommand
 
