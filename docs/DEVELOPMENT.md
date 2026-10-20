@@ -49,4 +49,6 @@ Lab 快速采样的受控入口使用 `transformer_rl.formal.lab_env.runtime:run
 
 阶段覆盖诊断的日志和 checkpoint 保留 `validation_only`、`diagnostic_stage` 与 `budget_scope`；预填的阶段偏移不代表实际 PPO 消费，不能作为学习 resume 的来源。旧未标记的 Lab 端点仍须核对课程累计消费与实际 update，不能用诊断偏移扩充预算。warm start 与 resume 必须二选一；完整正式恢复继续使用 managed checkpoint 与 journal。
 
+新监督进程在 exec 后两次核对实际 boot、start 和完整 argv，再保存启动身份。父进程退出后，即使收据身份不一致也不再轮询该 PID；界面明确报错并拒绝恢复。不用后来的 status 修补旧收据或补造启动身份。
+
 直接 Lab 诊断与 managed 路径复用 `NativePhysicsHealth`：绑定当前进程继承的独占 stdout/stderr 文件，每轮采样返回后、PPO 更新前只读取新追加部分，不从仿真线程同步回调 Python。managed worker 已由父进程重定向；直接诊断需把两路输出重定向到该验证目录的文件。容量溢出或漏交互区间不能变成有效学习结果；这项检查不在逐 step 路径重做所有权或协议校验。

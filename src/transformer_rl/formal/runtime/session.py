@@ -40,6 +40,30 @@ class StructuredTrainingSession(ManagedSession):
             raise ValueError('not a private structured training session')
 
     @staticmethod
+    def _bind_child_identity(child, argv, authorized_boot, *, timeout_s=5.):
+        """Bind an actual owned child after exec, before retiring its identity.
+
+        Linux can briefly expose an empty cmdline while exec replaces it. Two
+        full matching observations are required; an incomplete launch never
+        becomes a resumable parent receipt by borrowing a later status file.
+        """
+        deadline = time.monotonic() + timeout_s
+        previous = None
+        while time.monotonic() < deadline:
+            if boot_id() != authorized_boot or child.poll() is not None:
+                return None
+            identity = process_identity(child.pid)
+            if (identity and identity.get('boot_id') == authorized_boot
+                    and identity.get('argv') == argv):
+                if identity == previous:
+                    return identity
+                previous = identity
+            else:
+                previous = None
+            time.sleep(.001)
+        return None
+
+    @staticmethod
     def source_sha256(package):
         table = {str(p.relative_to(package)): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in sorted(Path(package).rglob('*.py'))}
@@ -228,7 +252,7 @@ class StructuredTrainingSession(ManagedSession):
                                          stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
                                          pass_fds=(descriptor, *(v['fd'] for v in held), *inherited_fds))
             self.submitted_process = child
-            identity = process_identity(child.pid)
+            identity = self._bind_child_identity(child, argv, binding['boot_id'])
             if identity:
                 write_json(attempt / 'launch.json', identity)
             return self.status()
@@ -252,14 +276,14 @@ class StructuredTrainingSession(ManagedSession):
         with (attempt / 'worker.log').open('xb') as log:
             child = subprocess.Popen(argv, cwd=self.root, stdin=subprocess.DEVNULL,
                                      stdout=log, stderr=subprocess.STDOUT, pass_fds=descriptors)
-            identity = process_identity(child.pid)
+            identity = self._bind_child_identity(child, argv, binding['boot_id'])
             if identity:
                 write_json(attempt / 'worker_launch.json', identity)
             code = child.wait()
         write_json(attempt / 'exit.json', {'format': 'private_structured_child_exit',
                    'token': binding['token'], 'boot': binding['boot_id'], 'attempt': str(attempt),
                    'identity': identity, 'returncode': code})
-        return code
+        return code if identity is not None else (code or 2)
 
 
 if __name__ == '__main__':

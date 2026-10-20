@@ -205,12 +205,19 @@ class ManagedSession:
         current_boot = boot_id()
         identity = control.get("identity") or read_json(attempt / "launch.json")
         exit_receipt = read_json(attempt / "exit.json")
+        exit_identity_matches = bool(identity and exit_receipt and exit_receipt.get("identity") == identity)
         # Retired handles must not be polled on a different kernel boot.
         if current_boot != request["boot_id"]:
             result.update(phase=final["summary"]["phase"] if final else "interrupted", active=False, boot_changed=True)
-        elif exit_receipt and exit_receipt.get("identity") == identity:
+        elif exit_receipt:
+            # Any parent exit retires the handle, including a malformed launch
+            # binding. Report the contradiction instead of polling that PID.
             result["active"] = False
-            if not final:
+            if not exit_identity_matches:
+                result.update(phase="failed", error="parent exit receipt identity differs from worker status")
+            elif exit_receipt.get("returncode") != 0:
+                result.update(phase="failed", error="worker exited with a nonzero parent receipt")
+            elif not final:
                 result.update(phase="failed", error="worker exited without a committed learning endpoint")
         elif identity and process_identity(identity["pid"]) == identity:
             result["active"] = True
@@ -227,7 +234,9 @@ class ManagedSession:
             # Linux can clear cmdline during exit before releasing the inherited
             # flock. Do not report shutdown or permit a new attempt in that gap.
             result.update(phase="closing" if final else "ownership_pending", active=True)
-        result["checkpoint_resume"] = bool(final and final["summary"].get("phase") == "stopped")
+        result["checkpoint_resume"] = bool(final and final["summary"].get("phase") == "stopped"
+                                           and (not exit_receipt or
+                                                (exit_identity_matches and exit_receipt.get("returncode") == 0)))
         return result
 
 
