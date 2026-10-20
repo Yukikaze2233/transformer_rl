@@ -110,11 +110,14 @@ class LabCollector:
             next_observation = returned.observation
             final = returned.final_labels
             history_before = self._history
-            reset_before = ((next_observation.episode_id != current.episode_id)
-                            | (next_observation.control_epoch != current.control_epoch))
+            # ``reset_before`` belongs to the frame at the start of this step.
+            # The reset produced by this action belongs to the NEXT endpoint;
+            # storing it on the current observation corrupts window gaps.
+            reset_after = ((next_observation.episode_id != current.episode_id)
+                           | (next_observation.control_epoch != current.control_epoch))
             next_history = torch.cat((history_before[:, 1:],
                                       next_observation.frame[:, None]), 1)
-            next_history[reset_before] = next_observation.frame[reset_before, None].expand(
+            next_history[reset_after] = next_observation.frame[reset_after, None].expand(
                 -1, self.history_length, -1)
             _, next_raw_state, _ = self.model.actor.policy.outputs(next_history)
             self._profile_boundary('next_policy', step + 1)
@@ -180,6 +183,7 @@ class LabCollector:
 
             self._history = next_history
             self._current = next_observation
+            reset_before = reset_after
             self._profile_boundary('stored', step + 1)
 
         self._profile_boundary('rollout_complete', steps)
