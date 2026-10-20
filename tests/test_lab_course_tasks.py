@@ -90,3 +90,88 @@ def test_request_decision_rejects_same_tick_estimate_and_keeps_ids_across_reset(
     restored.reset(torch.arange(2), sample, torch.zeros(2, dtype=torch.float64))
     assert restored.protocol.max_seen_id.eq(0).all()
     assert restored.next_id.eq(1).all()
+
+
+def _touch_estimate(t, valid=True):
+    return CompletedEstimate(torch.zeros(2), torch.ones(2, 2), torch.zeros(2), torch.zeros(2),
+                             t.clone(), torch.full((2,), valid, dtype=torch.bool))
+
+
+def test_manual_and_tof_requests_share_busy_cancel_and_timeout_protocol():
+    from transformer_rl.formal.lab_env.course_tasks import RequestCommand
+
+    tasks, _ = fixture()
+    tasks.family[:] = 4
+    first = torch.zeros(2, dtype=torch.float64)
+    second = torch.full((2,), .01, dtype=torch.float64)
+    manual = RequestCommand(torch.zeros(2, dtype=torch.long), torch.full((2,), .10),
+                            source='manual')
+    tasks.step(first, _touch_estimate(torch.full((2,), -.01, dtype=torch.float64)), torch.zeros(2), command=manual)
+    tasks.step(second, _touch_estimate(first), torch.zeros(2), command=manual)
+    assert tasks.protocol.active_id.eq(0).all()
+
+    busy = RequestCommand(torch.ones(2, dtype=torch.long), torch.full((2,), .10), source='tof')
+    tasks.step(torch.full((2,), .02, dtype=torch.float64), _touch_estimate(second), torch.zeros(2),
+               command=busy)
+    assert tasks.external_request_counters[RequestResponse.BUSY].item() == 2
+
+    cancel = RequestCommand(torch.full((2,), -1, dtype=torch.long), torch.zeros(2),
+                            cancel_id=torch.zeros(2, dtype=torch.long), source='manual')
+    tasks.step(torch.full((2,), .03, dtype=torch.float64), _touch_estimate(torch.full((2,), .02, dtype=torch.float64)),
+               torch.zeros(2), command=cancel)
+    assert tasks.protocol.active_id.eq(-1).all()
+    assert tasks.external_request_counters[RequestResponse.CANCELLED].item() == 0
+
+    tof = RequestCommand(torch.full((2,), 2, dtype=torch.long), torch.full((2,), .10), source='tof')
+    tasks.step(torch.full((2,), .04, dtype=torch.float64), _touch_estimate(torch.full((2,), .02, dtype=torch.float64)),
+               torch.zeros(2), command=tof)
+    tasks.step(torch.full((2,), 7.0, dtype=torch.float64), _touch_estimate(torch.full((2,), 6.9, dtype=torch.float64)),
+               torch.zeros(2), command=RequestCommand(torch.full((2,), -1, dtype=torch.long), torch.zeros(2), source='tof'))
+    assert tasks.external_request_counters[RequestResponse.ACCEPTED].item() == 4
+
+
+def test_external_request_height_drives_reference_and_success_not_sampled_rise():
+    from transformer_rl.formal.lab_env.course_tasks import RequestCommand
+
+    tasks, _ = fixture()
+    tasks.family[:] = 4
+    tasks.rise[:] = .05
+    external = RequestCommand(torch.zeros(2, dtype=torch.long), torch.full((2,), .20), source='tof')
+    tasks.step(torch.zeros(2, dtype=torch.float64),
+               _touch_estimate(torch.full((2,), -.01, dtype=torch.float64)), torch.zeros(2), command=external)
+    tasks.step(torch.full((2,), .01, dtype=torch.float64),
+               _touch_estimate(torch.zeros(2, dtype=torch.float64)), torch.zeros(2), command=external)
+    assert tasks.protocol.active_id.eq(0).all()
+    assert tasks.active_rise.eq(.20).all()
+    reference = tasks.jump_reference()
+    torch.testing.assert_close(reference.target_apex_world_z_m - tasks.ground_anchor - tasks.latched_height,
+                               torch.full((2,), .20))
+    # A 0.10m physical rise must not satisfy a 0.20m external request.
+    tasks.observe_physics(torch.zeros(2, 2), torch.ones(2), torch.zeros(2), torch.full((2,), .42))
+    tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .42))
+    assert tasks.success_id.eq(-1).all()
+
+
+def test_large_external_id_does_not_make_the_next_auto_request_replay():
+    from transformer_rl.formal.lab_env.course_tasks import RequestCommand
+
+    tasks, _ = fixture()
+    tasks.family[:] = 4
+    tasks.rise[:] = .10
+    external = RequestCommand(torch.full((2,), 100, dtype=torch.long), torch.full((2,), .10), source='tof')
+    tasks.step(torch.zeros(2, dtype=torch.float64),
+               _touch_estimate(torch.full((2,), -.01, dtype=torch.float64)), torch.zeros(2), command=external)
+    tasks.step(torch.full((2,), .01, dtype=torch.float64),
+               _touch_estimate(torch.zeros(2, dtype=torch.float64)), torch.zeros(2), command=external)
+    assert tasks.protocol.active_id.eq(100).all()
+    cancel = RequestCommand(torch.full((2,), -1, dtype=torch.long), torch.zeros(2),
+                            cancel_id=torch.full((2,), 100, dtype=torch.long), source='manual')
+    tasks.step(torch.full((2,), .02, dtype=torch.float64),
+               _touch_estimate(torch.full((2,), .01, dtype=torch.float64)), torch.zeros(2), command=cancel)
+    assert tasks.protocol.active_id.eq(-1).all()
+    assert tasks.next_id.eq(101).all()
+    tasks.next_request_s[:] = 0
+    tasks.step(torch.full((2,), .03, dtype=torch.float64),
+               _touch_estimate(torch.full((2,), .02, dtype=torch.float64)), torch.zeros(2))
+    assert tasks.protocol.max_seen_id.eq(101).all()
+    assert tasks.protocol.active_id.eq(101).all()
