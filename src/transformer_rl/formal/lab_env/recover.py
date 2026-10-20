@@ -1,4 +1,4 @@
-"""华南虎式 recover task：随机翻倒 reset、落地 action hold、逐帧 success reward。
+"""随机翻倒 recover task：随机翻倒 reset、落地 action hold、逐帧 success reward。
 
 这不是 recovery FSM；它是一个独立 task：reset 后先让机器人自然落地，
 再由 policy 接管，episode 固定 5s。actor 仍使用 35D flags。
@@ -28,7 +28,7 @@ class RecoverTaskSpec:
     roll_range: tuple[float, float] = (-.5, .5)
     pitch_range: tuple[float, float] = (-.5, .5)
     yaw_range: tuple[float, float] = (-math.pi, math.pi)
-    root_height_range_m: tuple[float, float] = (.32, .38)
+    root_height_range_m: tuple[float, float] = (.30, .35)
     lin_vel_ranges: tuple[tuple[float, float], ...] = ((-.1, .1), (-.05, .05), (-.1, .1))
     ang_vel_ranges: tuple[tuple[float, float], ...] = ((-.3, .3), (-.3, .3), (-.5, .5))
     joint_position_jitter_rad: float = .1

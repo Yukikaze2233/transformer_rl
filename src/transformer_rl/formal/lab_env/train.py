@@ -2,7 +2,7 @@
 
 默认使用 M1 平地 command 课程和 flat_reward；``--formal-reward`` 切换到
 PhysicalRewardComposer。PPO/auxiliary 数学仍复用 StructuredPPOTrainer。
-完整 6-stage 课程还需要 terrain/jump request 能力；当前入口只开放
+完整 3-phase 课程还需要 terrain/jump request 能力；当前入口只开放
 height/motion/rotation/recovery，未实现项会显式拒绝。
 进程启动必须设置与正式 run 相同的 CUDA/WSL 环境变量。
 """
@@ -47,8 +47,8 @@ def _parse_args(argv=None):
     parser.add_argument("--env-spacing", type=float, default=4.0)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--stage", type=int, default=None, choices=range(6),
-                        help="M1 command stage 0-3；正式课程 fresh run 只能从 0 开始")
+    parser.add_argument("--stage", type=int, default=None, choices=range(4),
+                        help="M1 command stage 0-3；正式 3-phase 课程 fresh run 只能从 0 开始")
     parser.add_argument("--init-checkpoint", type=Path)
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--checkpoint-interval", type=int, default=1)
@@ -56,9 +56,9 @@ def _parse_args(argv=None):
     parser.add_argument("--formal-reward", action="store_true",
                         help="使用正式 PhysicalRewardComposer")
     parser.add_argument("--formal-curriculum", action="store_true",
-                        help="使用正式 6-stage TaskDraw 课程；当前只支持 height/motion/rotation/recovery")
+                        help="使用正式 3-phase TaskDraw 课程；当前只支持 height/motion/rotation/recovery")
     parser.add_argument("--recover", action="store_true",
-                        help="使用华南虎式 recover task：随机翻倒 reset + action hold + 5s episode")
+                        help="使用随机翻倒 recover task：随机翻倒 reset + action hold + 5s episode")
     parser.add_argument("--recover-hold-s", type=float, default=.5)
     parser.add_argument("--recover-height", type=float, default=.25)
     parser.add_argument("--height-scanner", action="store_true",

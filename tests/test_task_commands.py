@@ -12,9 +12,9 @@ from transformer_rl.formal.tasks.curriculum import ContinuousTaskSampler, TaskFa
 from transformer_rl.formal.tasks.protocol import CompletedEstimate, RequestProtocol, RequestResponse
 
 
-def fixture(count=120, stage=5):
+def fixture(count=120, stage=2):
     protocol = RequestProtocol(count)
-    start = torch.tensor([[0., 0., 0., .305]]).repeat(count, 1)
+    start = torch.tensor([[0., 0., 0., .32]]).repeat(count, 1)
     program = TaskCommandProgram(protocol, CommandStream(start, DriveEnvelope(.06, .4373), CommandRates(2., 3., .2)),
                                   JumpReferenceProgram())
     draw = ContinuousTaskSampler(2101).sample(count, stage)
@@ -36,7 +36,7 @@ def boundary(program, now, inputs=None):
     return condition, program.commands(now, torch.zeros(n, 6))
 
 
-@pytest.mark.parametrize('stage', range(6))
+@pytest.mark.parametrize('stage', range(3))
 def test_all_continuous_stage_draws_map_to_explicit_plans_without_becoming_a_second_policy(stage):
     p, draw, plan = fixture(stage=stage)
     p.reset(torch.ones(p.num_envs, dtype=torch.bool), plan, torch.zeros(p.num_envs, dtype=torch.float64))
@@ -46,7 +46,7 @@ def test_all_continuous_stage_draws_map_to_explicit_plans_without_becoming_a_sec
     assert commands.mode[draw.family == int(TaskFamily.RECOVERY)].eq(int(CommandMode.RECOVERY)).all()
     hold = plan.trajectory.kind == int(TrajectoryKind.HOLD)
     torch.testing.assert_close(plan.trajectory.start[hold], plan.trajectory.end[hold])
-    nominal = plan.trajectory.end.new_tensor((0., 0., 0., .305))
+    nominal = plan.trajectory.end.new_tensor((0., 0., 0., .32))
     torch.testing.assert_close(plan.trajectory.end[draw.nominal], nominal.expand(int(draw.nominal.sum()), -1))
     assert set(draw.family.tolist()).issubset(set(range(6)))
 

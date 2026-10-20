@@ -1,4 +1,4 @@
-"""正式 6-stage reward/PPO 课程的任务调度层。
+"""正式 3-phase reward/PPO 课程的任务调度层。
 
 这里只负责三件事：按冻结的 STAGE_WEIGHTS 采样 TaskDraw、维护不可退款的
 CurriculumBudget、把 stage 状态纳入 checkpoint。PPO 数学仍由
@@ -14,8 +14,9 @@ import torch
 
 from ..control.observation import CommandMode
 from ..tasks.curriculum import (
-    STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS, ContinuousTaskSampler,
-    CurriculumBudget, TaskDomain, TaskDraw, TaskFamily,
+    JUMP_BUDGET, JUMP_WEIGHTS, STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS,
+    TOTAL_BUDGET, ContinuousTaskSampler, CurriculumBudget, TaskDomain, TaskDraw,
+    TaskFamily,
 )
 from ..tasks.reward import RewardPhase
 
@@ -79,7 +80,7 @@ class FormalCurriculumState:
 
 
 class FormalTaskCurriculum:
-    """精确 6-stage 调度器；采样与名额记账共用一条 RNG/预算状态。"""
+    """精确 3-phase 调度器；采样与名额记账共用一条 RNG/预算状态。"""
 
     _FORMAT = "lab_formal_curriculum_v1"
 
@@ -260,10 +261,10 @@ class FormalPPOPlan:
             raise ValueError("promotion 必须是 exposure 或 audited")
         if tuple(self.stage_budgets) != STAGE_BUDGETS or tuple(self.stage_weights) != STAGE_WEIGHTS:
             raise ValueError("正式课程预算/权重必须与冻结定义一致")
-        if sum(self.stage_budgets) != 20000:
-            raise ValueError("正式课程总预算必须是 20000 updates")
+        if sum(self.stage_budgets) != TOTAL_BUDGET:
+            raise ValueError(f"正式课程总预算必须是 {TOTAL_BUDGET} updates")
         for index, weights in enumerate(self.stage_weights):
-            if (len(weights) != len(STAGE_NAMES) or abs(sum(weights) - 1) > 1e-9
+            if (len(weights) != len(TaskFamily) or abs(sum(weights) - 1) > 1e-9
                     or any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
                            for value in weights)):
                 raise ValueError(f"stage {index} 权重必须是有限非负且和为一")
@@ -274,6 +275,11 @@ class FormalPPOPlan:
         return {"index": index, "name": STAGE_NAMES[index],
                 "budget": self.stage_budgets[index],
                 "weights": self.stage_weights[index]}
+
+    def jump(self) -> dict:
+        """独立的跳跃巩固段；不计入三段主课程预算。"""
+        return {"name": "jump", "budget": JUMP_BUDGET,
+                "weights": JUMP_WEIGHTS, "after_main_budget": TOTAL_BUDGET}
 
 
 __all__ = [

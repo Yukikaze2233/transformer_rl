@@ -1,4 +1,4 @@
-"""华南虎式 recover task 的纯逻辑单测；不启动 Isaac。"""
+"""recover task 的纯逻辑单测；不启动 Isaac。"""
 import math
 
 import torch

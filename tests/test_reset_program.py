@@ -67,10 +67,10 @@ def test_six_families_keep_full_requested_draw_and_complete_courses_without_fail
     for f in fields(requested):
         assert torch.equal(getattr(value.draw, f.name), getattr(requested, f.name))
     assert value.commands.task_horizon_s.tolist() == [1., 1., 1., 1., 2., 2., 2.]
-    assert [c.request.extent.x_m for c in value.courses] == [(-12., 12.)] * 7
+    assert [c.request.extent.x_m for c in value.courses] == [(-7.4, 7.4)] * 7
     assert value.courses[3].request.kind == TerrainKind.ROUGH
     assert any(abs(z) > 0 for row in value.courses[3].surface.patches[0].z_m for z in row)
-    assert value.commands.trajectory.end[3].tolist() == pytest.approx([0., 0., 0., .305])
+    assert value.commands.trajectory.end[3].tolist() == pytest.approx([0., 0., 0., .32])
     assert value.recovery.requested_posture_id.tolist() == [0, 0, 0, 0, 0, 4, 14]
     assert not value.source_ready[-1] and value.recovery.required_preparation_action[-1].abs().max() > 3
     assert value.recovery.requested_leg_forward_pitch_rad[-1].min() > 3
@@ -80,16 +80,16 @@ def test_six_families_keep_full_requested_draw_and_complete_courses_without_fail
 
 def test_sampler_geometry_pose_rng_and_fair_quotas_resume_without_touching_global_rng():
     first, controller, origins = fixture(8)
-    first.sample(8, 5, origins, controller)
+    first.sample(8, 2, origins, controller)
     state = deepcopy(first.state_dict())
     global_rng = torch.random.get_rng_state().clone()
-    expected = first.sample(8, 5, origins, controller)
+    expected = first.sample(8, 2, origins, controller)
     assert torch.equal(torch.random.get_rng_state(), global_rng)
     second, other_controller, other_origins = fixture(8)
     bound_tasks, bound_terrain = second.tasks, second.terrain
     second.load_state_dict(state)
     assert second.tasks is bound_tasks and second.terrain is bound_terrain
-    actual = second.sample(8, 5, other_origins, other_controller)
+    actual = second.sample(8, 2, other_origins, other_controller)
     assert actual.patch.course_sha256 == expected.patch.course_sha256
     for f in fields(actual.draw):
         assert torch.equal(getattr(actual.draw, f.name), getattr(expected.draw, f.name))
@@ -149,7 +149,7 @@ def test_failed_preparation_retains_sampler_progress_and_attempt_accounting_with
 
     program.terrain.from_draw = fail
     with pytest.raises(RuntimeError, match='resource rejection'):
-        program.sample(2, 5, origins, controller)
+        program.sample(2, 2, origins, controller)
     assert not torch.equal(program.tasks.generator.get_state(), before['rng'])
     assert program.attempted_batches == 1 and program.requested_rows == 2 and program.completed_batches == 0
 

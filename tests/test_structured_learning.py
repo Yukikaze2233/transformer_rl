@@ -54,7 +54,7 @@ def components(promotion='exposure', checkpoint_interval=25):
     return recipe, state
 
 
-def attempt(root, name, descriptor, *, operation='resume', start=0, spent=0., target=20000):
+def attempt(root, name, descriptor, *, operation='resume', start=0, spent=0., target=30000):
     directory = root / name
     (directory / 'control').mkdir(parents=True)
     (directory / 'train' / 'checkpoints').mkdir(parents=True)
@@ -257,25 +257,25 @@ def test_selected_checkpoint_interval_is_consumed_by_the_complete_learning_loop(
 def test_exposure_training_crosses_every_stage_and_finishes_without_any_evaluation(tmp_path, monkeypatch):
     import transformer_rl.formal.tasks.curriculum as curriculum_module
 
-    # Six real synthetic updates exercise the complete control state machine;
-    # the separate schedule test covers the unchanged20000 formal budget.
-    monkeypatch.setattr(curriculum_module, 'STAGE_BUDGETS', (1, 1, 1, 1, 1, 1))
+    # Three real synthetic updates exercise the complete control state machine;
+    # the separate schedule test covers the unchanged 30000 formal budget.
+    monkeypatch.setattr(curriculum_module, 'STAGE_BUDGETS', (1, 1, 1))
     original = LearningRecipe.journal_spec
     monkeypatch.setattr(LearningRecipe, 'journal_spec',
-                        lambda recipe: replace(original(recipe), target_rollouts=6))
+                        lambda recipe: replace(original(recipe), target_rollouts=3))
     with fixture(tmp_path) as (loop, env, directory):
-        for stage in range(6):
+        for stage in range(3):
             loop.run_update()
             assert loop.components.curriculum.consumed[stage] == 1
         result = read_json(directory / 'control' / 'result.json')
         assert result['summary']['phase'] == 'completed'
         assert result['summary']['stop_reason'] == 'training_budget_complete'
-        assert result['summary']['update'] == 6 and loop._finished
-        assert loop.components.curriculum.decisions == [] and env.counter == 96
-        assert loop.journal.summary()['reserved_by_stage'] == [1] * 6
+        assert result['summary']['update'] == 3 and loop._finished
+        assert loop.components.curriculum.decisions == [] and env.counter == 48
+        assert loop.journal.summary()['reserved_by_stage'] == [1] * 3
         marker = read_json(loop.store.directory / 'latest.json')
         assert marker['purpose'] == 'training_budget_complete'
-        assert loop.store.load('final.pt').components.trainer.update_index == 6
+        assert loop.store.load('final.pt').components.trainer.update_index == 3
 
 
 def test_stop_at_zero_preserves_initialization_and_is_acknowledged_only_after_complete_snapshot(tmp_path):

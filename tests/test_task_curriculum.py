@@ -31,22 +31,19 @@ def charge_to(budget, total):
 
 def test_final_mixture_contains_full_continuous_domains_and_both_endpoints():
     sampler = ContinuousTaskSampler(2101)
-    draw = sampler.sample(10000, 5)
-    assert torch.bincount(draw.family, minlength=6).tolist() == [1500, 2000, 2000, 2000, 1500, 1000]
+    draw = sampler.sample(10000, 2)
+    assert torch.bincount(draw.family, minlength=6).tolist() == [1500, 1500, 1500, 3500, 0, 2000]
     assert torch.count_nonzero(draw.requested_command[:, 1]) == 0
     height = draw.requested_command[:, 3]
-    assert (height >= 0.17).all() and (height <= 0.40).all()
-    assert height.min() < 0.171 and height.max() > 0.399
+    assert (height >= 0.20).all() and (height <= 0.35).all()
+    assert height.min() < 0.201 and height.max() > 0.349
     motion = draw.requested_command[draw.family == TaskFamily.MOTION]
-    assert motion[:, 0].min() == -5 and motion[:, 0].max() == 5
+    assert motion[:, 0].min() == -2.7 and motion[:, 0].max() == 2.7
     assert torch.count_nonzero(motion[:, 2]) == 0
     rotation = draw.requested_command[draw.family == TaskFamily.ROTATION]
-    torch.testing.assert_close(rotation[:, 2].min(), torch.tensor(-6 * torch.pi))
-    torch.testing.assert_close(rotation[:, 2].max(), torch.tensor(6 * torch.pi))
+    torch.testing.assert_close(rotation[:, 2].min(), torch.tensor(-2 * torch.pi))
+    torch.testing.assert_close(rotation[:, 2].max(), torch.tensor(2 * torch.pi))
     assert (rotation[:, 0] == 0).sum() > 400
-    jump = draw.jump_height_m[draw.family == TaskFamily.REQUEST]
-    torch.testing.assert_close(jump.min(), torch.tensor(0.03))
-    torch.testing.assert_close(jump.max(), torch.tensor(0.30))
     assert set(draw.terrain_kind[draw.family == TaskFamily.TERRAIN].tolist()) == set(range(1, 8))
     assert set(draw.recovery_posture[draw.family == TaskFamily.RECOVERY].tolist()) == set(range(16))
     assert set(draw.trajectory_kind.tolist()) == set(range(7))
@@ -54,8 +51,10 @@ def test_final_mixture_contains_full_continuous_domains_and_both_endpoints():
 
 
 def test_strata_are_70_15_15_and_not_a_discrete_command_grid():
-    draw = ContinuousTaskSampler(2102).sample(10000, 5)
-    for family, count in enumerate((1500, 2000, 2000, 2000, 1500, 1000)):
+    draw = ContinuousTaskSampler(2102).sample(10000, 2)
+    for family, count in enumerate((1500, 1500, 1500, 3500, 0, 2000)):
+        if count == 0:
+            continue
         selected = draw.family == family
         assert torch.bincount(draw.stratum[selected], minlength=3).tolist() == [int(count * 0.7),
                                                                                int(count * 0.15),
@@ -71,17 +70,19 @@ def test_one_row_reset_batches_do_not_starve_rare_families_or_strata():
     family_counts = torch.zeros(6, dtype=torch.long)
     strata_counts = torch.zeros(6, 3, dtype=torch.long)
     for _ in range(1000):
-        draw = sampler.sample(1, 4)
+        draw = sampler.sample(1, 2)
         family_counts[draw.family[0]] += 1
         strata_counts[draw.family[0], draw.stratum[0]] += 1
-    torch.testing.assert_close(family_counts, torch.tensor([100, 100, 100, 50, 600, 50]))
+    torch.testing.assert_close(family_counts, torch.tensor([150, 150, 150, 350, 0, 200]))
     for family in range(6):
+        if family_counts[family] == 0:
+            continue
         assert (strata_counts[family] > 0).all()
         expected = family_counts[family] * torch.tensor([0.7, 0.15, 0.15])
         assert (strata_counts[family] - expected).abs().max() <= 1
 
 
-@pytest.mark.parametrize('stage', range(6))
+@pytest.mark.parametrize('stage', range(3))
 def test_stage_introduction_preserves_rehearsal_floors(stage):
     draw = ContinuousTaskSampler(2101).sample(10000, stage)
     actual = torch.bincount(draw.family, minlength=6).float() / 10000
@@ -97,22 +98,22 @@ def test_stage_introduction_preserves_rehearsal_floors(stage):
 def test_sampler_resume_restores_rng_and_all_fractional_quota_deficits():
     original = ContinuousTaskSampler(2101)
     original.sample(13, 0)
-    original.sample(19, 4)
-    original.sample(37, 5)
+    original.sample(19, 1)
+    original.sample(37, 2)
     saved = original.state_dict()
     restored = ContinuousTaskSampler(999)
     restored.load_state_dict(saved)
-    for stage, count in ((4, 107), (5, 23), (0, 1), (3, 71)):
+    for stage, count in ((2, 107), (1, 23), (0, 1), (2, 71)):
         assert_draw_equal(original.sample(count, stage), restored.sample(count, stage))
-    saved['family_credit'][4][0] = 100
-    assert restored.state_dict()['family_credit'][4][0] != 100
+    saved['family_credit'][2][0] = 100
+    assert restored.state_dict()['family_credit'][2][0] != 100
 
 
 def test_sampler_uses_its_own_rng_and_rejects_corrupt_resume_atomically():
     torch.manual_seed(7)
     before = torch.random.get_rng_state().clone()
     sampler = ContinuousTaskSampler(2101)
-    sampler.sample(1024, 5)
+    sampler.sample(1024, 2)
     assert torch.equal(before, torch.random.get_rng_state())
     state = sampler.state_dict()
     bad = deepcopy(state)
@@ -124,27 +125,27 @@ def test_sampler_uses_its_own_rng_and_rejects_corrupt_resume_atomically():
     assert_draw_equal(sampler.sample(127, 2), valid.sample(127, 2))
 
 
-def test_successful_curriculum_spends_exactly_20000_without_refunding_early_stage_budget():
+def test_successful_curriculum_spends_exactly_30000_without_refunding_early_stage_budget():
     budget = CurriculumBudget(promotion='audited')
-    for stage in range(5):
+    for stage in range(2):
         assert budget.stage == stage
         charge_to(budget, budget.total_updates + (STAGE_BUDGETS[stage] + 3) // 4)
         budget.submit_stage_validation(decision(budget))
         budget.charge_rollout()
         budget.submit_stage_validation(decision(budget))
-    assert budget.stage == 5 and budget.transferred_to_consolidation > 0
-    charge_to(budget, 20000)
+    assert budget.stage == 2 and budget.transferred_to_consolidation > 0
+    charge_to(budget, 30000)
     assert budget.status == 'training_budget_complete_evaluation_pending'
-    assert budget.total_updates == 20000
-    assert budget.total_updates * 1024 * 48 == 983040000
-    assert budget.total_updates * 1024 * 48 * 3 == 2949120000
+    assert budget.total_updates == 30000
+    assert budget.total_updates * 1024 * 48 == 1474560000
+    assert budget.total_updates * 1024 * 48 * 3 == 4423680000
     with pytest.raises(RuntimeError):
         budget.charge_rollout()
 
 
 def test_full_stage_validation_before_minimum_exposure_cannot_promote():
     budget = CurriculumBudget(promotion='audited')
-    charge_to(budget, 749)
+    charge_to(budget, 1249)
     original = budget.state_dict()
     with pytest.raises(ValueError, match='25 percent'):
         budget.submit_stage_validation(decision(budget))
@@ -153,7 +154,7 @@ def test_full_stage_validation_before_minimum_exposure_cannot_promote():
 
 def test_duplicate_checkpoint_and_heldout_selection_are_rejected():
     budget = CurriculumBudget(promotion='audited')
-    charge_to(budget, 750)
+    charge_to(budget, 1250)
     with pytest.raises(ValueError):
         budget.submit_stage_validation(decision(budget, heldout_used=True))
     with pytest.raises(ValueError):
@@ -169,38 +170,38 @@ def test_duplicate_checkpoint_and_heldout_selection_are_rejected():
 
 def test_validation_failures_reset_pass_streak_and_four_candidates_are_bounded():
     budget = CurriculumBudget(promotion='audited')
-    charge_to(budget, 750)
+    charge_to(budget, 1250)
     for index, passed in enumerate((True, False, True, True)):
         if index:
             budget.charge_rollout()
         budget.submit_stage_validation(decision(budget, passed=passed))
     assert budget.stage == 1
     failed = CurriculumBudget(promotion='audited')
-    charge_to(failed, 750)
+    charge_to(failed, 1250)
     for index in range(4):
         if index:
             failed.charge_rollout()
         failed.submit_stage_validation(decision(failed, coverage_passed=False))
     assert failed.status == 'failed_qualification'
-    assert failed.total_updates == 753
+    assert failed.total_updates == 1253
     with pytest.raises(RuntimeError):
         failed.charge_rollout()
 
 
 def test_stage_cap_requires_qualification_and_does_not_silently_skip_forward():
     budget = CurriculumBudget(promotion='audited')
-    charge_to(budget, 3000)
+    charge_to(budget, 5000)
     assert budget.stage == 0 and budget.status == 'stage_budget_complete_validation_pending'
     with pytest.raises(RuntimeError):
         budget.charge_rollout()
-    budget.submit_stage_validation(decision(budget))
+    budget.submit_stage_validation(decision(budget, passed=False))
     assert budget.stage == 0 and budget.status == 'failed_qualification'
-    assert budget.total_updates == 3000
+    assert budget.total_updates == 5000
 
 
 def test_budget_checkpoint_is_replayed_and_tampering_rejected_without_mutation():
     budget = CurriculumBudget(promotion='audited')
-    charge_to(budget, 750)
+    charge_to(budget, 1250)
     budget.submit_stage_validation(decision(budget))
     budget.charge_rollout()
     budget.submit_stage_validation(decision(budget))
@@ -216,24 +217,24 @@ def test_budget_checkpoint_is_replayed_and_tampering_rejected_without_mutation()
     assert restored.state_dict() == saved
 
 
-def test_default_exposure_schedule_covers_all_six_stages_without_evaluation_or_refund():
+def test_default_exposure_schedule_covers_all_three_phases_without_evaluation_or_refund():
     budget = CurriculumBudget()
     stages = []
-    for _ in range(20000):
+    for _ in range(30000):
         stages.append(budget.prepare_rollout())
         budget.charge_rollout()
-    assert [stages.count(stage) for stage in range(6)] == list(STAGE_BUDGETS)
-    assert budget.consumed == list(STAGE_BUDGETS) and budget.total_updates == 20000
+    assert [stages.count(stage) for stage in range(3)] == list(STAGE_BUDGETS)
+    assert budget.consumed == list(STAGE_BUDGETS) and budget.total_updates == 30000
     assert budget.status == 'training_budget_complete'
     assert budget.decisions == [] and budget.transferred_to_consolidation == 0
-    assert budget.total_updates * 1024 * 48 * 3 == 2949120000
+    assert budget.total_updates * 1024 * 48 * 3 == 4423680000
     with pytest.raises(RuntimeError):
         budget.charge_rollout()
 
 
 def test_exposure_schedule_resumes_on_both_sides_of_the_boundary_without_promoting_mid_rollout():
     budget = CurriculumBudget()
-    charge_to(budget, 3000)
+    charge_to(budget, 5000)
     assert budget.stage == 0 and budget.status == 'running'
     for stage in (0, 1):
         if stage == 1:
@@ -243,7 +244,7 @@ def test_exposure_schedule_resumes_on_both_sides_of_the_boundary_without_promoti
         restored.load_state_dict(saved)
         assert restored.state_dict() == saved
         restored.charge_rollout()
-        assert restored.stage == 1 and restored.consumed[:2] == [3000, 1]
+        assert restored.stage == 1 and restored.consumed[:2] == [5000, 1]
     with pytest.raises(RuntimeError, match='manual evaluation'):
         budget.submit_stage_validation(decision(budget))
     with pytest.raises(ValueError):

@@ -1,4 +1,4 @@
-"""正式 6-stage 课程调度单测；不启动 Isaac。"""
+"""正式 3-phase 课程调度单测；不启动 Isaac。"""
 from copy import deepcopy
 
 import pytest
@@ -10,7 +10,7 @@ from transformer_rl.formal.lab_env.formal_curriculum import (
 )
 from transformer_rl.formal.control.observation import CommandMode
 from transformer_rl.formal.tasks.curriculum import (
-    STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS, TaskFamily,
+    JUMP_BUDGET, JUMP_WEIGHTS, STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS, TaskFamily,
 )
 
 
@@ -22,9 +22,10 @@ def test_stage_weights_and_budgets_are_exactly_the_frozen_course():
     plan = FormalPPOPlan()
     assert plan.stage_budgets == STAGE_BUDGETS
     assert plan.stage_weights == STAGE_WEIGHTS
-    assert sum(plan.stage_budgets) == 20000
+    assert sum(plan.stage_budgets) == 30000
     assert plan.stage(0)["weights"] == STAGE_WEIGHTS[0]
-    assert plan.stage(5)["name"] == "consolidation"
+    assert plan.stage(2)["name"] == "hard"
+    assert plan.jump()["budget"] == 5000
 
 
 def test_default_capabilities_refuse_recovery_stage_zero_instead_of_faking_it():
@@ -36,7 +37,7 @@ def test_default_capabilities_refuse_recovery_stage_zero_instead_of_faking_it():
 
 def test_full_capabilities_sample_every_stage_family_exactly():
     curriculum = FormalTaskCurriculum(16, capabilities=all_capabilities(), seed=7)
-    for stage in range(6):
+    for stage in range(3):
         curriculum.budget.stage = stage
         draw = curriculum.sample(torch.arange(16))
         counts = torch.bincount(draw.family, minlength=6).float() / 16
@@ -47,11 +48,11 @@ def test_full_capabilities_sample_every_stage_family_exactly():
 
 def test_budget_advances_only_on_update_boundary_and_is_not_refunded():
     curriculum = FormalTaskCurriculum(4, capabilities=all_capabilities())
-    curriculum.budget.consumed = [STAGE_BUDGETS[0], 0, 0, 0, 0, 0]
+    curriculum.budget.consumed = [STAGE_BUDGETS[0], 0, 0]
     assert curriculum.stage == 0
     assert curriculum.begin_update() == 1
     assert curriculum.stage == 1
-    assert curriculum.budget.consumed == [STAGE_BUDGETS[0], 1, 0, 0, 0, 0]
+    assert curriculum.budget.consumed == [STAGE_BUDGETS[0], 1, 0]
     assert curriculum.budget.total_updates == STAGE_BUDGETS[0] + 1
 
 
@@ -91,15 +92,15 @@ def test_task_draw_sampler_refuses_unimplemented_terrain_and_jump():
     curriculum = FormalTaskCurriculum(8, capabilities=FormalCurriculumCapabilities(
         terrain=True, requests=True, recovery=True), seed=5)
     sampler = LabTaskDrawSampler(curriculum)
-    curriculum.budget.stage = 3
+    curriculum.budget.stage = 1
     with pytest.raises(UnsupportedCurriculumTask, match="terrain/jump"):
         for _ in range(32):
             sampler(torch.arange(8))
 
 
-def test_no_silent_capability_shortcut_for_terrain_or_requests():
+def test_request_course_is_separate_and_does_not_change_main_phase_weights():
+    assert JUMP_BUDGET == 5000
+    assert JUMP_WEIGHTS[TaskFamily.REQUEST] == .5
     only_recovery = FormalCurriculumCapabilities(recovery=True)
     terrain = FormalTaskCurriculum(4, capabilities=only_recovery)
-    assert terrain.missing_capabilities(3) == ("terrain",)
-    both = FormalTaskCurriculum(4, capabilities=FormalCurriculumCapabilities(terrain=True, recovery=True))
-    assert both.missing_capabilities(4) == ("request",)
+    assert terrain.missing_capabilities(1) == ("terrain",)

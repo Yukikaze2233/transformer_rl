@@ -26,7 +26,7 @@ class FlatTaskSpec:
     """平地 M1 的显式阈值与奖励尺度；量纲随字段名。"""
 
     action_bounds: tuple[float, ...] = (3.0, 3.0, 3.0, 3.0, 9.0, 9.0)
-    nominal_height_m: float = 0.305
+    nominal_height_m: float = 0.32
     minimum_height_m: float = 0.08
     minimum_recovery_height_m: float = 0.01
     failure_tilt_rad: float = 1.2

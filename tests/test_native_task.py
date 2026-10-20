@@ -54,7 +54,7 @@ def fixture(period=.005, *, horizons=(.2, .2), jump=False, trace_sink=None):
     def reset_source(mask, episode, now):
         resets.append((mask.clone(), episode.clone(), now.clone()))
         target = initial.clone()
-        target[:, 0], target[:, 3] = 1., .36
+        target[:, 0], target[:, 3] = 1., .34
         plan = TaskCommandPlan(CommandTrajectory(initial, target, torch.ones(2), torch.ones(2, dtype=torch.long)),
                                 torch.zeros(2, dtype=torch.long), torch.tensor(horizons, dtype=torch.float64),
                                 torch.full((2,), .1 if jump else 0.), torch.full((2,), .1, dtype=torch.float64))

@@ -38,7 +38,7 @@ def test_completed_boundary_replays_every_counter_and_stage_without_mutating_ret
         writer.finish(actual(writer), active_elapsed_s=.2)
         writer.record_boundary(active_elapsed_s=.25)
         boundary = writer.checkpoint_boundary()
-        assert boundary['reserved_by_stage'] == [1, 0, 0, 0, 0, 0]
+        assert boundary['reserved_by_stage'] == [1, 0, 0]
         assert boundary['actor_optimizer_steps'] == boundary['critic_optimizer_steps'] == 2
         reader = LearningJournal(writer.directory)
         reader.require_exact_boundary(boundary)

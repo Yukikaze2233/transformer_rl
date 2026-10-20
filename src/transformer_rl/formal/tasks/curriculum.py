@@ -25,29 +25,32 @@ class TaskFamily(IntEnum):
     RECOVERY = 5
 
 
-STAGE_NAMES = ('foundation', 'motion', 'rotation', 'terrain', 'requests', 'consolidation')
-STAGE_BUDGETS = (3000, 3500, 3500, 4500, 3000, 2500)
+STAGE_NAMES = ('warmup', 'rough', 'hard')
+STAGE_BUDGETS = (5000, 20000, 5000)
 STAGE_WEIGHTS = (
-    (0.80, 0.00, 0.00, 0.00, 0.00, 0.20),
-    (0.20, 0.70, 0.00, 0.00, 0.00, 0.10),
-    (0.10, 0.10, 0.70, 0.00, 0.00, 0.10),
-    (0.10, 0.10, 0.10, 0.65, 0.00, 0.05),
-    (0.10, 0.10, 0.10, 0.05, 0.60, 0.05),
-    (0.15, 0.20, 0.20, 0.20, 0.15, 0.10),
+    (0.60, 0.20, 0.10, 0.00, 0.00, 0.10),
+    (0.15, 0.25, 0.15, 0.35, 0.00, 0.10),
+    (0.15, 0.15, 0.15, 0.35, 0.00, 0.20),
 )
+TOTAL_BUDGET = sum(STAGE_BUDGETS)
+JUMP_BUDGET = 5000
+JUMP_WEIGHTS = (0.20, 0.10, 0.10, 0.10, 0.50, 0.00)
+PHASE_NAMES = STAGE_NAMES
+PHASE_BUDGETS = STAGE_BUDGETS
+PHASE_WEIGHTS = STAGE_WEIGHTS
 
 
 @dataclass(frozen=True)
 class TaskDomain:
-    height_m: tuple[float, float] = (0.17, 0.40)
-    forward_m_s: tuple[float, float] = (-5.0, 5.0)
-    yaw_rad_s: tuple[float, float] = (-6 * math.pi, 6 * math.pi)
-    jump_m: tuple[float, float] = (0.03, 0.30)
+    height_m: tuple[float, float] = (0.20, 0.35)
+    forward_m_s: tuple[float, float] = (-2.7, 2.7)
+    yaw_rad_s: tuple[float, float] = (-2 * math.pi, 2 * math.pi)
+    jump_m: tuple[float, float] = (0.03, 0.20)
     slope_rad: tuple[float, float] = (-math.pi / 12, math.pi / 12)
     roughness_m: tuple[float, float] = (0.0, 0.02)
     step_up_m: tuple[float, float] = (0.0, 0.25)
     step_down_m: tuple[float, float] = (0.0, 0.15)
-    nominal_height_m: float = 0.305
+    nominal_height_m: float = 0.32
     nominal_fraction: float = 0.20
 
     def __post_init__(self):
@@ -233,7 +236,7 @@ class AuditedStageDecision:
 
 
 class CurriculumBudget:
-    """Continuous 20000-update budget, preserving consumption after failed PPO.
+    """Continuous 30000-update budget, preserving consumption after failed PPO.
 
     Exposure scheduling is the training default; manual evaluation never
     blocks it or grants qualification. Audited promotion remains an explicit
@@ -257,14 +260,14 @@ class CurriculumBudget:
 
     @property
     def stage_limit(self):
-        return STAGE_BUDGETS[self.stage] + (self.transferred_to_consolidation if self.stage == 5 else 0)
+        return STAGE_BUDGETS[self.stage] + (self.transferred_to_consolidation if self.stage == len(STAGE_NAMES) - 1 else 0)
 
     def charge_rollout(self):
         self.prepare_rollout()
         if self.status != 'running' or self.consumed[self.stage] >= self.stage_limit:
             raise RuntimeError('curriculum cannot spend beyond a stopped or exhausted stage')
         self.consumed[self.stage] += 1
-        if self.stage == 5 and self.total_updates == sum(STAGE_BUDGETS):
+        if self.stage == len(STAGE_NAMES) - 1 and self.total_updates == sum(STAGE_BUDGETS):
             self.status = ('training_budget_complete' if self.promotion == 'exposure'
                            else 'training_budget_complete_evaluation_pending')
         elif self.promotion == 'audited' and self.consumed[self.stage] == self.stage_limit:
@@ -272,7 +275,7 @@ class CurriculumBudget:
 
     def prepare_rollout(self):
         """Advance only between rollouts,never during the last old-stage sample."""
-        if (self.promotion == 'exposure' and self.status == 'running' and self.stage < 5
+        if (self.promotion == 'exposure' and self.status == 'running' and self.stage < len(STAGE_NAMES) - 1
                 and self.consumed[self.stage] == self.stage_limit):
             self.stage += 1
         return self.stage
@@ -280,7 +283,7 @@ class CurriculumBudget:
     def submit_stage_validation(self, decision: AuditedStageDecision):
         if self.promotion != 'audited':
             raise RuntimeError('manual evaluation does not change the exposure training schedule')
-        if self.stage == 5 or self.status not in ('running', 'stage_budget_complete_validation_pending'):
+        if self.stage == len(STAGE_NAMES) - 1 or self.status not in ('running', 'stage_budget_complete_validation_pending'):
             raise RuntimeError('stage promotion is unavailable in the current curriculum state')
         if not isinstance(decision, AuditedStageDecision):
             raise TypeError('stage decisions require the independent audited-decision contract')
