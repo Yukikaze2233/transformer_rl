@@ -73,7 +73,7 @@ def render(state, *, width=84, color=False, message=""):
              f"{bar}  {ratio:6.1%}", f"更新  {update:,} / {target:,}"]
     if state.get('structured'):
         lines += [f"{state['num_envs']} 环境 · {state['history_length']} 帧含当前 · 策略 100Hz / 物理 200Hz",
-                  "闭链 12 / 6 · 每 25 更新保存 · 评估由人手动发起"]
+                  "闭链 12 / 6 · 按冻结配置保存 · 评估由人手动发起"]
     if state.get("queue_counts"):
         counts = state["queue_counts"]
         lines[6] = f"{'评估步' if state.get('stage') == 'evaluating' else '当前更新'}  {update:,} / {target:,}"
