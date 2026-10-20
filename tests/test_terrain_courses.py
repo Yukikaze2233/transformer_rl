@@ -91,3 +91,82 @@ def test_course_spawn_is_on_declared_approach_not_inside_first_rise(atlas):
     torch.testing.assert_close(local[:, 0], torch.tensor([-1., 0.]))
     assert local[:, 1].eq(0).all()
     torch.testing.assert_close(local[:, 2], course.router.spawn_z[course.router.tile] + .32)
+
+
+def test_authored_assets_remain_available_below_their_atlas_level(atlas):
+    from transformer_rl.formal.tasks.geometry import TerrainKind
+    from transformer_rl.formal.tasks.terrain_courses import TerrainCourseRouter
+
+    router = TerrainCourseRouter(atlas, 256, seed=41, device='cpu')
+    names = [tile['name'] for tile in router.manifest['tiles']]
+    road = names.index('road_step')
+    central = names.index('central_steps')
+    assert router.authored[road] and router.authored[central]
+    for kind, expected in ((int(TerrainKind.STEP_UP), road),
+                           (int(TerrainKind.TWO_PLATFORMS), central)):
+        ids = torch.arange(256)
+        router.reset(ids, torch.full_like(ids, kind), stage=1, command_forward=torch.ones(256))
+        selected = router.tile
+        assert (router.kinds[selected] == kind).all()
+
+
+def test_body_bump_clears_only_allowed_contact_not_other_failures():
+    from types import SimpleNamespace
+    from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+
+    course = LabTerrainCourse.__new__(LabTerrainCourse)
+    course.env = SimpleNamespace(_task=SimpleNamespace(minimum_height_m=.17, failure_tilt_rad=.9))
+    course.body_contact_allowed = torch.tensor([True, True, True, True])
+    terminated = torch.tensor([True, True, True, True])
+    state = SimpleNamespace(height_above_ground_m=torch.tensor([.3, .3, .1, .3]))
+    tilt = torch.tensor([.2, 1.2, .2, .2])
+    base = torch.tensor([True, True, True, False])
+    result = course.termination(terminated, state, tilt, base)
+    assert result.tolist() == [False, True, True, True]
+
+
+def _stair_command_with_truth(truth_height):
+    from types import SimpleNamespace
+    from transformer_rl.formal.lab_env.skill_fsm import SkillFSM
+    from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+
+    n = 2
+    fsm = SkillFSM(n)
+    command = torch.tensor([[1., 0., 0., .32], [1., 0., 0., .32]])
+    sample = SimpleNamespace(terrain_contact_force_world_n=torch.zeros(n, 19, 3))
+    env = SimpleNamespace(
+        _clock=lambda: torch.zeros(n, dtype=torch.float64),
+        _completed_estimate=None,
+        _ground_at_root=torch.full((n,), truth_height),
+        _last_sample=sample,
+        _wheel_body_indices=torch.tensor([1, 2]),
+        _base_body_index=0,
+        _last_tilt=torch.zeros(n),
+        _command_base=command.clone(),
+        _base_command_mode=torch.zeros(n, dtype=torch.long),
+        _command=command.clone(),
+        _command_mode=torch.zeros(n, dtype=torch.long),
+        _request_height=torch.zeros(n),
+        _skill_fsm=fsm,
+    )
+    admission = SimpleNamespace(admitted=command.clone())
+    tasks = SimpleNamespace(step=lambda *args: (
+        admission, torch.zeros(n, dtype=torch.long), torch.zeros(n), None))
+    course = LabTerrainCourse.__new__(LabTerrainCourse)
+    course.env = env
+    course.tasks = tasks
+    course._skill_fsm = fsm
+    course.body_contact_allowed = torch.zeros(n, dtype=torch.bool)
+    course.manual_stair_request = torch.ones(n, dtype=torch.bool)
+    course.manual_stair_height_m = torch.full((n,), .20)
+    course.tof_step_height_m = torch.zeros(n)
+    course.advance_skill()
+    return env._command.clone(), env._command_mode.clone(), fsm.stair.state.clone()
+
+
+def test_stair_command_and_fsm_do_not_read_critic_terrain_truth():
+    low = _stair_command_with_truth(0.)
+    high = _stair_command_with_truth(10.)
+    torch.testing.assert_close(low[0], high[0])
+    torch.testing.assert_close(low[1], high[1])
+    torch.testing.assert_close(low[2], high[2])

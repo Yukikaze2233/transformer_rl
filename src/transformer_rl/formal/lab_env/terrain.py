@@ -43,7 +43,11 @@ class LabTerrainCourse:
         x, y = torch.meshgrid(torch.linspace(-.5, .5, 11, device=env._device),
                               torch.linspace(-.3, .3, 7, device=env._device), indexing='xy')
         self._grid_offsets = torch.stack((x.flatten(), y.flatten()), -1)
-        self._lookahead = torch.tensor([0., .25, -.25, .8, -.8], device=env._device)
+        # Stair control has no privileged terrain sensor. These are the only
+        # stair request sources; a future ToF driver fills the same tensors.
+        self.manual_stair_request = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
+        self.manual_stair_height_m = torch.zeros(env.num_envs, dtype=torch.float32, device=env._device)
+        self.tof_step_height_m = torch.zeros(env.num_envs, dtype=torch.float32, device=env._device)
 
     def _wheel_centres(self):
         env = self.env
@@ -90,20 +94,21 @@ class LabTerrainCourse:
         relative = env._root_link_position()[:, 2, None] - heights - env._task.nominal_height_m
         return (5 * relative).clamp(-1, 1), heights[:, 38]
 
-    def wheel_lookahead(self):
-        """Current, near +/-0.25m, and far +/-0.8m samples for both wheels."""
-        env = self.env
-        centres = self._wheel_centres()
-        offsets = torch.stack((self._lookahead, torch.zeros_like(self._lookahead)), -1)
-        points = torch.stack([self._yaw_offsets(centres[:, side], offsets) for side in range(2)], 1)
-        heights, valid, _, _ = self.query(points, self.router.tile[:, None, None].expand(-1, 2, 5))
-        if not valid.all():
-            raise RuntimeError('wheel lookahead left the authored collision geometry')
-        reverse = env._command_base[:, 0] < 0
-        current = heights[:, :, 0].mean(-1)
-        near = torch.where(reverse[:, None], heights[:, :, 2], heights[:, :, 1]).mean(-1)
-        far = torch.where(reverse[:, None], heights[:, :, 4], heights[:, :, 3]).mean(-1)
-        return current, near, far
+    def submit_stair_request(self, ids, height_m):
+        """Manual stair request; the ToF driver uses the same height field."""
+        ids = torch.as_tensor(ids, dtype=torch.long, device=self.env._device)
+        value = torch.as_tensor(height_m, dtype=torch.float32, device=self.env._device)
+        if (ids.ndim != 1 or value.shape != ids.shape or (ids < 0).any()
+                or (ids >= self.env.num_envs).any() or not torch.isfinite(value).all()):
+            raise ValueError('stair request requires finite row heights')
+        self.manual_stair_request[ids] = True
+        self.manual_stair_height_m[ids] = value
+
+    def submit_tof_step_height(self, height_m):
+        value = torch.as_tensor(height_m, dtype=torch.float32, device=self.env._device)
+        if value.shape != (self.env.num_envs,) or not torch.isfinite(value).all():
+            raise ValueError('ToF step height must match all environment rows')
+        self.tof_step_height_m.copy_(value)
 
     def place_reset(self, ids, task, pose):
         if task is None:
@@ -132,30 +137,34 @@ class LabTerrainCourse:
         env._base_command_mode[ids] = self.tasks.base_mode[ids]
         env._request_height[ids] = 0
         self.body_contact_allowed[ids] = False
+        self.manual_stair_request[ids] = False
+        self.manual_stair_height_m[ids] = 0
+        self.tof_step_height_m[ids] = 0
 
     def advance_skill(self):
+        # Deployment-visible request decision: env._completed_estimate comes
+        # from the preceding actor observation. Terrain truth is not a stair
+        # sensor; manual/ToF input is latched in the fields below.
         env = self.env
         admission, mode, rise, _ = self.tasks.step(env._clock(), env._completed_estimate, env._ground_at_root)
         env._command_base.copy_(admission.admitted)
         env._base_command_mode.copy_(mode)
-        current, near, far = self.wheel_lookahead()
-        step = (near - current).clamp_min(0)
-        state = env._last_state
+        # No wheel_lookahead()/terrain truth enters the stair decision. The
+        # manual request and a future ToF signal share step_height_m; the
+        # remaining FSM inputs are deployable command/contact/attitude values.
+        manual = self.manual_stair_request
+        manual_height = self.manual_stair_height_m
+        step = torch.where(manual, manual_height, self.tof_step_height_m)
         load = env._last_sample.terrain_contact_force_world_n[:, env._base_body_index].norm(dim=-1)
-        # Base support is intentional only during the bounded BODY_BUMP state.
         load = torch.where(env._skill_fsm.stair.state == int(StairState.BODY_BUMP), 0, load)
         stair = env._skill_fsm.stair.step(
-            step_height_m=step, wheel_force_n=state.wheel_ground_force_n,
-            body_height_m=state.height_above_ground_m, tilt_rad=env._last_tilt,
+            step_height_m=step, wheel_force_n=env._last_sample.terrain_contact_force_world_n[:, env._wheel_body_indices].norm(dim=-1),
+            body_height_m=env._command[:, 3], tilt_rad=env._last_tilt,
             base_contact_force_n=load, command_height_m=admission.admitted[:, 3],
-            auto_enabled=(mode != int(CommandMode.RECOVERY)) & (mode != int(CommandMode.JUMP)))
+            auto_enabled=False, manual_request=manual, manual_height_m=manual_height)
         active = stair.mode != int(CommandMode.NORMAL)
         env._command.copy_(admission.admitted)
         env._command[:, 0] *= torch.where(active, stair.speed_scale, 1)
-        # Far samples slow the approach; near samples classify the actual rise.
-        # A two-step aggregate is never misclassified as one 400mm wall.
-        edge = ((far - current).abs() > .04) | ((near - current) < -.04)
-        env._command[:, 0] *= torch.where(edge & ~active, .6, 1.)
         env._command[:, 3] = torch.where(active, stair.height_command_m, env._command[:, 3])
         env._command_mode.copy_(torch.where(active, stair.mode, mode))
         env._request_height.copy_(rise)
@@ -178,10 +187,13 @@ class LabTerrainCourse:
             joint_boundary_shortfall_rad=boundary, body_contact_allowed=self.body_contact_allowed)
 
     def termination(self, terminated, state, tilt, base_contact):
-        # Retain pose limits; only the intentional base-contact criterion differs.
-        safe = ((state.height_above_ground_m >= self.env._task.minimum_height_m)
-                & (tilt <= self.env._task.failure_tilt_rad))
-        return torch.where(self.body_contact_allowed & base_contact & safe, False, terminated)
+        # BODY_BUMP exempts only the intentional base-contact criterion. Height
+        # and tilt failures remain terminal, and an already latched failure in
+        # the caller is never cleared here.
+        height_ok = state.height_above_ground_m >= self.env._task.minimum_height_m
+        tilt_ok = tilt <= self.env._task.failure_tilt_rad
+        allowed_contact = self.body_contact_allowed & base_contact & height_ok & tilt_ok
+        return terminated & ~allowed_contact
 
     def state_dict(self):
         return {'format': 'lab_terrain_course_v1', 'router': self.router.state_dict(), 'tasks': self.tasks.state_dict()}
@@ -194,8 +206,11 @@ class LabTerrainCourse:
 
     def metrics(self):
         return {'atlas_sha256': self.router.identity,
+                'task_kind_histogram': self.tasks.kind_counts.tolist(),
+                'task_mode_histogram': self.tasks.mode_counts.tolist(),
                 'level_histogram': torch.bincount(self.router.level, minlength=self.router.manifest['levels']).tolist(),
                 'tile_histogram': torch.bincount(self.router.tile, minlength=len(self.router.kinds)).tolist(),
                 'course_exits': int(self.router.course_exits.sum()),
                 'scan_queries': self.query.queries, 'scan_misses': int(self.query.misses),
-                'request_responses': self.tasks.request_counters.tolist()}
+                'request_responses': self.tasks.request_counters.tolist(),
+                'external_request_responses': self.tasks.external_request_counters.tolist()}
