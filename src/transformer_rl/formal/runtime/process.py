@@ -106,7 +106,11 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
             runtime = stack.enter_context(runtime_factory(
                 recipe, components, runtime_configuration, control=control))
             environment = getattr(runtime, 'environment', runtime)
-            collector = StructuredCollector(environment, components.model, recipe.collection)
+            create_collector = getattr(runtime, 'create_collector', None)
+            if create_collector is not None and not callable(create_collector):
+                raise TypeError('runtime collector factory must be callable')
+            collector = (StructuredCollector(environment, components.model, recipe.collection)
+                         if create_collector is None else create_collector(components.model, recipe.collection))
             collector.reset()
             collector.attempted_vector_steps = components.attempted_vector_steps
             collector.returned_vector_steps = components.returned_vector_steps

@@ -4,6 +4,7 @@ from dataclasses import replace
 import fcntl
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -86,6 +87,72 @@ def test_fresh_complete_worker_constructs_the_jump_stage_without_changing_initia
     assert complete.trainer.update_index == 0
     assert all(torch.equal(value, state.model.state_dict()[name])
                for name, value in complete.model.state_dict().items())
+
+
+def test_runtime_fast_lab_collector_keeps_managed_stop_and_nonzero_consumption(tmp_path):
+    from transformer_rl.formal.lab_env.adapter import LabLabeledEnv
+    from transformer_rl.formal.lab_env.collector import LabCollector
+    from transformer_rl.formal.learning.checkpoint import StructuredCheckpointStore
+    from transformer_rl.formal.policy import StructuredActorCritic
+
+    class FastLabFixture(SyntheticLabeledEnv, LabLabeledEnv):
+        def __init__(self):
+            super().__init__()
+            self.last_timing, self.last_counts = {}, {}
+
+        def _observe(self, previous):
+            observation = super()._observe(previous)
+            critic = torch.zeros(self.num_envs, 182)
+            critic[:, :81] = observation.critic
+            return replace(observation, critic=critic)
+
+        def reset(self, seed=None):
+            # LabLabeledEnv publishes owned observations. The generic fixture
+            # deliberately reuses buffers, so reproduce that ownership here.
+            return super().reset(seed).owned()
+
+        def step(self, *args):
+            returned = super().step(*args)
+            critic = torch.zeros(self.num_envs, 182)
+            critic[:, :81] = returned.final_critic
+            if self.counter == 16:
+                command(directory, 'stop', 1)
+            return replace(returned, observation=returned.observation.owned(), final_critic=critic)
+
+    root = tmp_path / 'fast_lab_worker'
+    root.mkdir()
+    descriptor = os.open(root / 'run.lock', os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    recipe, _ = components()
+    policy = replace(recipe.policy, critic_input_dim=185)
+    torch.manual_seed(recipe.training_seed)
+    initial = StructuredActorCritic(policy)
+    recipe = replace(recipe, policy=policy, target_rollouts=35000,
+                     initial_model_sha256=StructuredCheckpointStore.model_sha256(initial))
+    directory = attempt(root, 'attempt_1', descriptor, target=35000)
+    (directory / 'train/checkpoints').rmdir()
+    env, factories = FastLabFixture(), []
+
+    def create_collector(model, collection):
+        collector = LabCollector(env, model, collection)
+        factories.append(type(collector))
+        return collector
+
+    @contextmanager
+    def runtime(*_args, **_kwargs):
+        yield SimpleNamespace(environment=env, create_collector=create_collector)
+
+    try:
+        report = run_worker(recipe, directory / 'control', runtime, {})
+        assert factories == [LabCollector]
+        assert report['status'] == 'stopped' and report['final_update'] == 1
+        row, = [json.loads(line) for line in (directory / 'train/metrics.jsonl').read_text().splitlines()]
+        assert row['consumption']['returned_transitions'] == 32
+        assert row['consumption']['ppo_updates'] == 1
+        assert row['consumption']['actor_optimizer_steps'] > 0
+        assert read_json(directory / 'control/result.json')['summary']['ack_sequence'] == 1
+    finally:
+        os.close(descriptor)
 
 
 def test_admitted_cuda_context_is_initialized_before_state_construction(tmp_path, monkeypatch):
