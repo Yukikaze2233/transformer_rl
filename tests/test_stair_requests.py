@@ -1,7 +1,8 @@
 """Deployable stair request IDs and force-free deployment FSM."""
 import torch
+import pytest
 
-from transformer_rl.formal.lab_env.course_tasks import StairRequestProtocol
+from transformer_rl.formal.lab_env.course_tasks import StairRequestConfig, StairRequestProtocol
 from transformer_rl.formal.lab_env.skill_fsm import StairFSM
 from transformer_rl.formal.tasks.protocol import RequestResponse
 
@@ -58,3 +59,41 @@ def test_deployment_stair_fsm_uses_probability_and_never_claims_success():
             tilt_rad=torch.zeros(1), command_height_m=torch.tensor([.32]),
             manual_request=torch.tensor([False]), manual_height_m=torch.tensor([0.]))
     assert not out.success.item()
+
+
+def test_cold_restore_keeps_consumed_stair_ids_but_aborts_active_command():
+    protocol = StairRequestProtocol(2)
+    protocol.step(now_s=torch.zeros(2, dtype=torch.float64),
+                  request_id=torch.tensor([17, 29]), height_m=torch.tensor([.2, .1]),
+                  cancel_id=torch.full((2,), -1), jump_active=torch.zeros(2, dtype=torch.bool))
+    saved = protocol.state_dict()
+    cold = StairRequestProtocol(2)
+    aborted = cold.restore_after_physical_reset(saved, torch.zeros(2, dtype=torch.float64))
+    assert aborted.tolist() == [17, 29]
+    assert cold.active_id.eq(-1).all()
+    replay = cold.step(now_s=torch.zeros(2, dtype=torch.float64),
+                       request_id=torch.tensor([17, 29]), height_m=torch.tensor([.2, .1]),
+                       cancel_id=torch.full((2,), -1), jump_active=torch.zeros(2, dtype=torch.bool))
+    assert replay.response.eq(int(RequestResponse.REPLAY)).all()
+
+
+def test_invalid_stair_clock_and_height_are_rejected_without_activation():
+    protocol = StairRequestProtocol(2)
+    invalid = protocol.step(now_s=torch.tensor([float('nan'), 0.], dtype=torch.float64),
+                            request_id=torch.tensor([0, 0]), height_m=torch.tensor([.1, .25]),
+                            cancel_id=torch.full((2,), -1), jump_active=torch.zeros(2, dtype=torch.bool))
+    assert invalid.response.tolist() == [int(RequestResponse.INVALID_CLOCK), int(RequestResponse.INVALID)]
+    assert not invalid.active.any()
+    with pytest.raises(ValueError):
+        StairRequestConfig(timeout_s=float('nan'))
+
+
+def test_command_height_changes_cannot_fabricate_stair_drop_or_success():
+    fsm = StairFSM(1)
+    for height in (.35, .17):
+        result = fsm.deployment_step(
+            step_height_m=torch.tensor([.2]), wheel_contact_probability=torch.ones(1, 2),
+            tilt_rad=torch.zeros(1), command_height_m=torch.tensor([height]),
+            manual_request=torch.tensor([height == .35]), manual_height_m=torch.tensor([.2]))
+        assert not result.failure.item()
+        assert not result.success.item()

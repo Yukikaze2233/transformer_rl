@@ -182,20 +182,35 @@ class LabTerrainCourse:
                                  self.tof_request_id)
         height_request = torch.where(self.manual_stair_request, self.manual_stair_height_m,
                                      self.tof_step_height_m)
-        condition = self.stair_requests.step(
-            now_s=env._clock(), request_id=request_id, height_m=height_request,
-            cancel_id=self.stair_cancel_id, jump_active=self.tasks.active_id >= 0)
-        accepted = condition.response == int(RequestResponse.ACCEPTED)
-        self.manual_stair_request.masked_fill_(accepted, False)
-        finished = condition.finished_id >= 0
-        self.stair_cancel_id.masked_fill_(finished, -1)
         estimate = env._completed_estimate
         if estimate is None:
-            contact_probability = torch.zeros(env._command.shape[0], 2, device=env._device)
-            tilt = torch.zeros(env._command.shape[0], device=env._device)
+            ready = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
+            contact_probability = torch.zeros(env.num_envs, 2, device=env._device)
+            tilt = torch.zeros(env.num_envs, device=env._device)
         else:
-            contact_probability = estimate.wheel_contact_probability
-            tilt = estimate.tilt_rad
+            age = env._clock() - estimate.available_at_s
+            contact_probability, tilt = estimate.wheel_contact_probability, estimate.tilt_rad
+            ready = (estimate.valid & torch.isfinite(age) & (age > 0)
+                     & (age <= self.tasks.protocol.config.estimate_max_age_s + 1e-9)
+                     & torch.isfinite(contact_probability).all(-1)
+                     & ((contact_probability >= 0) & (contact_probability <= 1)).all(-1)
+                     & torch.isfinite(tilt) & (tilt >= 0))
+            # These inactive placeholders never become observations or labels.
+            contact_probability = torch.where(ready[:, None], contact_probability, 0.)
+            tilt = torch.where(ready, tilt, 0.)
+        condition = self.stair_requests.step(
+            now_s=env._clock(), request_id=request_id, height_m=height_request,
+            cancel_id=self.stair_cancel_id, jump_active=self.tasks.active_id >= 0, ready=ready)
+        # Each submitted packet is consumed once, including BUSY/invalid IDs.
+        self.manual_stair_request.zero_()
+        self.manual_stair_request_id.fill_(-1)
+        self.tof_request_id.fill_(-1)
+        self.stair_next_id.copy_(torch.maximum(
+            self.stair_next_id, self.stair_requests.max_seen_id + 1))
+        finished = condition.finished_id >= 0
+        self.stair_cancel_id.masked_fill_(finished, -1)
+        if finished.any():
+            env._skill_fsm.stair.reset(finished.nonzero().flatten())
         stair = env._skill_fsm.stair.deployment_step(
             step_height_m=torch.where(condition.active, condition.height_m,
                                       torch.zeros_like(condition.height_m)),
@@ -237,13 +252,25 @@ class LabTerrainCourse:
         return terminated & ~allowed_contact
 
     def state_dict(self):
-        return {'format': 'lab_terrain_course_v1', 'router': self.router.state_dict(), 'tasks': self.tasks.state_dict()}
+        return {'format': 'lab_terrain_course_v2', 'router': self.router.state_dict(),
+                'tasks': self.tasks.state_dict(), 'stair_requests': self.stair_requests.state_dict(),
+                'stair_next_id': self.stair_next_id.clone()}
 
     def restore_after_physical_reset(self, state):
-        if state.get('format') != 'lab_terrain_course_v1':
+        if (not isinstance(state, dict)
+                or set(state) != {'format', 'router', 'tasks', 'stair_requests', 'stair_next_id'}
+                or state.get('format') != 'lab_terrain_course_v2'):
             raise ValueError('terrain course checkpoint format differs')
+        next_id = state['stair_next_id']
+        if (not isinstance(next_id, torch.Tensor) or next_id.shape != self.stair_next_id.shape
+                or next_id.dtype != torch.long or (next_id < 0).any()
+                or (next_id.to(self.env._device)
+                    <= state['stair_requests']['max_seen_id'].to(self.env._device)).any()):
+            raise ValueError('terrain course stair request watermarks differ')
         self.router.load_state_dict(state['router'])
         self.tasks.restore_after_physical_reset(state['tasks'], self.env._clock())
+        self.stair_requests.restore_after_physical_reset(state['stair_requests'], self.env._clock())
+        self.stair_next_id.copy_(next_id)
 
     def metrics(self):
         return {'atlas_sha256': self.router.identity,

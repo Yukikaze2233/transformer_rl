@@ -223,7 +223,8 @@ class StairFSM:
                         if success_from_height else torch.zeros_like(is_stair))
         self.success_time = torch.where(success_cond, self.success_time + self.config.policy_dt_s,
                                         torch.where(active, torch.zeros_like(self.success_time), self.success_time))
-        drop = body < self.reference_height - self.config.failure_drop_m
+        drop = ((body < self.reference_height - self.config.failure_drop_m)
+                if success_from_height else torch.zeros_like(active))
         wall_active = active & (step > self.config.ledge_max_m)
         hard_failure = active & (drop | (tilt > self.config.failure_tilt_rad)
                                  | base | wall_active)

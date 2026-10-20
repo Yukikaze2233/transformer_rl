@@ -127,10 +127,11 @@ def test_body_bump_clears_only_allowed_contact_not_other_failures():
     assert result.tolist() == [False, True, True, True]
 
 
-def _stair_command_with_truth(truth_height):
+def _stair_command_with_truth(truth_height, *, return_course=False):
     from types import SimpleNamespace
     from transformer_rl.formal.lab_env.skill_fsm import SkillFSM
     from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+    from transformer_rl.formal.tasks.protocol import CompletedEstimate, RequestProtocol
     from transformer_rl.formal.lab_env.course_tasks import StairRequestProtocol
 
     n = 2
@@ -141,7 +142,9 @@ def _stair_command_with_truth(truth_height):
         num_envs=n,
         _device=torch.device('cpu'),
         _clock=lambda: torch.zeros(n, dtype=torch.float64),
-        _completed_estimate=None,
+        _completed_estimate=CompletedEstimate(
+            torch.zeros(n), torch.ones(n, 2), torch.zeros(n), torch.zeros(n),
+            torch.full((n,), -.01, dtype=torch.float64), torch.ones(n, dtype=torch.bool)),
         _ground_at_root=torch.full((n,), truth_height),
         _last_sample=sample,
         _wheel_body_indices=torch.tensor([1, 2]),
@@ -157,6 +160,7 @@ def _stair_command_with_truth(truth_height):
     admission = SimpleNamespace(admitted=command.clone())
     tasks = SimpleNamespace(
         active_id=torch.full((n,), -1, dtype=torch.long),
+        protocol=RequestProtocol(n),
         step=lambda *args, **kwargs: (admission, torch.zeros(n, dtype=torch.long), torch.zeros(n), None))
     course = LabTerrainCourse.__new__(LabTerrainCourse)
     course.env = env
@@ -170,7 +174,10 @@ def _stair_command_with_truth(truth_height):
     course.stair_cancel_id = torch.full((n,), -1, dtype=torch.long)
     course.tof_step_height_m = torch.zeros(n)
     course.tof_request_id = torch.full((n,), -1, dtype=torch.long)
+    course.stair_next_id = torch.ones(n, dtype=torch.long)
     course.advance_skill()
+    if return_course:
+        return course
     return env._command.clone(), env._command_mode.clone(), fsm.stair.state.clone()
 
 
@@ -180,3 +187,21 @@ def test_stair_command_and_fsm_do_not_read_critic_terrain_truth():
     torch.testing.assert_close(low[0], high[0])
     torch.testing.assert_close(low[1], high[1])
     torch.testing.assert_close(low[2], high[2])
+
+
+def test_cancelled_stair_stops_the_deployment_fsm_in_the_same_interval():
+    course = _stair_command_with_truth(0., return_course=True)
+    assert course.env._command_mode.eq(1).all()
+    course.env._clock = lambda: torch.full((2,), .01, dtype=torch.float64)
+    course.cancel_stair_request(torch.tensor([0]), torch.tensor([0]))
+    course.advance_skill()
+    assert course.env._command_mode.tolist() == [0, 1]
+    assert course.stair_requests.active_id.tolist() == [-1, 0]
+
+
+def test_stale_completed_estimate_aborts_stair_without_using_simulator_truth():
+    course = _stair_command_with_truth(0., return_course=True)
+    course.env._clock = lambda: torch.full((2,), .10, dtype=torch.float64)
+    course.advance_skill()
+    assert course.env._command_mode.eq(0).all()
+    assert course.stair_requests.active_id.eq(-1).all()

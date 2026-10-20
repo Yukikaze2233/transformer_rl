@@ -52,7 +52,7 @@ class ManagedLabRuntime:
     task quota and independent RNG streams survive the new physical reset.
     """
 
-    _FORMAT = 'managed_lab_task_source_v1'
+    _FORMAT = 'managed_lab_task_source_v2'
 
     def __init__(self, env, recipe, components, identity, *, profile=False, physics_health=None):
         if type(profile) is not bool or not isinstance(identity, dict):
@@ -118,12 +118,13 @@ class ManagedLabRuntime:
         course = deepcopy(state['course'])
         task = course.get('tasks', {})
         protocol = self.components.protocol
-        if (set(course) != {'format', 'router', 'tasks'} or not isinstance(task, dict)
-                or set(task) != {'format', 'next_id', 'paid_id', 'rng', 'request_counters'}):
+        if (set(course) != {'format', 'router', 'tasks', 'stair_requests', 'stair_next_id'}
+                or not isinstance(task, dict)
+                or set(task) != {'format', 'next_id', 'paid_id', 'rng',
+                                *self.course.tasks._COUNTERS}):
             raise ValueError('managed Lab task snapshot fields differ')
-        for name, reference in (('next_id', self.course.tasks.next_id),
-                                ('paid_id', self.course.tasks.paid_id),
-                                ('request_counters', self.course.tasks.request_counters)):
+        for name in ('next_id', 'paid_id', *self.course.tasks._COUNTERS):
+            reference = getattr(self.course.tasks, name)
             value = task[name]
             if not isinstance(value, torch.Tensor) or value.shape != reference.shape or value.dtype != reference.dtype:
                 raise ValueError('managed Lab task snapshot tensor differs: ' + name)

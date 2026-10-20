@@ -8,7 +8,7 @@ import torch
 
 from test_policy_optimization import assert_identical
 from test_structured_checkpoint import fixture, update
-from transformer_rl.formal.lab_env.course_tasks import LabCourseTasks
+from transformer_rl.formal.lab_env.course_tasks import LabCourseTasks, StairRequestProtocol
 from transformer_rl.formal.lab_env.formal_curriculum import FormalCurriculumCapabilities, UnsupportedCurriculumTask
 from transformer_rl.formal.lab_env.formal_reward import FormalRewardConfig
 from transformer_rl.formal.lab_env.managed import ManagedCurriculum, ManagedLabRuntime
@@ -30,10 +30,12 @@ def scene(tmp_path, components, *, seed=13):
     course = LabTerrainCourse.__new__(LabTerrainCourse)
     course.router = TerrainCourseRouter(path, 4, seed=seed)
     course.tasks = LabCourseTasks(4, DriveEnvelope(.06, .4), seed=seed)
+    course.stair_requests = StairRequestProtocol(4)
+    course.stair_next_id = torch.zeros(4, dtype=torch.long)
     reward = SimpleNamespace(config=FormalRewardConfig(16.),
                              missing_term_reasons={'contact_slip': 'No verified contact-point relative tangent velocity producer',
                                                    'joint_boundary': 'No selected-asset geometric boundary producer'})
-    env = SimpleNamespace(num_envs=4, device='cpu', step_dt=.01, _physical_tick=0,
+    env = SimpleNamespace(num_envs=4, device='cpu', _device=torch.device('cpu'), step_dt=.01, _physical_tick=0,
                           _terrain_course=course, _formal_reward=reward,
                           _clock=lambda: torch.zeros(4, dtype=torch.float64))
     course.env = env
@@ -108,7 +110,7 @@ def test_managed_source_roundtrip_keeps_real_task_rng_ids_and_learning_budget(tm
         restored.restore_global_rng_after_cold_setup()
 
 
-@pytest.mark.parametrize('change', ('identity', 'reward', 'watermark', 'live_physics'))
+@pytest.mark.parametrize('change', ('identity', 'reward', 'watermark', 'live_physics', 'legacy_format'))
 def test_managed_restore_refuses_incompatible_or_live_task_state(tmp_path, change):
     recipe, components, journal, store = fixture(tmp_path, full=True, target_rollouts=35000)
     with journal:
@@ -124,12 +126,36 @@ def test_managed_restore_refuses_incompatible_or_live_task_state(tmp_path, chang
             saved['reward_contract']['missing_terms']['contact_slip'] = 'silently enabled'
         elif change == 'watermark':
             saved['course']['tasks']['next_id'][:] = -1
+        elif change == 'legacy_format':
+            saved['format'] = 'managed_lab_task_source_v1'
         else:
             cold_env._physical_tick = 1
         with pytest.raises(ValueError, match='original sources|watermarks'):
             ManagedLabRuntime(cold_env, recipe, restored.components, identity(cold_env))
         assert restored.components.task_source is None
         assert restored.components.deferred_task_source_state is not None
+
+
+def test_cold_source_keeps_stair_deduplication_and_cumulative_request_counters(tmp_path):
+    recipe, components, journal, store = fixture(tmp_path, full=True, target_rollouts=35000)
+    with journal:
+        env = scene(tmp_path, components)
+        managed = ManagedLabRuntime(env, recipe, components, identity(env))
+        course = managed.course
+        course.stair_requests.max_seen_id[0] = 19
+        course.stair_requests.active_id[0] = 19
+        course.stair_next_id[0] = 20
+        course.tasks.external_request_counters[1] = 4
+        course.tasks.kind_counts[0] = 17
+        store.save('stair.pt', components)
+        restored = store.load('stair.pt')
+        cold_env = scene(tmp_path, restored.components)
+        cold = ManagedLabRuntime(cold_env, recipe, restored.components, identity(cold_env))
+        assert cold.course.stair_requests.max_seen_id.tolist() == [19, -1, -1, -1]
+        assert cold.course.stair_requests.active_id.eq(-1).all()
+        assert cold.course.stair_next_id.tolist() == [20, 0, 0, 0]
+        assert cold.course.tasks.external_request_counters[1] == 4
+        assert cold.course.tasks.kind_counts[0] == 17
 
 
 def test_managed_collector_uses_the_full_learner_without_rebuilding_it(tmp_path):

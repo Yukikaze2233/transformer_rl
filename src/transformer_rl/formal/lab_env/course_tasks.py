@@ -5,14 +5,15 @@ Physical flight/landing labels and success are a separate reward-only channel.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
+import math
 
 import torch
 
 from ..control.observation import CommandMode
 from ..tasks.curriculum import TaskFamily
 from ..tasks.jump import JumpReferenceProgram
-from ..tasks.protocol import CompletedEstimate, RequestProtocol, RequestResponse
+from ..tasks.protocol import CompletedEstimate, RequestEnd, RequestProtocol, RequestResponse
 from ..tasks.reward import RewardPhase
 from ..tasks.trajectory import CommandRates, CommandStream, CommandTrajectory, DriveEnvelope
 
@@ -58,20 +59,30 @@ class StairCondition:
     active_id: torch.Tensor
     response: torch.Tensor
     finished_id: torch.Tensor
+    end_reason: torch.Tensor
 
 
 @dataclass(frozen=True)
 class StairRequestConfig:
     policy_dt_s: float = .01
     min_height_m: float = .04
-    max_height_m: float = .25
+    max_height_m: float = .20
     timeout_s: float = 6.
+
+    def __post_init__(self):
+        if (any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+                for value in vars(self).values())
+                or self.policy_dt_s != .01 or self.min_height_m >= self.max_height_m
+                or self.timeout_s <= self.policy_dt_s):
+            raise ValueError('stair request bounds require finite 100Hz timing and ordered heights')
 
 
 class StairRequestProtocol:
     """One-shot stair request IDs, sharing BUSY/cancel/timeout semantics."""
 
     def __init__(self, num_envs, device="cpu", config=StairRequestConfig()):
+        if type(num_envs) is not int or num_envs < 1 or not isinstance(config, StairRequestConfig):
+            raise ValueError('stair requests require positive row count and parsed configuration')
         self.num_envs, self.device, self.config = num_envs, torch.device(device), config
         self.max_seen_id = torch.full((num_envs,), -1, dtype=torch.long, device=self.device)
         self.active_id = torch.full_like(self.max_seen_id, -1)
@@ -90,19 +101,29 @@ class StairRequestProtocol:
                 raise ValueError(f"stair {name} requires {shape}/{dtype} on {self.device}")
 
     @torch.no_grad()
-    def step(self, *, now_s, request_id, height_m, cancel_id, jump_active):
+    def step(self, *, now_s, request_id, height_m, cancel_id, jump_active, ready=None):
         self._check(now_s, request_id, height_m, cancel_id, jump_active)
+        ready = (torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+                 if ready is None else ready)
+        if (not isinstance(ready, torch.Tensor) or ready.shape != (self.num_envs,)
+                or ready.dtype != torch.bool or ready.device != self.device):
+            raise ValueError('stair readiness requires one bool per row')
         clock = torch.isfinite(now_s) & (now_s > self.last_time_s)
         now = torch.where(clock, now_s, self.last_time_s)
+        invalid_id = (request_id < -1) | (cancel_id < -1)
         new = (request_id >= 0) & (request_id > self.max_seen_id) & clock
         replay = (request_id >= 0) & ~new & clock
         valid_height = torch.isfinite(height_m) & (height_m >= self.config.min_height_m) & (height_m <= self.config.max_height_m)
         busy = new & ((self.active_id >= 0) | jump_active)
-        accept = new & ~busy & valid_height & (cancel_id != request_id)
+        cancelled_on_arrival = new & (cancel_id == request_id)
+        accept = new & ~busy & valid_height & ~cancelled_on_arrival & ~invalid_id & ready
         response = torch.where(new, int(RequestResponse.NOT_READY), torch.zeros_like(self.active_id))
+        response = torch.where(~clock, int(RequestResponse.INVALID_CLOCK), response)
+        response = torch.where(invalid_id & clock, int(RequestResponse.INVALID), response)
         response = torch.where(replay, int(RequestResponse.REPLAY), response)
         response = torch.where(new & ~valid_height, int(RequestResponse.INVALID), response)
         response = torch.where(busy, int(RequestResponse.BUSY), response)
+        response = torch.where(cancelled_on_arrival, int(RequestResponse.CANCELLED), response)
         response = torch.where(accept, int(RequestResponse.ACCEPTED), response)
         self.max_seen_id.copy_(torch.where(new, request_id, self.max_seen_id))
         self.active_id.copy_(torch.where(accept, request_id, self.active_id))
@@ -112,8 +133,13 @@ class StairRequestProtocol:
         elapsed = torch.where(active, now - self.accepted_at_s, 0)
         cancel = active & (cancel_id == self.active_id) & clock
         timeout = active & clock & (elapsed >= self.config.timeout_s)
-        finished = cancel | timeout
+        aborted = active & clock & (~ready | jump_active)
+        finished = cancel | timeout | aborted
         finished_id = torch.where(finished, self.active_id, -1)
+        end = torch.zeros_like(self.active_id)
+        end = torch.where(cancel, int(RequestEnd.CANCELLED), end)
+        end = torch.where(timeout, int(RequestEnd.TIMEOUT), end)
+        end = torch.where(aborted, int(RequestEnd.SAFETY_ABORT), end)
         self.active_id.masked_fill_(finished, -1)
         self.height_m.masked_fill_(finished, 0)
         self.accepted_at_s.masked_fill_(finished, 0)
@@ -121,7 +147,7 @@ class StairRequestProtocol:
         active = self.active_id >= 0
         return StairCondition(active, torch.where(active, self.height_m, 0),
                               torch.where(active, elapsed, 0).float(), self.active_id.clone(),
-                              response, finished_id)
+                              response, finished_id, end)
 
     def reset(self, ids, now_s):
         ids = torch.as_tensor(ids, dtype=torch.long, device=self.device)
@@ -135,8 +161,38 @@ class StairRequestProtocol:
         self.height_m.masked_fill_(mask, 0)
         self.accepted_at_s.masked_fill_(mask, 0)
 
+    def state_dict(self):
+        return {'format': 'lab_stair_requests_v1', 'configuration': asdict(self.config),
+                'max_seen_id': self.max_seen_id.clone(), 'active_id': self.active_id.clone()}
+
+    def restore_after_physical_reset(self, state, now_s):
+        """Keep consumed IDs; an old physical stair command is explicitly aborted."""
+        if (not isinstance(state, dict)
+                or set(state) != {'format', 'configuration', 'max_seen_id', 'active_id'}
+                or state['format'] != 'lab_stair_requests_v1'
+                or state['configuration'] != asdict(self.config)
+                or not isinstance(now_s, torch.Tensor) or now_s.shape != (self.num_envs,)
+                or now_s.dtype != torch.float64 or now_s.device != self.device
+                or not torch.isfinite(now_s).all()):
+            raise ValueError('stair restore requires its exact request contract and fresh clock')
+        for name in ('max_seen_id', 'active_id'):
+            value = state[name]
+            if (not isinstance(value, torch.Tensor) or value.shape != self.max_seen_id.shape
+                    or value.dtype != torch.long or (value < -1).any()):
+                raise ValueError('stair restore request watermarks differ')
+        maximum = state['max_seen_id'].to(self.device)
+        aborted = state['active_id'].to(self.device)
+        if (aborted > maximum).any():
+            raise ValueError('stair restore request watermarks differ')
+        self.max_seen_id.copy_(maximum)
+        self.clear(torch.ones(self.num_envs, dtype=torch.bool, device=self.device))
+        self.last_time_s.copy_(now_s - self.config.policy_dt_s)
+        return aborted.clone()
+
 
 class LabCourseTasks:
+    _COUNTERS = ('request_counters', 'external_request_counters', 'kind_counts', 'mode_counts')
+
     def __init__(self, num_envs, envelope: DriveEnvelope, *, seed=2102, device='cpu'):
         self.num_envs, self.device = num_envs, torch.device(device)
         self.generator = torch.Generator(device=self.device).manual_seed(seed)
@@ -304,18 +360,30 @@ class LabCourseTasks:
 
     def state_dict(self):
         # Cold restoration aborts physical requests, preserving IDs and RNG.
-        return {'format': 'lab_course_tasks_v1', 'protocol': self.protocol.state_dict(),
+        return {'format': 'lab_course_tasks_v2', 'protocol': self.protocol.state_dict(),
                 'next_id': self.next_id.clone(), 'paid_id': self.paid_id.clone(),
-                'rng': self.generator.get_state().clone(), 'request_counters': self.request_counters.clone()}
+                'rng': self.generator.get_state().clone(),
+                **{name: getattr(self, name).clone() for name in self._COUNTERS}}
 
     def restore_after_physical_reset(self, state, now):
-        if state.get('format') != 'lab_course_tasks_v1' or state['next_id'].shape != self.next_id.shape:
+        expected = {'format', 'protocol', 'next_id', 'paid_id', 'rng', *self._COUNTERS}
+        if (not isinstance(state, dict) or set(state) != expected
+                or state.get('format') != 'lab_course_tasks_v2'):
             raise ValueError('course request checkpoint differs')
+        for name in ('next_id', 'paid_id', *self._COUNTERS):
+            value, reference = state[name], getattr(self, name)
+            minimum = -1 if name == 'paid_id' else 0
+            if (not isinstance(value, torch.Tensor) or value.shape != reference.shape
+                    or value.dtype != reference.dtype or (value < minimum).any()):
+                raise ValueError('course request checkpoint tensor differs: ' + name)
+        generator = torch.Generator(device=self.device)
+        generator.set_state(state['rng'].cpu())
         self.protocol.restore_after_physical_reset(state['protocol'], now)
         self.next_id.copy_(torch.maximum(state['next_id'], self.protocol.max_seen_id + 1))
         self.paid_id.copy_(state['paid_id'])
-        self.request_counters.copy_(state['request_counters'])
-        self.generator.set_state(state['rng'].cpu())
+        for name in self._COUNTERS:
+            getattr(self, name).copy_(state[name])
+        self.generator = generator
 
 
 def completed_policy_estimate(frame, raw_state, timestamp):
