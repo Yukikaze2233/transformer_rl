@@ -96,6 +96,7 @@ class LabRecoverTask:
         self.hold_steps = max(1, round(spec.action_hold_s / spec.policy_dt_s))
         self.hold_remaining = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         self.success = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
+        self.success_paid = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         self.active = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
 
     def _uniform(self, count, bounds):
@@ -124,6 +125,7 @@ class LabRecoverTask:
         joint_velocity = self._uniform(n, self.spec.joint_velocity_range_rad_s)[:, None].expand(-1, 18).clone()
         self.hold_remaining[ids] = self.hold_steps
         self.success[ids] = False
+        self.success_paid[ids] = False
         self.active[ids] = True
         return RecoverResetPlan(root, velocity, joint_position, joint_velocity)
 
@@ -157,7 +159,11 @@ class LabRecoverTask:
         return ok
 
     def reward_bonus(self):
-        return self.success.to(torch.float32) * self.spec.success_bonus
+        # Success is an episode event, not a per-frame reward. Pay only on the
+        # first successful frame of the episode; reset re-arms it.
+        pay = self.success & ~self.success_paid
+        self.success_paid |= pay
+        return pay.to(torch.float32) * self.spec.success_bonus
 
 
 __all__ = ["LabRecoverTask", "RecoverResetPlan", "RecoverTaskSpec"]

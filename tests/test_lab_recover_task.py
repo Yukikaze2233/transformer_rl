@@ -58,3 +58,19 @@ def test_recover_hold_is_excluded_from_success_and_can_be_zeroed():
     assert not task.success_mask(wheel_force_n=wheel, base_load_n=base, height_m=height,
                                  gravity_body=gravity).any()
     assert task.reward_bonus().eq(0).all()
+
+
+def test_recover_success_bonus_is_paid_once_per_episode():
+    task, _ = fixture()
+    for _ in range(task.hold_steps):
+        task.advance()
+    wheel = torch.full((4, 2), 10.)
+    base = torch.zeros(4)
+    height = torch.full((4,), .25)
+    gravity = torch.tensor([[0., 0., -1.]]).repeat(4, 1)
+    task.success_mask(wheel_force_n=wheel, base_load_n=base, height_m=height,
+                      gravity_body=gravity)
+    assert task.reward_bonus().eq(1).all()
+    task.success_mask(wheel_force_n=wheel, base_load_n=base, height_m=height,
+                      gravity_body=gravity)
+    assert task.reward_bonus().eq(0).all()

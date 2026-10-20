@@ -25,7 +25,7 @@ REWARD_COST_TERMS = (
     'ordinary_vertical', 'jump_vertical', 'effort', 'mechanical_power_proxy',
     'leg_velocity', 'leg_acceleration', 'issued_first_difference',
     'issued_second_difference', 'harmful_contact', 'contact_slip', 'joint_boundary',
-    'flight_wheel_effort', 'landing_impact',
+    'roll_pitch_angular_velocity', 'flight_wheel_effort', 'landing_impact',
 )
 REWARD_TERMS = REWARD_POSITIVE_TERMS + REWARD_COST_TERMS
 
@@ -50,11 +50,16 @@ class RewardTuning:
     success_event: float = 1.
     gravity_m_s2: float = 9.81
     landing_load_multiple: float = 3.
+    angular_damping_ordinary: float = .05
+    angular_damping_jump: float = .10
+    angular_damping_recovery: float = 0.
 
     def __post_init__(self):
         values = tuple(vars(self).values())
         if (any(type(v) not in (int, float) or not math.isfinite(v) for v in values)
                 or min(self.robot_mass_kg, self.gravity_m_s2, self.landing_load_multiple) <= 0
+                or min(self.angular_damping_ordinary, self.angular_damping_jump,
+                       self.angular_damping_recovery) < 0
                 or self.policy_dt_s != .01 or not 0 < self.gamma < 1 or self.cost_density_scale != 10.
                 or self.absorbing_density >= -self.cost_density_scale or self.failure_event >= 0
                 or self.success_event < 0):
@@ -335,6 +340,13 @@ class PhysicalRewardComposer:
                 'height': 2 * height_gate * h(eh / .04),
                 'attitude': torch.where(recovery, 2 * h(pose / .8).sum(-1),
                                          torch.where(jump, .25 * h(pose / .5).sum(-1), (pose / .2).square().sum(-1))),
+                # Roll/pitch rate damping is distinct from static attitude
+                # error; recovery flips need low gating, jump uses its own gain.
+                'roll_pitch_angular_velocity': torch.where(
+                    recovery, self.tuning.angular_damping_recovery,
+                    torch.where(jump, self.tuning.angular_damping_jump,
+                                self.tuning.angular_damping_ordinary))
+                    * sample.angular_velocity_body_rad_s[:, :2].square().sum(-1),
                 'stand_world_xy': still * 1.5 * h(sample.velocity_origin_world_m_s[:, :2].norm(dim=-1) / .05),
                 'lateral_velocity': .5 * (velocity[:, 1] / .25).square(),
                 'ordinary_vertical': ordinary * .2 * (velocity[:, 2] / .3).square(),

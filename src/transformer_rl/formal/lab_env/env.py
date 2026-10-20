@@ -588,6 +588,10 @@ class WheeledLabEnv(DirectRLEnv):
         self.reset_terminated.copy_(self._last_terminated)
         self.reset_time_outs.copy_(self._last_truncated)
         self.reset_buf = self.reset_terminated | self.reset_time_outs
+        # Preserve the interval's done flags before _reset_idx clears the
+        # internal row state for the next step. GAE must cut on these flags.
+        terminated_out = self._last_terminated.clone()
+        truncated_out = self._last_truncated.clone()
         self._previous_action.copy_(self._issued_action)
         reset_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1).int()
         self._capture_terminal()
@@ -598,8 +602,8 @@ class WheeledLabEnv(DirectRLEnv):
         self._timing = {"step_s": time.perf_counter() - started}
         self.extras["timing"] = self._timing
         self.extras["reward_terms"] = self._reward_terms
-        return (self.obs_buf, self._last_reward, self._last_terminated,
-                self._last_truncated, self.extras)
+        return (self.obs_buf, self._last_reward, terminated_out,
+                truncated_out, self.extras)
 
     def _reset_idx(self, env_ids):
         ids = torch.as_tensor(env_ids, dtype=torch.long, device=self._device)

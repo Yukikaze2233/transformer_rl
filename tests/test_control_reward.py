@@ -86,6 +86,22 @@ def test_perfect_support_reward_is_seven_per_second_with_exactly_one_dt(period):
         finish(reward)
 
 
+def test_roll_pitch_rate_damping_is_mode_gated_and_separate_from_attitude():
+    reward = fixture()
+
+    def change(value, _):
+        return replace(value, angular_velocity_body_rad_s=torch.tensor([[1., 2., 0.]]).repeat(2, 1))
+
+    normal = step(reward, change=change)
+    torch.testing.assert_close(normal.raw_cost_densities['roll_pitch_angular_velocity'],
+                               torch.full((2,), .25, dtype=torch.float64))
+    jump = step(reward, reference(CommandMode.JUMP, RewardPhase.FLIGHT), change=change)
+    torch.testing.assert_close(jump.raw_cost_densities['roll_pitch_angular_velocity'],
+                               torch.full((2,), .5, dtype=torch.float64))
+    recovery = step(reward, reference(CommandMode.RECOVERY, RewardPhase.RECOVERY), change=change)
+    assert recovery.raw_cost_densities['roll_pitch_angular_velocity'].eq(0).all()
+
+
 def test_complete_jump_density_budget_is_eight_not_nine_and_does_not_change_support_weights():
     reward = fixture()
     result = step(reward, reference(CommandMode.JUMP, RewardPhase.FLIGHT))
