@@ -33,6 +33,16 @@ def test_inclined_patch_support_is_projected_in_world_z():
     assert normal[0] == 10 and upward[0] == 8
 
 
+def test_normal_loads_sum_across_distinct_material_surface_filters():
+    force = torch.tensor([7., 3., 5., 9.])
+    normals = torch.tensor([[0., 0., 1.], [1., 0., 0.], [0., 0., 1.], [0., 0., -1.]])
+    counts = torch.tensor([[1, 1], [1, 1]], dtype=torch.int32)
+    starts = torch.tensor([[0, 1], [2, 3]], dtype=torch.int32)
+    normal, upward = LabContactLoads.reduce(force, normals, counts, starts, 5)
+    torch.testing.assert_close(normal, torch.tensor([10., 14.]))
+    torch.testing.assert_close(upward, torch.tensor([7., 5.]))
+
+
 @pytest.mark.parametrize('bad', ('direction', 'range', 'capacity'))
 def test_invalid_contact_measurement_never_becomes_a_zero_load(bad):
     force, normals, counts, starts = patches()

@@ -26,7 +26,7 @@ from .settings import load_asset_description
 
 _PHYSICS_FIELDS = {'gpu_found_lost_pairs_capacity', 'gpu_found_lost_aggregate_pairs_capacity',
                    'gpu_total_aggregate_pairs_capacity', 'gpu_max_rigid_contact_count',
-                   'gpu_max_rigid_patch_count'}
+                   'gpu_max_rigid_patch_count', 'gpu_collision_stack_size'}
 
 
 def parse_configuration(recipe, configuration, authorized_boot):
@@ -35,7 +35,7 @@ def parse_configuration(recipe, configuration, authorized_boot):
                 'terrain_atlas_pin', 'environment_spacing_m', 'task', 'pair_domain',
                 'physics', 'profile_collection', 'termination_limits'}
     if (not isinstance(configuration, dict) or set(configuration) != expected
-            or configuration['format'] != 'managed_lab_runtime_v2'
+            or configuration['format'] != 'managed_lab_runtime_v3'
             or configuration['authorized_boot'] != authorized_boot or authorized_boot != boot_id()
             or recipe.device != 'cuda:0' or recipe.policy.critic_input_dim != 185
             or recipe.policy.history_length != 5 or recipe.collection.policy_dt_s != .01
@@ -154,6 +154,7 @@ def runtime(recipe, components, configuration, *, control):
                                      'failure_latch_clock': 'each_physical_substep'},
             'contact_mapping': getattr(env, 'contact_mapping_receipt', None),
             'contact_measurement': env._contact_loads.receipt,
+            'terrain_collision': env.terrain_collision_receipt,
             'wheel_material': env.wheel_material_receipt,
             'collision_isolation': env.collision_isolation_receipt,
             'cold_physical_state_restored': False, 'automatic_evaluation': False,

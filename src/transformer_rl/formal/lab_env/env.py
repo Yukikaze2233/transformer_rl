@@ -41,6 +41,7 @@ from .materials import WheelMaterialReader
 from .isolation import author_shared_ground_groups, isolate_scene
 from .observations import LabObservationBuilder
 from .settings import LabEnvSettings, load_asset_description
+from .terrain_collision import partition_static_collision
 
 
 class WheeledLabEnv(DirectRLEnv):
@@ -154,7 +155,7 @@ class WheeledLabEnv(DirectRLEnv):
                 and formal_config.normal_load_source == 'native_contact_patch_normal_forces'):
             self._contact_loads = LabContactLoads(
                 self.contact_sensor, self._binding, self.scene.env_prim_paths,
-                collision_path='/World/ground/terrain/Collision', device=self._device)
+                collision_path=tuple(self._course_collision_receipt['collider_paths']), device=self._device)
         self._command = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self._device)
         self._command[:, 3] = self._task.nominal_height_m
         self._command_base = self._command.clone()
@@ -239,6 +240,10 @@ class WheeledLabEnv(DirectRLEnv):
                 'native': (self._collision_isolation.receipt
                            if self._collision_isolation is not None else None)}
 
+    @property
+    def terrain_collision_receipt(self):
+        return self._course_collision_receipt
+
     def _build_pressure(self):
         asset = self._asset.directory
         model = json.loads((asset / "model_spec.json").read_text())
@@ -267,8 +272,6 @@ class WheeledLabEnv(DirectRLEnv):
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         self.scene.articulations["robot"] = self.robot
-        self.contact_sensor = ContactSensor(self.cfg.contact_sensor)
-        self.scene.sensors["contact_sensor"] = self.contact_sensor
         self.height_scanner = None
         if self.cfg.height_scanner is not None:
             self.height_scanner = RayCaster(self.cfg.height_scanner)
@@ -283,6 +286,12 @@ class WheeledLabEnv(DirectRLEnv):
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
         self.terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+        self._course_collision_receipt = (partition_static_collision(self.scene.stage)
+            if getattr(self.cfg, 'course_manifest', None) else None)
+        if self._course_collision_receipt is not None:
+            self.cfg.contact_sensor.filter_prim_paths_expr = list(self._course_collision_receipt['collider_paths'])
+        self.contact_sensor = ContactSensor(self.cfg.contact_sensor)
+        self.scene.sensors['contact_sensor'] = self.contact_sensor
         if self._scan_debug:
             print("TERRAIN cfg", self.cfg.terrain.terrain_type,
                   getattr(self.cfg.terrain, "use_terrain_origins", None), flush=True)

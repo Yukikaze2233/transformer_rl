@@ -50,15 +50,20 @@ class LabContactLoads:
         self.device, self.num_envs = torch.device(device), len(environment_paths)
         names = tuple(sensor.body_names)
         expected = tuple(sensor.body_physx_view.prim_paths)
-        owned = all(path.startswith(environment_paths[index // len(names)] + '/Robot/')
-                    and path.rsplit('/', 1)[-1] == names[index % len(names)]
+        owned = all(path == environment_paths[index // len(names)] + '/Robot/' + names[index % len(names)]
                     for index, path in enumerate(expected)) if names else False
+        collision_paths = ((collision_path,) if isinstance(collision_path, str) else tuple(collision_path))
+        actual_filters = tuple(tuple(paths) for paths in self.view.filter_paths)
         if (not owned or len(expected) != self.num_envs * len(names)
                 or tuple(self.view.sensor_paths) != expected or self.view.sensor_count != len(expected)
-                or self.view.filter_count != 1
-                or tuple(tuple(paths) for paths in self.view.filter_paths) != ((collision_path,),) * len(expected)
+                or not collision_paths or len(set(collision_paths)) != len(collision_paths)
+                or self.view.filter_count != len(collision_paths)
+                or len(actual_filters) != len(expected)
+                or any(len(paths) != len(collision_paths) or set(paths) != set(collision_paths)
+                       for paths in actual_filters)
                 or set(names) != set(binding.native_body_names)):
-            raise ValueError('Lab patch loads require the exact robot bodies and one static terrain filter')
+            raise ValueError('Lab patch loads require exact robot bodies and every static terrain partition')
+        self.surface_count = len(collision_paths)
         self.target = torch.tensor([binding.native_body_names.index(name) for name in names], device=self.device)
         self.wheels = torch.tensor(binding.wheel_body_indices, device=self.device)
         self.normal = torch.zeros(self.num_envs, len(names), device=self.device)
@@ -66,7 +71,7 @@ class LabContactLoads:
         self.valid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._tick = None
         self.capacity = self.view.max_contact_data_count
-        self.receipt = {'source': 'native_contact_patch_normal_forces', 'filter': collision_path,
+        self.receipt = {'source': 'native_contact_patch_normal_forces', 'filters': actual_filters[0],
                         'sensor_bodies': names, 'native_bodies': binding.native_body_names,
                         'max_contact_data_count': self.capacity,
                         'wheel_support': 'sum_positive_world_z_components_per_patch',
@@ -111,7 +116,7 @@ class LabContactLoads:
             if len(packet) != 6:
                 raise ValueError('native patch packet layout differs')
             force, normals, counts, starts = (self._tensor(packet[i]) for i in (0, 2, 4, 5))
-            if counts.shape != (self.view.sensor_count, 1):
+            if counts.shape != (self.view.sensor_count, self.surface_count):
                 raise ValueError('native patch pairs differ from the bound shared terrain')
             normal, upward = self.reduce(force, normals, counts, starts, self.capacity)
             self.normal.index_copy_(1, self.target, normal.reshape(self.num_envs, -1))

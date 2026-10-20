@@ -321,7 +321,8 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     if formal_reward is not None and formal_reward.normal_load_source == 'native_contact_patch_normal_forces':
         if terrain_profile != 'course':
             raise ValueError('native patch-load binding currently requires the frozen static course atlas')
-        cfg.contact_sensor.filter_prim_paths_expr = ['/World/ground/terrain/Collision']
+        from .terrain_collision import NATIVE_COLLISION_PATTERN
+        cfg.contact_sensor.filter_prim_paths_expr = [NATIVE_COLLISION_PATTERN]
         cfg.contact_sensor.max_contact_data_count_per_prim = 16
     # The 11x7 scanner already contains the center ground ray; do not build a
     # second single-ray sensor in large rough-terrain batches.

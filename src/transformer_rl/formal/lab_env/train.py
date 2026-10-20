@@ -277,6 +277,9 @@ def main(argv=None):
             # capacity than IsaacLab's single-environment default.
             gpu_max_rigid_contact_count=2**24,
             gpu_max_rigid_patch_count=2**22,
+            # The real multi-surface 8192 scene exceeded the default 64 MiB.
+            # A dropped-contact interval is rejected, never accepted as faster.
+            gpu_collision_stack_size=2**28,
         )
         if os.environ.get("LAB_SCAN_DEBUG") == "1":
             print("TRAIN before env construct", flush=True)

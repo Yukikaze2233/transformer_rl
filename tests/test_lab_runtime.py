@@ -38,7 +38,7 @@ def inputs(tmp_path, monkeypatch):
     atlas = tmp_path / 'atlas.json'
     atlas.write_text(json.dumps({'format': 'terrain_course_atlas_v1', 'files': {
         name: terrain_file_pin(tmp_path / name) for name in ('terrain.usda', 'geometry.npz', 'query_index.npz')}}))
-    config = {'format': 'managed_lab_runtime_v2', 'authorized_boot': boot_id(),
+    config = {'format': 'managed_lab_runtime_v3', 'authorized_boot': boot_id(),
               'asset_directory': str(asset.directory), 'response_source_pin': file_pin(response),
               'terrain_atlas_pin': file_pin(atlas), 'environment_spacing_m': 1.,
               'task': asdict(FlatTaskSpec()), 'pair_domain': None,
@@ -47,7 +47,8 @@ def inputs(tmp_path, monkeypatch):
               'physics': dict(gpu_found_lost_pairs_capacity=2**22,
                               gpu_found_lost_aggregate_pairs_capacity=2**25,
                               gpu_total_aggregate_pairs_capacity=2**22,
-                              gpu_max_rigid_contact_count=2**24, gpu_max_rigid_patch_count=2**22),
+                              gpu_max_rigid_contact_count=2**24, gpu_max_rigid_patch_count=2**22,
+                              gpu_collision_stack_size=2**28),
               'profile_collection': False}
     return recipe, components, journal, config, received
 
@@ -66,7 +67,7 @@ def test_frozen_runtime_pins_sources_and_preserves_exact_physical_options(tmp_pa
         assert limits.failure_tilt_rad == 2.5 and limits.forbidden_contact_confirm_s == .02
 
 
-@pytest.mark.parametrize('change', ('boot', 'task', 'capacity', 'profile', 'payload', 'limits_missing', 'limits_value', 'old_format'))
+@pytest.mark.parametrize('change', ('boot', 'task', 'capacity', 'stack_missing', 'profile', 'payload', 'limits_missing', 'limits_value', 'old_format'))
 def test_runtime_refuses_changed_contract_before_importing_sdk(tmp_path, monkeypatch, change):
     recipe, _, journal, config, _ = inputs(tmp_path, monkeypatch)
     with journal:
@@ -76,6 +77,8 @@ def test_runtime_refuses_changed_contract_before_importing_sdk(tmp_path, monkeyp
             config['task']['action_bounds'] = [1.] * 6
         elif change == 'capacity':
             config['physics']['gpu_max_rigid_contact_count'] = 0
+        elif change == 'stack_missing':
+            config['physics'].pop('gpu_collision_stack_size')
         elif change == 'profile':
             config['profile_collection'] = 'false'
         elif change == 'limits_missing':
@@ -83,7 +86,7 @@ def test_runtime_refuses_changed_contract_before_importing_sdk(tmp_path, monkeyp
         elif change == 'limits_value':
             config['termination_limits']['forbidden_contact_confirm_s'] = 0
         elif change == 'old_format':
-            config['format'] = 'managed_lab_runtime_v1'
+            config['format'] = 'managed_lab_runtime_v2'
         else:
             (tmp_path / 'terrain.usda').write_text('changed after freezing')
         with pytest.raises(ValueError):
