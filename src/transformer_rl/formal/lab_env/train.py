@@ -176,6 +176,7 @@ def main(argv=None):
         from .formal_reward import FormalRewardConfig
         from .recover import RecoverTaskSpec
         from .settings import load_asset_description
+        from ..tasks.termination import NativeTaskLimits
 
         settings = SettingsManager.instance()
         settings.initialize_carb_settings()
@@ -239,15 +240,25 @@ def main(argv=None):
             trainer.critic_optimizer.load_state_dict(payload["critic_adam"])
 
         formal_reward = None
+        termination_limits = None
         if args.formal_reward:
             description = load_asset_description(asset, expected_manifest_sha256=expected_asset)
-            formal_reward = FormalRewardConfig.from_manifest(description.manifest)
+            formal_reward = FormalRewardConfig.from_manifest(
+                description.manifest, normal_load_source=('native_contact_patch_normal_forces'
+                    if args.terrain_profile == 'course' else 'contact_force_world_z_abs'))
+            limits = runtime.get('termination_limits', runtime.get('tuning', {}).get('limits'))
+            if not isinstance(limits, dict):
+                raise ValueError('formal diagnostic sampling needs explicit original termination limits')
+            limits = dict(limits)
+            limits['forbidden_body_names'] = tuple(limits['forbidden_body_names'])
+            termination_limits = NativeTaskLimits(**limits)
         recover_spec = (RecoverTaskSpec(policy_dt_s=.01, action_hold_s=args.recover_hold_s,
                                         height_command_m=args.recover_height)
                         if args.recover else None)
         cfg = build_env_cfg(asset, num_envs=args.num_envs, env_spacing_m=args.env_spacing,
                             device=args.device, response=response, pair_domain=pair,
                             formal_reward=formal_reward, recover=recover_spec,
+                            termination_limits=termination_limits,
                             height_scanner=args.height_scanner,
                             terrain_scan=(args.terrain_scan or policy.critic_input_dim == 185),
                             forward_scan=args.forward_scan,

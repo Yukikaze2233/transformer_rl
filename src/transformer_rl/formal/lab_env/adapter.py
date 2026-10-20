@@ -55,6 +55,9 @@ class LabLabeledEnv:
         contact = (force > self.contact_threshold_n).to(torch.float32)
         valid = (torch.isfinite(state.velocity_origin_body_m_s).all(-1)
                  & torch.isfinite(state.policy_velocity_rad_s).all(-1))
+        contact_valid = getattr(state, 'contact_measurement_valid', None)
+        if contact_valid is not None:
+            valid &= contact_valid
         return PhysicalLabels(
             velocity_body_m_s=state.velocity_origin_body_m_s.clone(),
             wheel_contact=contact,

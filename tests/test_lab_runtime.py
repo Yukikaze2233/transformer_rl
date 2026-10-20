@@ -10,6 +10,7 @@ from test_structured_checkpoint import fixture
 from transformer_rl.common.training_control import boot_id, file_pin
 from transformer_rl.formal.contracts import ACTION_ORDER
 from transformer_rl.formal.lab_env.contract import FlatTaskSpec
+from transformer_rl.formal.tasks.termination import NativeTaskLimits
 from transformer_rl.formal.lab_env import runtime as module
 from transformer_rl.formal.tasks.terrain_assets import file_pin as terrain_file_pin
 
@@ -37,10 +38,12 @@ def inputs(tmp_path, monkeypatch):
     atlas = tmp_path / 'atlas.json'
     atlas.write_text(json.dumps({'format': 'terrain_course_atlas_v1', 'files': {
         name: terrain_file_pin(tmp_path / name) for name in ('terrain.usda', 'geometry.npz', 'query_index.npz')}}))
-    config = {'format': 'managed_lab_runtime_v1', 'authorized_boot': boot_id(),
+    config = {'format': 'managed_lab_runtime_v2', 'authorized_boot': boot_id(),
               'asset_directory': str(asset.directory), 'response_source_pin': file_pin(response),
               'terrain_atlas_pin': file_pin(atlas), 'environment_spacing_m': 1.,
               'task': asdict(FlatTaskSpec()), 'pair_domain': None,
+              'termination_limits': asdict(NativeTaskLimits(
+                  .08, .01, .5, 2.5, ('base_link',), 2., .02, .02, .01, 5.)),
               'physics': dict(gpu_found_lost_pairs_capacity=2**22,
                               gpu_found_lost_aggregate_pairs_capacity=2**25,
                               gpu_total_aggregate_pairs_capacity=2**22,
@@ -52,7 +55,7 @@ def inputs(tmp_path, monkeypatch):
 def test_frozen_runtime_pins_sources_and_preserves_exact_physical_options(tmp_path, monkeypatch):
     recipe, _, journal, config, received = inputs(tmp_path, monkeypatch)
     with journal:
-        asset, response, pair, task, atlas, identity = module.parse_configuration(recipe, config, boot_id())
+        asset, response, pair, task, atlas, identity, limits = module.parse_configuration(recipe, config, boot_id())
         assert received == [(config['asset_directory'], recipe.asset_manifest_sha256)]
         assert asset.manifest_sha256 == identity['asset_manifest_sha256']
         assert pair is None and task.action_bounds == recipe.collection.action_bounds
@@ -60,9 +63,10 @@ def test_frozen_runtime_pins_sources_and_preserves_exact_physical_options(tmp_pa
         assert identity['atlas_sha256'] == config['terrain_atlas_pin']['sha256']
         assert identity['response_sha256'] == config['response_source_pin']['sha256']
         assert len(identity['runtime_sha256']) == 64
+        assert limits.failure_tilt_rad == 2.5 and limits.forbidden_contact_confirm_s == .02
 
 
-@pytest.mark.parametrize('change', ('boot', 'task', 'capacity', 'profile', 'payload'))
+@pytest.mark.parametrize('change', ('boot', 'task', 'capacity', 'profile', 'payload', 'limits_missing', 'limits_value', 'old_format'))
 def test_runtime_refuses_changed_contract_before_importing_sdk(tmp_path, monkeypatch, change):
     recipe, _, journal, config, _ = inputs(tmp_path, monkeypatch)
     with journal:
@@ -74,6 +78,12 @@ def test_runtime_refuses_changed_contract_before_importing_sdk(tmp_path, monkeyp
             config['physics']['gpu_max_rigid_contact_count'] = 0
         elif change == 'profile':
             config['profile_collection'] = 'false'
+        elif change == 'limits_missing':
+            config.pop('termination_limits')
+        elif change == 'limits_value':
+            config['termination_limits']['forbidden_contact_confirm_s'] = 0
+        elif change == 'old_format':
+            config['format'] = 'managed_lab_runtime_v1'
         else:
             (tmp_path / 'terrain.usda').write_text('changed after freezing')
         with pytest.raises(ValueError):
@@ -84,7 +94,7 @@ def test_sdk_open_failure_is_published_without_building_a_scene(tmp_path, monkey
     recipe, components, journal, config, _ = inputs(tmp_path, monkeypatch)
     # Configuration parsing is tested separately. Use CPU components for the
     # control/lifecycle test so this test cannot create a CUDA context.
-    monkeypatch.setattr(module, 'parse_configuration', lambda *_: (None, None, None, None, None, {}))
+    monkeypatch.setattr(module, 'parse_configuration', lambda *_: (None, None, None, None, None, {}, None))
     failures = []
     control = SimpleNamespace(binding={'boot_id': boot_id()}, fail=failures.append)
     fake_package, fake_app = ModuleType('isaaclab'), ModuleType('isaaclab.app')

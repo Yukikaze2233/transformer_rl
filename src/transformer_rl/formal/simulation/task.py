@@ -6,9 +6,6 @@ terrain is relabelled over old shapes, and no production training is admitted.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import IntFlag
-import math
 import time
 
 import torch
@@ -20,59 +17,12 @@ from ..control.observation import CommandMode, SensorSample
 from ..control.actuation import PreparationHold
 from ..tasks.skills import PhysicalJumpEvidence
 from ..contracts import LabeledStep
+from ..tasks.termination import FailureReason, NativeTaskLimits, PhysicalConditions, PhysicalFailureLatch
 from ..tasks.commands import RequestInputs, TaskCommandPlan, TaskCommandProgram
 from ..tasks.protocol import RequestResponse
 from ..tasks.reset_plan import NativeTaskResetPlan
 
 
-
-
-class FailureReason(IntFlag):
-    LOW_SUPPORT_HEIGHT = 1
-    EXCESSIVE_TILT = 2
-    FORBIDDEN_BODY_CONTACT = 4
-    PASSIVE_KNEE_OVERRUN = 8
-    KNEE_PIVOT_RESIDUAL = 16
-    PRESSURE_STROKE = 32
-
-
-@dataclass(frozen=True)
-class NativeTaskLimits:
-    """Explicit recipe inputs; there are no guessed hardware-safe defaults."""
-
-    minimum_normal_height_m: float
-    minimum_recovery_height_m: float
-    healthy_tilt_rad: float
-    failure_tilt_rad: float
-    forbidden_body_names: tuple[str, ...]
-    forbidden_body_load_n: float
-    forbidden_contact_confirm_s: float
-    passive_knee_overrun_rad: float
-    knee_pivot_residual_m: float
-    preparation_timeout_s: float
-
-    def __post_init__(self):
-        positive = ('healthy_tilt_rad', 'failure_tilt_rad', 'forbidden_body_load_n',
-                    'forbidden_contact_confirm_s', 'passive_knee_overrun_rad', 'knee_pivot_residual_m',
-                    'preparation_timeout_s')
-        if (any(type(getattr(self, k)) not in (int, float) or not math.isfinite(getattr(self, k))
-                or getattr(self, k) <= 0 for k in positive)
-                or any(type(v) not in (int, float) or not math.isfinite(v) or v < 0
-                       for v in (self.minimum_normal_height_m, self.minimum_recovery_height_m))
-                or not self.minimum_recovery_height_m <= self.minimum_normal_height_m
-                or not self.healthy_tilt_rad < self.failure_tilt_rad <= math.pi
-                or self.preparation_timeout_s < .05
-                or not isinstance(self.forbidden_body_names, tuple) or not self.forbidden_body_names
-                or len(set(self.forbidden_body_names)) != len(self.forbidden_body_names)
-                or any(not isinstance(v, str) or not v for v in self.forbidden_body_names)):
-            raise ValueError('native task limits require explicit finite,ordered physical/contact/preparation bounds')
-
-
-@dataclass(frozen=True)
-class PhysicalConditions:
-    healthy: torch.Tensor
-    true_failure: torch.Tensor
-    failure_reasons: torch.Tensor
 
 
 class NativeTaskConditions:
@@ -88,14 +38,14 @@ class NativeTaskConditions:
         self.num_envs, self.device = plant.num_envs, plant.device
         self._bodies = tuple(binding.native_body_names.index(v) for v in limits.forbidden_body_names)
         self._tick = plant.scene.observation.physical_tick
-        self._contact_time = torch.zeros(self.num_envs, dtype=torch.float64, device=self.device)
-        self.failure_reasons = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._latch = PhysicalFailureLatch(limits, self.num_envs, physics_dt_s=plant.dt, device=self.device)
+        self.failure_reasons = self._latch.failure_reasons
 
     def reset(self, mask):
         if (self.plant.scene.observation.physical_tick != self._tick or mask.shape != self.failure_reasons.shape
                 or mask.dtype != torch.bool or mask.device != self.device):
             raise ValueError('condition reset requires its current published native boundary')
-        self._contact_time[mask], self.failure_reasons[mask] = 0, 0
+        self._latch.reset(mask)
 
     @torch.no_grad()
     def observe(self, tick, sample: NativeRewardSample, commands):
@@ -103,28 +53,16 @@ class NativeTaskConditions:
         if (tick is not self.plant._last_tick_packet or not isinstance(sample, NativeRewardSample)
                 or tick.physical_tick != self._tick + 1 or sample.physical_tick != tick.physical_tick):
             raise ValueError('conditions require every next actual native/reward sample')
-        p, c = sample.physics, self.limits
-        recovery = commands.mode == int(CommandMode.RECOVERY)
-        tilt = torch.atan2(p.gravity_body[:, :2].norm(dim=-1), -p.gravity_body[:, 2])
-        contact = p.body_normal_load_n[:, list(self._bodies)].gt(c.forbidden_body_load_n).any(-1) & ~recovery
-        self._contact_time = torch.where(contact, self._contact_time + self.plant.dt, 0)
-        minimum = torch.where(recovery, c.minimum_recovery_height_m, c.minimum_normal_height_m)
-        events = (
-            (p.height_above_ground_m < minimum, FailureReason.LOW_SUPPORT_HEIGHT),
-            ((tilt > c.failure_tilt_rad) & ~recovery, FailureReason.EXCESSIVE_TILT),
-            (self._contact_time >= c.forbidden_contact_confirm_s - 1e-9, FailureReason.FORBIDDEN_BODY_CONTACT),
-            ((sample.boundary.knee_signed_clearance_rad < -c.passive_knee_overrun_rad).any(-1),
-             FailureReason.PASSIVE_KNEE_OVERRUN),
-            ((sample.boundary.knee_pivot_residual_m > c.knee_pivot_residual_m).any(-1), FailureReason.KNEE_PIVOT_RESIDUAL),
-            (~tick.pressure.within_mechanical_stroke.all(-1), FailureReason.PRESSURE_STROKE),
-        )
-        for event, reason in events:
-            self.failure_reasons |= event.long() * int(reason)
-        failed = self.failure_reasons != 0
-        healthy = (~failed & ~contact & (tilt <= c.healthy_tilt_rad)
-                   & sample.boundary.knee_signed_clearance_rad.ge(0).all(-1))
+        p = sample.physics
+        result = self._latch.observe(
+            height_m=p.height_above_ground_m, gravity_body=p.gravity_body,
+            forbidden_body_load_n=p.body_normal_load_n[:, list(self._bodies)],
+            knee_signed_clearance_rad=sample.boundary.knee_signed_clearance_rad,
+            knee_pivot_residual_m=sample.boundary.knee_pivot_residual_m,
+            within_pressure_stroke=tick.pressure.within_mechanical_stroke,
+            recovery=commands.mode == int(CommandMode.RECOVERY))
         self._tick = tick.physical_tick
-        return PhysicalConditions(healthy, failed.clone(), self.failure_reasons.clone())
+        return result
 
 
 class NativePreparationError(RuntimeError):

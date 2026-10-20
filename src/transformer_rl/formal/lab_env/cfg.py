@@ -15,6 +15,7 @@ from .contract import FlatTaskSpec
 from .formal_reward import FormalRewardConfig
 from .recover import RecoverTaskSpec
 from .settings import AssetDescription, load_asset_description
+from ..tasks.termination import NativeTaskLimits
 
 STEP_PLATFORM_DEPTH_M = 0.80
 
@@ -278,6 +279,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
                   pair_domain: PairTargetDomain | None = None,
                   task: FlatTaskSpec | None = None,
                   formal_reward: FormalRewardConfig | None = None,
+                  termination_limits: NativeTaskLimits | None = None,
                   recover: RecoverTaskSpec | None = None,
                   height_scanner: bool = False,
                   terrain_scan: bool = False,
@@ -292,6 +294,8 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     if (type(env_spacing_m) not in (int, float) or not math.isfinite(env_spacing_m)
             or env_spacing_m <= 0):
         raise ValueError("env_spacing_m 必须是有限正数")
+    if formal_reward is not None and not isinstance(termination_limits, NativeTaskLimits):
+        raise ValueError('formal Lab tasks require explicit original physical termination limits')
     asset = load_asset_description(asset_directory,
                                    expected_manifest_sha256=expected_manifest_sha256)
     cfg = WheeledLabEnvCfg()
@@ -306,6 +310,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     object.__setattr__(cfg, "response_spec", response)
     object.__setattr__(cfg, "pair_domain_spec", pair_domain)
     object.__setattr__(cfg, "formal_reward_spec", formal_reward)
+    object.__setattr__(cfg, 'termination_limits', termination_limits)
     object.__setattr__(cfg, "recover_spec", recover)
     object.__setattr__(cfg, "course_manifest", terrain_atlas_manifest)
     object.__setattr__(cfg, 'static_plane_height_m', 0. if terrain_profile == 'plane' else None)
@@ -313,6 +318,11 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
         cfg.episode_length_s = recover.episode_length_s
     cfg.robot_cfg = build_robot_cfg(asset, response=response)
     cfg.contact_sensor = build_contact_sensor_cfg()
+    if formal_reward is not None and formal_reward.normal_load_source == 'native_contact_patch_normal_forces':
+        if terrain_profile != 'course':
+            raise ValueError('native patch-load binding currently requires the frozen static course atlas')
+        cfg.contact_sensor.filter_prim_paths_expr = ['/World/ground/terrain/Collision']
+        cfg.contact_sensor.max_contact_data_count_per_prim = 16
     # The 11x7 scanner already contains the center ground ray; do not build a
     # second single-ray sensor in large rough-terrain batches.
     cfg.height_scanner = (build_height_scanner_cfg()

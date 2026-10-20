@@ -7,6 +7,7 @@ from ..control.observation import (CommandFeatures, MechanicalBinding,
                                    NativePhysicalSample, ObservationAssembler,
                                    SensorSample)
 from .contract import ACTOR_DIM, HISTORY_LENGTH, HistoryBuffer
+from .contact_measurement import LabObservationAssembler
 
 
 class LabObservationBuilder:
@@ -19,7 +20,7 @@ class LabObservationBuilder:
         self.binding = binding
         self.num_envs = num_envs
         self.device = torch.device(device)
-        self.assembler = ObservationAssembler(binding, num_envs, self.device)
+        self.assembler = LabObservationAssembler(binding, num_envs, self.device)
         self.history = HistoryBuffer(num_envs, length=history_length,
                                      frame_dim=ACTOR_DIM, device=self.device)
 

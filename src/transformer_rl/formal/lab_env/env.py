@@ -25,6 +25,7 @@ from ..control.pressure import NativeSliderPressure, PressureParameters
 from .actuator import WheeledControlCore
 from .cfg import WheeledLabEnvCfg
 from .contact_mapping import contact_body_mapping
+from .contact_measurement import LabContactLoads, LabPhysicalSample
 from .contract import ACTION_DIM, CRITIC182_DIM, FlatTaskSpec, flat_reward, flat_termination
 from .formal_curriculum import LabTaskSample
 from .formal_reward import FormalRewardConfig, LabFormalReward
@@ -33,6 +34,7 @@ from .warp_scan import miss_histograms
 from .forward_scan import ForwardStepDetector
 from .skill_fsm import JumpState, SkillFSM
 from ..tasks.reward import RewardPhase
+from ..tasks.termination import NativeTaskLimits, PhysicalFailureLatch
 from .recover import LabRecoverTask, RecoverTaskSpec
 from .recovery import LabRecoveryReset
 from .materials import WheelMaterialReader
@@ -115,6 +117,7 @@ class WheeledLabEnv(DirectRLEnv):
         formal_config = getattr(cfg, "formal_reward_spec", None)
         self._formal_reward = None
         self._boundary_geometry = None
+        self._failure_latch = None
         if formal_config is not None:
             if not isinstance(formal_config, FormalRewardConfig):
                 raise TypeError("cfg.formal_reward_spec 必须是 FormalRewardConfig")
@@ -130,6 +133,13 @@ class WheeledLabEnv(DirectRLEnv):
                 self._binding, self.num_envs, formal_config, device=str(self._device),
                 boundary_geometry=self._boundary_geometry,
             )
+            limits = getattr(cfg, 'termination_limits', None)
+            if not isinstance(limits, NativeTaskLimits):
+                raise ValueError('formal reward cannot use the simplified M1 termination contract')
+            self._forbidden_bodies = [self._binding.native_body_names.index(name)
+                                      for name in limits.forbidden_body_names]
+            self._failure_latch = PhysicalFailureLatch(
+                limits, self.num_envs, physics_dt_s=float(self.physics_dt), device=self._device)
             self._episode_id = torch.zeros(self.num_envs, dtype=torch.long, device=self._device)
             self._control_epoch = torch.zeros_like(self._episode_id)
             self._formal_initialized = torch.zeros(self.num_envs, dtype=torch.bool,
@@ -139,6 +149,12 @@ class WheeledLabEnv(DirectRLEnv):
         self._contact_force = torch.zeros(self.num_envs, len(self._binding.native_body_names), 3,
                                           dtype=torch.float32, device=self._device)
         self._contact_source, self._contact_target = self._contact_mapping()
+        self._contact_loads = None
+        if (formal_config is not None
+                and formal_config.normal_load_source == 'native_contact_patch_normal_forces'):
+            self._contact_loads = LabContactLoads(
+                self.contact_sensor, self._binding, self.scene.env_prim_paths,
+                collision_path='/World/ground/terrain/Collision', device=self._device)
         self._command = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self._device)
         self._command[:, 3] = self._task.nominal_height_m
         self._command_base = self._command.clone()
@@ -497,7 +513,7 @@ class WheeledLabEnv(DirectRLEnv):
         if self._terrain_course is not None:
             ground, wheels_ground = self._terrain_course.ground()
             origins = self._terrain_course.router.origins
-        return NativePhysicalSample(
+        result = NativePhysicalSample(
             self._as_torch(data.joint_pos),
             self._as_torch(data.joint_vel),
             position,
@@ -512,6 +528,12 @@ class WheeledLabEnv(DirectRLEnv):
             torch.ones(self.num_envs, 2, dtype=torch.float32, device=self._device),
             self._clock(),
         )
+        if self._contact_loads is not None:
+            normal, support = self._contact_loads.read(self._physical_tick, float(self.physics_dt))
+            return LabPhysicalSample(**result.__dict__, body_normal_load_n=normal,
+                                     wheel_support_load_n=support,
+                                     contact_measurement_valid=self._contact_loads.valid)
+        return result
 
     def _commands(self) -> CommandFeatures:
         return CommandFeatures(
@@ -583,20 +605,39 @@ class WheeledLabEnv(DirectRLEnv):
     def _observe_substep(self) -> None:
         sample = self._sample()
         state = self._observations.assembler.measure(sample)
-        terminated, tilt, base_contact = flat_termination(
-            height_m=state.height_above_ground_m,
-            gravity_body=state.gravity_body,
-            base_contact_force_n=sample.terrain_contact_force_world_n[:, self._base_body_index].norm(dim=-1),
-            spec=self._task,
-        )
-        recovery = self._command_mode == int(CommandMode.RECOVERY)
-        terminated = torch.where(
-            recovery,
-            state.height_above_ground_m < self._task.minimum_recovery_height_m,
-            terminated,
-        )
-        if self._terrain_course is not None:
-            terminated = self._terrain_course.termination(terminated, state, tilt, base_contact)
+        boundary = None
+        if self._failure_latch is not None:
+            boundary = self._boundary_geometry.evaluate(
+                self._as_torch(self.robot.data.body_link_pose_w),
+                self._as_torch(self.robot.data.joint_pos), self._targets, knee_margin_rad=.05)
+            pressure = self._pressure.evaluate(
+                self._as_torch(self.robot.data.joint_pos).index_select(1, self._spring_indices))
+            allowed = (None if self._terrain_course is None
+                       else self._terrain_course.body_contact_allowed)
+            conditions = self._failure_latch.observe(
+                height_m=state.height_above_ground_m, gravity_body=state.gravity_body,
+                forbidden_body_load_n=(sample.body_normal_load_n[:, self._forbidden_bodies]
+                    if isinstance(sample, LabPhysicalSample) else sample.terrain_contact_force_world_n[
+                        :, self._forbidden_bodies].norm(dim=-1)),
+                knee_signed_clearance_rad=boundary.knee_signed_clearance_rad,
+                knee_pivot_residual_m=boundary.knee_pivot_residual_m,
+                within_pressure_stroke=pressure.within_mechanical_stroke,
+                recovery=self._command_mode == int(CommandMode.RECOVERY),
+                body_contact_allowed=allowed)
+            terminated = conditions.true_failure
+            tilt = torch.atan2(state.gravity_body[:, :2].norm(dim=-1), -state.gravity_body[:, 2])
+            base_contact = sample.terrain_contact_force_world_n[
+                :, self._base_body_index].norm(dim=-1) > self._failure_latch.limits.forbidden_body_load_n
+        else:
+            terminated, tilt, base_contact = flat_termination(
+                height_m=state.height_above_ground_m, gravity_body=state.gravity_body,
+                base_contact_force_n=sample.terrain_contact_force_world_n[:, self._base_body_index].norm(dim=-1),
+                spec=self._task)
+            recovery = self._command_mode == int(CommandMode.RECOVERY)
+            terminated = torch.where(recovery, state.height_above_ground_m < self._task.minimum_recovery_height_m,
+                                     terminated)
+            if self._terrain_course is not None:
+                terminated = self._terrain_course.termination(terminated, state, tilt, base_contact)
         self._terminated |= terminated
         self._last_sample = sample
         self._last_state = state
@@ -604,13 +645,7 @@ class WheeledLabEnv(DirectRLEnv):
         self._last_tilt = tilt
         self._last_base_contact = base_contact
         if self._formal_reward is not None:
-            boundary = None
-            if self._boundary_geometry is not None and self._targets is not None:
-                boundary = self._boundary_geometry.evaluate(
-                    self._as_torch(self.robot.data.body_link_pose_w),
-                    self._as_torch(self.robot.data.joint_pos),
-                    self._targets, knee_margin_rad=.05,
-                ).shortfall_rad
+            boundary = boundary.shortfall_rad
             jump = self._command_mode == int(CommandMode.JUMP)
             zero = torch.zeros(self.num_envs, dtype=torch.float32, device=self._device)
             jump_height_world = self._ground_at_root + self._command[:, 3] + self._request_height
@@ -799,6 +834,8 @@ class WheeledLabEnv(DirectRLEnv):
         self.scene.write_data_to_sim()
         self.sim.forward()
         self.scene.update(dt=0.0)
+        if self._contact_loads is not None:
+            self._contact_loads.reset_rows(ids, self._physical_tick)
         if self._scan_debug:
             print("RESET after scene.update", flush=True)
         if self._control.drive is not None:
@@ -806,6 +843,10 @@ class WheeledLabEnv(DirectRLEnv):
             mask[ids] = True
             self._control.drive.reset(mask)
         self._terminated[ids] = False
+        if self._failure_latch is not None:
+            mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
+            mask[ids] = True
+            self._failure_latch.reset(mask)
         self._last_terminated[ids] = False
         self._last_truncated[ids] = False
         # Keep the terminal reward in _last_reward until the next policy step;

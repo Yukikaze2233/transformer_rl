@@ -36,11 +36,11 @@ class FormalRewardConfig:
     normal_load_source: str = "contact_force_world_z_abs"
 
     @classmethod
-    def from_manifest(cls, manifest):
+    def from_manifest(cls, manifest, *, normal_load_source='contact_force_world_z_abs'):
         mass = manifest.get("total_mass_kg") if isinstance(manifest, dict) else None
         if type(mass) not in (int, float) or not math.isfinite(mass) or mass <= 0:
             raise ValueError("asset manifest 必须提供有限正 total_mass_kg")
-        return cls(float(mass))
+        return cls(float(mass), normal_load_source=normal_load_source)
 
     def __post_init__(self):
         if (type(self.robot_mass_kg) not in (int, float) or not math.isfinite(self.robot_mass_kg)
@@ -50,7 +50,8 @@ class FormalRewardConfig:
                 or len(set(self.available_terms)) != len(self.available_terms)
                 or any(name not in REWARD_POSITIVE_TERMS + REWARD_COST_TERMS
                        for name in self.available_terms)
-                or self.normal_load_source not in ("contact_force_norm", "contact_force_world_z_abs")):
+                or self.normal_load_source not in ("contact_force_norm", "contact_force_world_z_abs",
+                                                    'native_contact_patch_normal_forces')):
             raise ValueError("正式 reward 配置的 mass/clock/term/source 不一致")
 
 
@@ -85,11 +86,17 @@ def reward_physics_from_lab(sample: NativePhysicalSample, state: MeasuredState, 
             or not isinstance(available_terms, tuple)):
         raise ValueError("正式 reward 的 action/id/availability 张量布局不一致")
     force = sample.terrain_contact_force_world_n
-    if normal_load_source == "contact_force_norm":
+    if normal_load_source == 'native_contact_patch_normal_forces':
+        body_load = getattr(sample, 'body_normal_load_n', None)
+        if (not isinstance(body_load, torch.Tensor) or body_load.shape != force.shape[:-1]
+                or body_load.device != device or body_load.dtype != torch.float32
+                or (body_load < 0).any()):
+            raise ValueError('formal reward requires the actual positive native patch loads')
+    elif normal_load_source == "contact_force_norm":
         body_load = force.norm(dim=-1)
     elif normal_load_source == "contact_force_world_z_abs":
-        # 平地/当前 LabEnv 的地面法向是世界 Z；保存按体表分离的法向载荷，
-        # 不用三轴合力范数冒充 normal load。
+        # Flat-only legacy diagnostic convention. A course must use actual
+        # scalar patch forces; world Z is not the normal of a stair riser.
         body_load = force[..., 2].abs()
     else:
         raise ValueError("未知的 LabEnv normal load 来源")
@@ -115,7 +122,7 @@ def reward_physics_from_lab(sample: NativePhysicalSample, state: MeasuredState, 
         sample.root_link_position_world_m[:, 2].clone(),
         state.height_above_ground_m.clone(), _roll_pitch(sample.root_link_orientation_xyzw),
         state.gravity_body.clone(), state.angular_velocity_body_rad_s.clone(),
-        state.policy_velocity_rad_s.clone(), effort_nm.clone(), body_load,
+        state.policy_velocity_rad_s.clone(), effort_nm.clone(), body_load.clone(),
         wheel_speed.clone(), boundary,
         available_terms=available_terms,
     )
