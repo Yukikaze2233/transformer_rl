@@ -43,6 +43,8 @@ git diff --check
 
 碰撞预处理对每个三角形只循环重排顶点起始顺序，选取入射边长乘积最小的角作为求交基底，避免狭长面使用近乎平行的两条长边。坐标、绕向、面数与逐面来源保持不变；`collision.npz` 的 `cyclic_corner_offset` 记录可逆偏移。该处理不删除有效薄面、不填洞、不改变焊接容差；新派生版本仍须独立通过原生查询检查。
 
+atlas 平移后的 float32 坐标另做一次精确零面积检查，仅移除编码后叉积确为零的面；不按面积或角度阈值删除有效薄面。manifest 的 `float32_face_cleanup` 记录所有被移除面的 tile、part 与来源三角形；NPZ 的 `face_source_part`、`face_source_triangle` 和 `face_pre_cleanup_index` 保留逐面映射，真实场地与人工 padding 分开追溯。
+
 atlas 的 `material_parameters` 按 `[静摩擦, 动摩擦, 恢复系数]` 保存每个物理材质，真实场地继承源 manifest，参数化地形明确采用静／动摩擦相等、恢复系数为零。旧 `material_coefficients` 只保留静摩擦查询语义；不能据此重建完整材质，也不能把轮下地表摩擦冒充 Critic 的轮体材料。派生时另建输出目录，保留原资产和旧 atlas 的身份；未实测标定的摩擦仍不称为标定值。
 
 Critic 的六维轮体材料由 `WheelMaterialReader` 读取 PhysX 实际 shape 属性，按左／右轮各自的静摩擦、动摩擦、恢复系数排列。当前无材质随机事件，初始化时读取并缓存；未来若显式改写物理材质，必须随后按受影响行 `refresh`。一轮多个碰撞 shape 的材质不一致时明确拒绝，不平均、不用地表摩擦替代；managed 的 `lab_setup.json` 保留 shape 映射来源。

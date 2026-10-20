@@ -71,6 +71,8 @@ def _asset_geometry(root, name):
         'training_padding_only': True, 'valid_half_width_m': float(min(abs(low[1]), high[1]) - .15),
         'spawn_z_m': float(ends[0]),
         'physical_material': material,
+        'geometry_part_roles': ['prepared_source', 'approach_padding', 'runout_padding',
+                                'left_padding', 'right_padding'],
     }
 
 
@@ -88,12 +90,15 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
     tuning = TerrainTuning(.7, (.2, 1.1), .25, platform_tread_m=.8, stair_tread_m=.8)
     generator = ContinuousTerrainGenerator(seed, tuning)
     vertices, faces, materials, face_tiles, tiles = [], [], [], [], []
+    face_parts, face_source_triangles = [], []
     vertex_count = 0
 
     def append(parts, material_values, tile):
         nonlocal vertex_count
+        if len(parts) != len(material_values):
+            raise ValueError('each terrain geometry part requires its physical material')
         origin = np.asarray(tile['origin_m'], np.float32)
-        for (points, triangles), material in zip(parts, material_values):
+        for part, ((points, triangles), material) in enumerate(zip(parts, material_values)):
             points = np.asarray(points, np.float32) + origin
             triangles = np.asarray(triangles, np.int64)
             vertices.append(points)
@@ -101,6 +106,8 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
             vertex_count += len(points)
             materials.extend([material] * len(triangles))
             face_tiles.extend([len(tiles)] * len(triangles))
+            face_parts.extend([part] * len(triangles))
+            face_source_triangles.extend(range(len(triangles)))
         tiles.append(tile)
 
     append([_rectangle(-90, 90, -90, 90, 0, 0)], [(.7, .7, 0.)], {
@@ -142,14 +149,32 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
             'finish_x_m': 5., 'start_x_m': -1.5, 'parameters': metadata, **metadata,
         })
     vertices, faces = np.concatenate(vertices), np.concatenate(faces)
+    face_tiles = np.asarray(face_tiles, np.int32)
+    face_parts = np.asarray(face_parts, np.int32)
+    face_source_triangles = np.asarray(face_source_triangles, np.int32)
+    # Translation to the atlas's float32 coordinates can collapse a source
+    # sliver. Remove only exactly zero-area encoded triangles, with provenance;
+    # a positive-area thin face is never removed by a size/angle tolerance.
+    triangles = vertices[faces].astype(np.float64)
+    normals = np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
+    keep = (normals != 0).any(-1)
+    removed = [{'pre_cleanup_face': int(index), 'tile': int(face_tiles[index]),
+                'part': int(face_parts[index]), 'source_triangle': int(face_source_triangles[index])}
+               for index in np.flatnonzero(~keep)]
+    pre_cleanup_index = np.flatnonzero(keep)
+    faces, materials = faces[keep], np.asarray(materials, dtype=float)[keep]
+    face_tiles, face_parts = face_tiles[keep], face_parts[keep]
+    face_source_triangles = face_source_triangles[keep]
     # Use one physical/scanning mesh with per-face material subsets.
-    parameters, material_ids = np.unique(np.asarray(materials, dtype=float), axis=0, return_inverse=True)
+    parameters, material_ids = np.unique(materials, axis=0, return_inverse=True)
     write_collision_usda(output / 'terrain.usda', vertices, faces, static_friction=.7,
                          dynamic_friction=.7, face_material=material_ids, material_parameters=parameters)
     np.savez_compressed(output / 'geometry.npz', vertices_m=vertices, triangles=faces,
                         face_material=material_ids, material_coefficients=parameters[:, 0],
                         material_parameters=parameters,
-                        face_tile=np.asarray(face_tiles, np.int32))
+                        face_tile=face_tiles, face_source_part=face_parts,
+                        face_source_triangle=face_source_triangles,
+                        face_pre_cleanup_index=pre_cleanup_index)
     np.savez_compressed(output / 'query_index.npz',
                         **build_query_index(vertices, faces, face_tiles, len(tiles)))
     manifest = {'format': 'terrain_course_atlas_v1', 'seed': seed, 'levels': levels,
@@ -161,7 +186,13 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
                 'material_combine_mode': 'multiply',
                 'material_coefficients_semantics': 'static_friction_only',
                 'material_policy': {'authored': 'source_manifest_values',
-                                    'procedural': 'static_equals_dynamic_zero_restitution'}}
+                                    'procedural': 'static_equals_dynamic_zero_restitution'},
+                'float32_face_cleanup': {'stage': 'after_atlas_translation',
+                    'rule': 'exact_zero_cross_product_of_encoded_vertices',
+                    'input_triangles': int(len(keep)), 'output_triangles': int(keep.sum()),
+                    'removed': removed, 'vertices_moved': False, 'positive_area_faces_removed': False},
+                'face_provenance': {'tile': 'face_tile', 'part': 'face_source_part',
+                    'part_triangle': 'face_source_triangle', 'pre_cleanup_index': 'face_pre_cleanup_index'}}
     (output / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
     return manifest
 
