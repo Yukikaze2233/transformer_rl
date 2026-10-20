@@ -120,8 +120,8 @@ def build_robot_cfg(asset: AssetDescription, *,
 
 def build_contact_sensor_cfg() -> ContactSensorCfg:
     """地形过滤后的每物理步净接触力；不保留 air-time 历史。"""
-    # 机器人自碰撞已关闭，平地阶段地面是唯一碰撞体；不设置 filter 可避免
-    # IsaacLab GPU 对全局 ground prim 的 filter 警告和额外建视图开销。
+    # 机器人自碰撞已关闭；跨环境互撞由 _setup_scene 的碰撞组隔离。
+    # 保留整机 contact sensor，以维持机身前部/腿部接触语义。
     return ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*",
         history_length=0,
@@ -183,7 +183,7 @@ def build_terrain_cfg(profile: str = "plane", *, atlas_manifest=None) -> Terrain
             usd_path=str(Path(atlas_manifest).resolve().parent / 'terrain.usda'), debug_vis=False)
     if profile == "rough":
         generator = TerrainGeneratorCfg(
-            size=(8.0, 8.0), border_width=20.0, num_rows=4, num_cols=4,
+            size=(9.0, 9.0), border_width=5.0, num_rows=10, num_cols=14,
             horizontal_scale=0.1, vertical_scale=0.005, slope_threshold=0.75,
             difficulty_range=(0.0, 1.0), use_cache=False,
             sub_terrains={

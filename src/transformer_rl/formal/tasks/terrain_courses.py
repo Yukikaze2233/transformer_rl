@@ -217,6 +217,12 @@ class TerrainCourseRouter:
         self.spawn_z = torch.tensor([t['spawn_z_m'] for t in tiles], device=self.device)
         self.kinds = torch.tensor([t['kind'] for t in tiles], device=self.device)
         self.tile_levels = torch.tensor([t['level'] for t in tiles], device=self.device)
+        # Authored v2 assets are fixed geometry, not a difficulty rung. They
+        # remain eligible at every stage instead of disappearing when a stage
+        # caps the procedural level below their atlas level.
+        self.authored = torch.tensor(
+            [t['name'] in ('road_step', 'central_steps') for t in tiles],
+            dtype=torch.bool, device=self.device)
         self.half_widths = torch.tensor([t['valid_half_width_m'] for t in tiles], device=self.device)
         self.finishes = torch.tensor([t['finish_x_m'] for t in tiles], device=self.device)
         self.starts = torch.tensor([t['start_x_m'] for t in tiles], device=self.device)
@@ -256,7 +262,8 @@ class TerrainCourseRouter:
         sampled = torch.randint(cap + 1, (len(ids),), generator=self.generator, device=self.device)
         level = torch.where(explore, sampled, self.level[ids])
         scores = torch.rand((len(ids), len(self.kinds)), generator=self.generator, device=self.device)
-        candidates = ((kind[:, None] == self.kinds) & (level[:, None] == self.tile_levels))
+        candidates = ((kind[:, None] == self.kinds)
+                       & ((level[:, None] == self.tile_levels) | self.authored[None, :]))
         candidates[kind == 0] = False
         candidates[kind == 0, 0] = True
         if not candidates.any(-1).all():
