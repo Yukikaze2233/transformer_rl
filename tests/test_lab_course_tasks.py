@@ -175,3 +175,28 @@ def test_large_external_id_does_not_make_the_next_auto_request_replay():
                _touch_estimate(torch.full((2,), .02, dtype=torch.float64)), torch.zeros(2))
     assert tasks.protocol.max_seen_id.eq(101).all()
     assert tasks.protocol.active_id.eq(101).all()
+
+
+def test_external_id_state_survives_reset_and_cold_restore_without_auto_replay():
+    from transformer_rl.formal.lab_env.course_tasks import RequestCommand
+
+    tasks, sample = fixture()
+    tasks.family[:] = 4
+    tasks.rise[:] = .10
+    external = RequestCommand(torch.full((2,), 100, dtype=torch.long), torch.full((2,), .10), source='tof')
+    tasks.step(torch.zeros(2, dtype=torch.float64),
+               _touch_estimate(torch.full((2,), -.01, dtype=torch.float64)), torch.zeros(2), command=external)
+    tasks.step(torch.full((2,), .01, dtype=torch.float64),
+               _touch_estimate(torch.zeros(2, dtype=torch.float64)), torch.zeros(2), command=external)
+    saved = tasks.state_dict()
+    restored, _ = fixture()
+    restored.restore_after_physical_reset(saved, torch.zeros(2, dtype=torch.float64))
+    restored.reset(torch.arange(2), sample, torch.zeros(2, dtype=torch.float64))
+    assert restored.protocol.max_seen_id.eq(100).all()
+    assert restored.next_id.ge(101).all()
+    restored.next_request_s[:] = 0
+    restored.family[:] = 4
+    restored.rise[:] = .10
+    restored.step(torch.zeros(2, dtype=torch.float64),
+                  _touch_estimate(torch.full((2,), -.01, dtype=torch.float64)), torch.zeros(2))
+    assert restored.protocol.active_id.ge(101).all()
