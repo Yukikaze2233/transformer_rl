@@ -143,6 +143,21 @@ def build_height_scanner_cfg() -> RayCasterCfg:
     )
 
 
+def build_forward_scanners_cfg() -> tuple[RayCasterCfg, RayCasterCfg, RayCasterCfg, RayCasterCfg]:
+    """Wheel-current and wheel-forward ground rays for the stair/jump FSM."""
+    def one(prim: str, x_m: float) -> RayCasterCfg:
+        return RayCasterCfg(
+            prim_path=f"/World/envs/env_.*/Robot/{prim}",
+            offset=RayCasterCfg.OffsetCfg(pos=(x_m, 0.0, 0.20)),
+            ray_alignment="yaw",
+            pattern_cfg=patterns.GridPatternCfg(resolution=0.01, size=(0.01, 0.01)),
+            debug_vis=False,
+            mesh_prim_paths=["/World/ground"],
+            update_period=0.0,
+        )
+    return one("L_link3", 0.0), one("L_link3", 0.25), one("R_link3", 0.0), one("R_link3", 0.25)
+
+
 def build_terrain_cfg(profile: str = "plane") -> TerrainImporterCfg:
     if profile not in ("plane", "rough"):
         raise ValueError("terrain profile 只支持 plane/rough")
@@ -219,6 +234,7 @@ class WheeledLabEnvCfg(DirectRLEnvCfg):
     robot_cfg: ArticulationCfg = MISSING
     contact_sensor: ContactSensorCfg = field(default_factory=build_contact_sensor_cfg)
     height_scanner: RayCasterCfg | None = None
+    forward_scanners: tuple[RayCasterCfg, ...] = field(default_factory=tuple)
 
     def __post_init__(self):
         super().__post_init__()
@@ -243,6 +259,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
                   formal_reward: FormalRewardConfig | None = None,
                   recover: RecoverTaskSpec | None = None,
                   height_scanner: bool = False,
+                  forward_scan: bool = False,
                   terrain_profile: str = "plane",
                   seed: int | None = 0,
                   expected_manifest_sha256: str | None = None) -> WheeledLabEnvCfg:
@@ -272,5 +289,6 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     cfg.robot_cfg = build_robot_cfg(asset, response=response)
     cfg.contact_sensor = build_contact_sensor_cfg()
     cfg.height_scanner = build_height_scanner_cfg() if height_scanner else None
+    cfg.forward_scanners = build_forward_scanners_cfg() if forward_scan else ()
     cfg.terrain = build_terrain_cfg(terrain_profile)
     return cfg

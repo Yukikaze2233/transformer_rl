@@ -26,6 +26,8 @@ from .cfg import WheeledLabEnvCfg
 from .contract import ACTION_DIM, FlatTaskSpec, flat_reward, flat_termination
 from .formal_curriculum import LabTaskSample
 from .formal_reward import FormalRewardConfig, LabFormalReward
+from .forward_scan import ForwardStepDetector
+from .skill_fsm import SkillFSM
 from ..tasks.reward import RewardPhase
 from .recover import LabRecoverTask, RecoverTaskSpec
 from .recovery import LabRecoveryReset
@@ -112,9 +114,15 @@ class WheeledLabEnv(DirectRLEnv):
         self._contact_source, self._contact_target = self._contact_mapping()
         self._command = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self._device)
         self._command[:, 3] = self._task.nominal_height_m
+        self._command_base = self._command.clone()
         self._request_height = torch.zeros(self.num_envs, dtype=torch.float32, device=self._device)
         self._command_mode = torch.full((self.num_envs,), int(CommandMode.NORMAL),
                                         dtype=torch.long, device=self._device)
+        self._base_command_mode = self._command_mode.clone()
+        self._skill_fsm = (SkillFSM(self.num_envs, device=str(self._device))
+                           if len(cfg.forward_scanners) else None)
+        self._forward_detector = (ForwardStepDetector(self.num_envs, device=str(self._device))
+                                  if self._skill_fsm is not None else None)
         self._reward_phase = torch.full((self.num_envs,), 0, dtype=torch.long, device=self._device)
         self._recovery_posture = torch.zeros(self.num_envs, dtype=torch.long, device=self._device)
         self._command_sampler = None
@@ -200,6 +208,9 @@ class WheeledLabEnv(DirectRLEnv):
         if self.cfg.height_scanner is not None:
             self.height_scanner = RayCaster(self.cfg.height_scanner)
             self.scene.sensors["height_scanner"] = self.height_scanner
+        self._forward_scanners = tuple(RayCaster(cfg) for cfg in self.cfg.forward_scanners)
+        for index, scanner in enumerate(self._forward_scanners):
+            self.scene.sensors[f"forward_scanner_{index}"] = scanner
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
         self.terrain = self.cfg.terrain.class_type(self.cfg.terrain)
@@ -222,6 +233,52 @@ class WheeledLabEnv(DirectRLEnv):
     def _clock(self):
         return torch.full((self.num_envs,), self._physical_tick * float(self.physics_dt),
                           dtype=torch.float64, device=self._device)
+    def _scan_height(self, scanner):
+        hits = self._as_torch(scanner.data.ray_hits_w)
+        if (hits.ndim != 3 or hits.shape[0] != self.num_envs or hits.shape[1] < 1
+                or hits.shape[-1] != 3):
+            raise ValueError("forward scanner 未返回 [N,Q,3] hits")
+        height = hits[:, 0, 2]
+        return height, torch.isfinite(height)
+
+    def _scan_ground(self):
+        if not self._forward_scanners:
+            floor = torch.zeros(self.num_envs, device=self._device)
+            return floor, floor, torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
+        left_now, left_now_valid = self._scan_height(self._forward_scanners[0])
+        left_ahead, left_ahead_valid = self._scan_height(self._forward_scanners[1])
+        right_now, right_now_valid = self._scan_height(self._forward_scanners[2])
+        right_ahead, right_ahead_valid = self._scan_height(self._forward_scanners[3])
+        valid = left_now_valid & left_ahead_valid & right_now_valid & right_ahead_valid
+        current = (left_now + right_now) * .5
+        ahead = (left_ahead + right_ahead) * .5
+        return current, ahead, valid
+
+    def _update_skill(self):
+        if self._skill_fsm is None or self._last_state is None or self._last_sample is None:
+            return
+        current, ahead, valid = self._scan_ground()
+        step_height = torch.where(valid, (ahead - current).clamp_min(0),
+                                  torch.zeros_like(current))
+        state = self._last_state
+        base_force = self._last_sample.terrain_contact_force_world_n[
+            :, self._base_body_index].norm(dim=-1)
+        recovery = self._base_command_mode == int(CommandMode.RECOVERY)
+        out = self._skill_fsm.step(
+            step_height_m=step_height,
+            wheel_force_n=state.wheel_ground_force_n,
+            body_height_m=state.height_above_ground_m,
+            tilt_rad=self._last_tilt,
+            base_contact_force_n=base_force,
+            command_height_m=self._command_base[:, 3],
+            auto_enabled=~recovery,
+        )
+        active = out.mode != int(CommandMode.NORMAL)
+        self._command[:, 3] = torch.where(active, out.height_command_m, self._command_base[:, 3])
+        self._command[:, 0] = self._command_base[:, 0] * torch.where(
+            active, out.speed_scale, torch.ones_like(out.speed_scale))
+        self._command_mode.copy_(torch.where(active, out.mode, self._base_command_mode))
+
 
     def _root_link_position(self):
         data = self.robot.data
@@ -451,6 +508,7 @@ class WheeledLabEnv(DirectRLEnv):
         self.reset_buf = self.reset_terminated | self.reset_time_outs
         self._previous_action.copy_(self._issued_action)
         reset_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1).int()
+        self._update_skill()
         if reset_ids.numel() > 0:
             self._reset_idx(reset_ids)
         self.obs_buf = self._get_observations()
@@ -500,6 +558,11 @@ class WheeledLabEnv(DirectRLEnv):
                 raise ValueError("command sampler 必须返回有限 [M,4] float32")
             self._command[ids] = sampled
 
+        self._command_base[ids] = self._command[ids]
+        self._base_command_mode[ids] = self._command_mode[ids]
+        if self._skill_fsm is not None:
+            self._skill_fsm.reset(ids)
+            self._forward_detector.reset(ids)
         root_pose = torch.zeros(count, 7, dtype=torch.float32, device=self._device)
         root_pose[:, 2] = self._task.nominal_height_m
         root_pose[:, 6] = 1.0
