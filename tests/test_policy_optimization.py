@@ -68,7 +68,7 @@ def assert_identical(actual, expected):
 def test_batch_uses_configured_critic_width_and_rejects_old_observations():
     network = model()
     batch = batch_for(network)
-    assert batch.critic.shape == (len(batch), 191)
+    assert batch.critic.shape == (len(batch), 185)
     batch.validate(network)
     with pytest.raises(ValueError, match='critic'):
         replace(batch, critic=batch.critic[:, :81]).validate(network)

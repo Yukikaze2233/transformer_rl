@@ -161,7 +161,7 @@ def test_real_width_candidate_and_initialized_adams_roundtrip(tmp_path):
         update(state, journal)
         receipt = store.save('full.pt', state)
         loaded = store.load('full.pt')
-        assert sum(p.numel() for p in loaded.components.model.parameters()) == 235256
+        assert sum(p.numel() for p in loaded.components.model.parameters()) == 233720
         assert loaded.components.trainer.actor_optimizer.state and loaded.components.trainer.critic_optimizer.state
         assert receipt['bytes'] > 2 * sum(p.numel() * p.element_size()
                                          for p in loaded.components.model.parameters())

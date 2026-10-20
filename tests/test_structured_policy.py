@@ -36,8 +36,8 @@ def test_actual_parameter_counts_and_deployment_head_removal():
     deployed = model.actor.policy.for_deployment()
     count = lambda module: sum(p.numel() for p in module.parameters())
     assert count(model.actor) == 144887
-    assert count(model.critic) == 90369
-    assert count(model) == 235256 < 450000
+    assert count(model.critic) == 88833
+    assert count(model) == 233720 < 450000
     assert count(deployed) == 142411
     assert deployed.prediction_head is None
     assert not any(isinstance(module, (nn.GRU, nn.LSTM, nn.Dropout)) for module in model.modules())
@@ -62,17 +62,17 @@ def test_json_roundtrip_preserves_all_hidden_widths_and_critic_contract():
     config = StructuredPolicyConfig()
     encoded = json.loads(json.dumps(asdict(config)))
     assert StructuredPolicyConfig(**encoded) == config
-    assert config.normalization_contract == 'fixed_manual35_191_no_running_statistics'
+    assert config.normalization_contract == 'fixed_manual35_185_no_running_statistics'
 
 
 def test_critic_feature_assembly_preserves_fields_and_detaches_actor_estimation():
     model = StructuredActorCritic()
-    environment = torch.randn(4, 188, requires_grad=True)
+    environment = torch.randn(4, 182, requires_grad=True)
     _, raw_state, _ = model.actor.policy.outputs(observation().frames)
     features = model.critic_features(environment, raw_state)
-    assert features.shape == (4, 191) and not features.requires_grad
-    torch.testing.assert_close(features[:, :188], environment)
-    torch.testing.assert_close(features[:, 188:], raw_state[:, :3])
+    assert features.shape == (4, 185) and not features.requires_grad
+    torch.testing.assert_close(features[:, :182], environment)
+    torch.testing.assert_close(features[:, 182:], raw_state[:, :3])
     model.critic(features).square().mean().backward()
     assert environment.grad is None
     assert all(p.grad is None for p in model.actor.parameters())
@@ -81,6 +81,14 @@ def test_critic_feature_assembly_preserves_fields_and_detaches_actor_estimation(
         model.critic_features(environment[:, :81], raw_state)
     with pytest.raises(ValueError, match='physical inputs'):
         model.critic_features(environment, raw_state.double())
+    with pytest.raises(ValueError, match='physical inputs'):
+        model.critic_features(torch.randn(4, 188), raw_state)
+
+
+def test_removed_extended_critic_contract_is_not_silently_assembled():
+    extended = StructuredActorCritic(StructuredPolicyConfig(critic_input_dim=191))
+    with pytest.raises(ValueError, match='185D observation contract'):
+        extended.critic_features(torch.randn(4, 188), torch.randn(4, 8))
 
 
 def test_explicit_old_dimensions_remain_representable_without_silent_weight_migration():

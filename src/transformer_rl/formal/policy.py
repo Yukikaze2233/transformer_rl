@@ -32,7 +32,7 @@ class StructuredPolicyConfig:
     leg_hidden_dims: tuple[int, int] = (64, 32)
     wheel_hidden_dims: tuple[int, int] = (64, 32)
     prediction_hidden_dim: int = 32
-    critic_input_dim: int = 191
+    critic_input_dim: int = 185
     critic_hidden_dims: tuple[int, int, int] = (256, 128, 64)
     gate_bias: float = -2.0
     mean_init_scale: float = 0.01
@@ -323,13 +323,13 @@ class StructuredActorCritic(nn.Module):
                                     nn.Linear(third, 1), nn.Flatten(0))
 
     def critic_features(self, environment_features: torch.Tensor, raw_state: torch.Tensor) -> torch.Tensor:
-        """188D物理特权量 + 本次Actor速度估计3D；价值梯度不进入Actor。"""
-        if self.config.critic_input_dim != 191:
-            raise ValueError('critic feature assembly requires the 191D observation contract')
-        if (environment_features.ndim != 2 or environment_features.shape[1] != 188
+        """182D环境特权量 + 本次Actor速度估计3D；价值梯度不进入Actor。"""
+        if self.config.critic_input_dim != 185:
+            raise ValueError('critic feature assembly requires the 185D observation contract')
+        if (environment_features.ndim != 2 or environment_features.shape[1] != 182
                 or raw_state.shape != (environment_features.shape[0], 8)
                 or environment_features.device != raw_state.device
                 or environment_features.dtype != raw_state.dtype
                 or not environment_features.is_floating_point()):
-            raise ValueError('critic features require matching [B,188] physical inputs and [B,8] actor state')
+            raise ValueError('critic features require matching [B,182] physical inputs and [B,8] actor state')
         return torch.cat((environment_features.detach(), raw_state[:, :3].detach()), -1)

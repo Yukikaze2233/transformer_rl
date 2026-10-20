@@ -2,7 +2,7 @@
 
 本文是网络、采样器与部署端的共同规格。系统分层见[系统架构](ARCHITECTURE.md)，启停与课程见[使用说明](USAGE.md)。
 
-**采用现有拓扑的轻量尺寸：一层32D空间门控注意力、两层64D时间门控注意力、五Query读出、35D×5帧Actor、191D独立Critic。** 保留身体分组、完整特征门控、状态估计、当前帧直连与腿／轮共享解码器。
+**采用现有拓扑的轻量尺寸：一层32D空间门控注意力、两层64D时间门控注意力、五Query读出、35D×5帧Actor、185D独立Critic。** 保留身体分组、完整特征门控、状态估计、当前帧直连与腿／轮共享解码器。
 
 ## 1. 实现状态与固定接口
 
@@ -10,8 +10,8 @@
 |---|---|---|
 | Actor输入／输出 | `float32[B,5,35] → float32[B,6]` | 保持现有35D字段和六轴顺序 |
 | 空间／时间主干 | 32D／64D，层数1／2 | 已修改；未部署到训练会话 |
-| Critic | `191→256→128→64→1`，ELU | 网络已修改；环境仍为旧81D观测 |
-| Critic拼接 | `model.critic_features(environment188, raw_state8)` | 已提供188＋3拼接及detach；188D实际数据源待接入 |
+| Critic | `185→256→128→64→1`，ELU | 网络已修改；环境仍为旧81D观测 |
+| Critic拼接 | `model.critic_features(environment182, raw_state8)` | 已提供182＋3拼接及detach；182D实际数据源待接入 |
 | PPO batch与checkpoint | 按配置校验Critic宽度、记录对应归一化标识 | 已修改；不自动迁移旧权重 |
 | 地形／课程／正式训练 | 不属于网络修改 | 本次未改动，训练保持暂停 |
 
@@ -29,8 +29,8 @@ flowchart TD
     D["Query＋当前局部原始状态<br/>＋机身6／命令11／估计8直连"]
     A["腿95→64→32→2，左右共享<br/>轮91→64→32→1，左右共享<br/>拼成6D原始动作均值"]
     C["训练Gaussian采样／部署使用均值<br/>执行层限幅与同轴成对映射<br/>四轴位置＋两轴轮速"]
-    X["环境特权188D<br/>基础84＋地形77＋补充状态27"]
-    V["独立Critic：191→256→128→64→1<br/>ELU，仅训练，输出V"]
+    X["环境特权182D<br/>基础78＋地形77＋补充状态27"]
+    V["独立Critic：185→256→128→64→1<br/>ELU，仅训练，输出V"]
     N["仅训练预测头70→32→6<br/>状态Query64＋已发出动作6"]
     H --> S --> T --> Q
     Q --> E
@@ -102,52 +102,45 @@ y = x + sigmoid(Wg_ffn z + bg_ffn) ⊙ FFN(z)
 
 所有dropout为0；门控权重初始0、bias为−2，初始残差增益约0.119。门控只作用于网络深度，不保存跨时间状态。探索标准差初始为`[0.3,0.3,0.3,0.3,0.5,0.5]`，探索log标准差裁到`[-4,1]`；它与速度估计的log标准差是两套变量。
 
-## 5. Critic：191D字段合同
+## 5. Critic：185D字段合同
 
-**网络已经接受191D，以下物理字段的组装仍需环境端实现。** 不是将旧81D补零到191D。新布局覆盖78D参考中的执行链信息，以及另一参考中的地形、历史动作、加速度、质量／质心与姿态扰动类别；不保证逐维兼容参考模型。
+**网络接受185D，环境182D数据组装仍待接入。** 字段仅采用两套已核对参考中实际启用的输入类别；保持本车已有35D Actor接口，不额外添加新的物理特权项。不声明与参考模型逐维兼容。
 
 ```text
-环境188D = 基础84 + 地形77 + 历史动作12 + 角加速度6 + COM偏移3 + 标称姿态扰动6
-Critic191D = 环境188D + 当前Actor估计速度3D（detach）
-V = MLP(191→256→128→64→1)，隐藏激活ELU
+环境182D = 78D基础 + 地形77 + 历史动作12 + 角加速度6 + COM偏移3 + 标称姿态扰动6
+Critic185D = 环境182D + 当前Actor估计速度3D（detach）
+V = MLP(185→256→128→64→1)，隐藏激活ELU
 ```
 
-所有量绑定观测时刻`t`、本环境、本回合和控制epoch；时序量只能读取`t`及以前。下表新增缩放是待接入合同，不是当前81D组装器已提供的行为。
+来源A为78D轮腿参考，来源B为复旦141D环境／实际144D Critic参考。下表的字段顺序为本车对接顺序；单位缩放、接触判定、PD和辨识响应由环境预处理负责，见[系统架构](ARCHITECTURE.md#物理与恢复)。网络读取预处理后的张量，不在网络内实现这些物理处理。
 
-| 索引 | 维数 | 字段 | 单位／归一化与来源 |
+| 索引 | 维数 | 字段 | 来源／含义 |
 |---|---:|---|---|
-| `0:35` | 35 | 干净Actor当前帧 | 同第3节缩放，不加入传感器噪声／延迟 |
-| `35:38` | 3 | 真实机身线速度 | `base_link`原点、机身坐标m/s，比例1 |
-| `38:39` | 1 | 真实离地高度 | `base_link`世界Z减根部地表Z，m，比例1 |
-| `39:45` | 6 | 实际输出轴Kp | N·m/rad，除160；速度控制轮轴的位置Kp为0 |
-| `45:51` | 6 | 实际输出轴Kd | N·m·s/rad；四腿除2.5，两轮除0.6 |
-| `51:57` | 6 | 已施加主动驱动力矩 | N·m，除`[40,40,40,40,4.5,4.5]`；不含气簧被动力 |
-| `57:61` | 4 | 实际观测年龄 | `t−sampled_at`，秒除0.01；q、dq、gyro、gravity |
-| `61:63` | 2 | 实际命令输运延迟 | 秒除0.01；腿组、轮组 |
-| `63:69` | 6 | 两轮相对机身线速度差 | `[L_xyz,R_xyz]`，m/s；`Rᵀ(v_wheel−v_base_origin)`，比例1 |
-| `69:71` | 2 | 轮接触状态 | 左／右0或1，使用有效的过去接触历史 |
-| `71:72` | 1 | 机身质量倍率 | 原生实际质量／资产标称质量 |
-| `72:78` | 6 | 两轮刚体材料 | `[μs_L,μd_L,e_L,μs_R,μd_R,e_R]`，比例1 |
-| `78:80` | 2 | 轮地接触合力强度 | 地形过滤后合力模长N，除125；不是法向patch载荷 |
-| `80:82` | 2 | 轮下地形摩擦 | 左／右地形材料系数，不与轮刚体材料混为一项 |
-| `82:84` | 2 | 轮下地表高度 | 地表世界Z减本环境原点Z，m；不是轮底净空 |
-| `84:161` | 77 | 周围地形高度 | 第5.1节11×7扫描 |
-| `161:167` | 6 | 再前一拍已发出动作 | `a_issued(t−2Δt)`；当前35D已含`t−Δt`动作 |
-| `167:173` | 6 | 再前两拍已发出动作 | `a_issued(t−3Δt)`，同一归一化口径 |
-| `173:179` | 6 | 输出轴角加速度 | 同epoch相邻物理样本的`Δdq/实际Δt`，rad/s²；腿除500、轮除2000 |
-| `179:182` | 3 | 机身COM局部偏移 | 实际局部COM减标称COM，m，除0.05 |
-| `182:188` | 6 | 标称输出姿态扰动 | 当前使用的标称输出位置减资产参考，rad；两轮位置槽为0 |
-| `188:191` | 3 | Actor估计线速度 | 本次前向`raw_state[:,:3]`，m/s，比例1，detach |
+| `0:35` | 35 | 干净Actor当前帧 | A；沿用第3节35D布局，不加传感器噪声／延迟 |
+| `35:38` | 3 | 真实机身线速度 | A、B；机身坐标 |
+| `38:39` | 1 | 真实离地高度 | A；机身相对地表高度 |
+| `39:45` | 6 | 六轴控制刚度 | A实际启用的`joint_stiffness` |
+| `45:51` | 6 | 六轴控制阻尼 | A实际启用的`joint_damping` |
+| `51:57` | 6 | 已施加主动驱动力矩 | A、B；六个主动输出轴，不含气簧被动力 |
+| `57:61` | 4 | 观测延迟 | A；q、dq、gyro、gravity四组，以物理步为单位 |
+| `61:63` | 2 | 动作延迟 | A；腿组、轮组，以物理步为单位 |
+| `63:69` | 6 | 两轮相对机身线速度差 | A；机身坐标`[L_xyz,R_xyz]` |
+| `69:71` | 2 | 轮接触状态 | A；左／右接触标志 |
+| `71:72` | 1 | 机身质量 | A、B；本车采用相对标称质量倍率 |
+| `72:78` | 6 | 两轮刚体材料 | A；`[μs_L,μd_L,e_L,μs_R,μd_R,e_R]` |
+| `78:155` | 77 | 周围地形高度 | B；第5.1节11×7扫描 |
+| `155:161` | 6 | 再前一拍已发出动作 | B；当前35D已含上一拍动作，本项为`t−2Δt` |
+| `161:167` | 6 | 再前两拍已发出动作 | B；`t−3Δt` |
+| `167:173` | 6 | 输出轴角加速度 | B；同epoch相邻物理样本的`Δdq/实际Δt` |
+| `173:176` | 3 | 机身COM局部偏移 | B；实际局部COM减标称COM |
+| `176:182` | 6 | 标称输出姿态扰动 | B；当前标称输出位置减资产参考，两轮位置槽为0 |
+| `182:185` | 3 | Actor估计线速度 | B的runner拼接方式；本次`raw_state[:,:3]`，detach |
 
-新增物理量按固定尺度归一化，先拒绝无效来源与非有限值，再裁到`[-100,100]`；地形先做米制裁剪。不增加running normalization。未随机化的标称姿态偏移真实为0，缺失的物理来源不能用0冒充。
+输入仅采用表内可追溯到参考的类别，不另加轮地接触合力、轮下地形摩擦或轮下地表高度；参考中已有的轮接触标志、轮体材料和77点地形保留。
 
-速度必须从COM参考换算到`base_link`原点，再转机身坐标；轮速度差使用同一原点并保留XYZ。增益是输出轴侧有效值，包含实际降额；力矩是响应模型后的有效主动驱动力，不是饱和前PD请求或六维归一化动作。
+两轮材料由每轮静摩擦系数、动摩擦系数、恢复系数组成。它们是训练特权信息，不进入部署Actor；随机材料下帮助Critic区分环境条件，固定材料下为常量。网络不据此修改摩擦或电机参数。
 
-命令输运延迟取当前已应用目标的`controller_applied_at−issued_at`，不重复加入有效电机响应时间。两组共享延迟时取共享值；组内各轴不同时取组内最大实际延迟，并记录这一聚合规则。时间戳不存在时不能用配置最大值代替实测值。
-
-原生接触监督使用过去15ms正法向载荷历史和2N阈值。净合力可能抵消，不能据此伪造法向载荷或接触切向滑移。Lab路径应明确自己的接触来源和parity状态。动作历史在新边界复制本边界真实初始已发出动作；角加速度由准备阶段的同epoch物理样本建立。
-
-旧81D的完整关节树`q18+dq18`不再输入新Critic，闭链求解、被动膝边界与诊断仍保留这些量。因此191D是新的信息组合，不是旧81D逐字段原样保留的超集。
+所有时序字段绑定本环境、本回合和控制epoch，只读取当前及过去的信息。环境端负责固定尺度预处理、有限值与来源检查；缺失字段不能补零冒充有效数据，也不新增running normalization。旧81D完整树状态`q18+dq18`不再输入本Critic，闭链求解与诊断仍保留这些物理量。
 
 ### 5.1 仿真地形77点
 
@@ -166,11 +159,11 @@ scan[7i+j] = 5 × clip(z_base − z_ground(p_xy(i,j)) − h_reference, −1m, 1m
 
 **只供Critic训练。** 不写入Actor窗口、状态估计器输入或部署模型。实车尚无ToF不影响仿真Critic使用这些真值，但Critic看到地形不代表部署Actor获得了前视感知。
 
-### 5.2 188＋3拼接
+### 5.2 182＋3拼接
 
-环境提供188D物理特权信息，采样器复用一次Actor前向的状态估计，通过`model.critic_features(...)`得到191D。该方法检查张量形状／dtype／device，拼接时detach；不判断物理字段是否真实，也不创建缺失字段。
+环境提供182D物理特权信息，采样器复用一次Actor前向的状态估计，通过`model.critic_features(...)`得到185D。该方法检查张量形状／dtype／device，拼接时detach；不判断物理字段是否真实，也不创建缺失字段。
 
-rollout内Actor冻结，191D快照与旧value一起保存；Critic更新继续读取此快照。Actor的PPO更新仍按当前权重重算历史和状态头，不拿保存的估计量代替新Actor特征。Critic梯度不进入Actor。
+rollout内Actor冻结，185D快照与旧value一起保存；Critic更新继续读取此快照。Actor的PPO更新仍按当前权重重算历史和状态头，不拿保存的估计量代替新Actor特征。Critic梯度不进入Actor。
 
 超时bootstrap必须使用PRE-reset物理特权量和PRE-reset窗口的估计速度，不能拼auto-reset新回合估计。终点窗口需在reset前保留；不能只凭新的环境obs重建。
 
@@ -187,7 +180,7 @@ wheel_speed_target = 10 × a_issued[4:6]             # rad/s，范围±90
 
 保存原始动作的Gaussian log概率，环境之后才限幅；不对裁剪后动作重算概率，也不增加输出tanh。四位置目标再经同轴成对可达域投影和共同绕圈选择；标称姿态来自107°资产绑定，不能按独立膝角限幅替代。
 
-当前控制层腿PD为`160(q_target−q)−2.5dq`，轮速反馈为`0.6(omega_target−omega)`；输出轴力矩上限为四腿40N·m、两轮4.5N·m，再按实际降额处理。网络不直接输出六路力矩。电机整链响应只应用一次，不因网络缩宽重复叠加链传动或USB延迟。
+网络输出四个位置目标和两个轮速目标，不直接输出六路力矩。PD、电机辨识响应、气簧与闭链仿真属于控制／环境层，见[系统架构](ARCHITECTURE.md#物理与恢复)。
 
 外部FSM管理请求ID、去重、取消、准入、起跳／落地完成和安全接管等持久状态。Actor在可观察命令下连续控制，所有模式共用一个模型，不切换平地／跳跃模型。当前可用手柄／键盘发请求；未来ToF台阶检测替换请求源，不自动变成Actor输入。
 
@@ -199,7 +192,7 @@ wheel_speed_target = 10 × a_issued[4:6]             # rad/s，范围±90
 |---|---|
 | Actor窗口 | `[B,5,35]`原始帧 |
 | Actor训练输出 | 均值`[B,6]`、raw_state`[B,8]`、状态Query上下文`[B,64]` |
-| 环境／Critic输入 | `[B,188]`物理块／拼接后`[B,191]` |
+| 环境／Critic输入 | `[B,182]`物理块／拼接后`[B,185]` |
 | 监督 | 当前速度`[B,3]`、接触`[B,2]`、下一步速度变化`[B,6]` |
 | GAE | time-major`[T,N]`，`T=48,N=8192` |
 | PPO端点 | 393,216；五帧不计为五倍fresh样本 |
@@ -244,23 +237,22 @@ PPO和三个辅助项合成一次Actor事务，动作梯度允许穿过估计头
 | **部署Actor** | **142,411** |
 | 训练预测头／探索参数 | 2,470／6 |
 | **训练Actor** | **144,887** |
-| **191D Critic** | **90,369** |
-| **训练总量** | **235,256** |
+| **185D Critic** | **88,833** |
+| **训练总量** | **233,720** |
 
-对照：旧部署Actor339,627、旧81D Critic62,209、旧训练总量408,824。Actor参数减少58.1%；主要矩阵运算估算从262万降至91.4万MAC／窗口，不代表整轮PPO同比加速。以上参数总量已由Kaiser实际模型实例计数核实，完整191D数据采集与8192吞吐尚未测量。
+对照：旧部署Actor339,627、旧81D Critic62,209、旧训练总量408,824。Actor参数减少58.1%；主要矩阵运算估算从262万降至91.4万MAC／窗口，不代表整轮PPO同比加速。参数总量已由Kaiser实际模型实例计数核实，完整185D数据采集与8192吞吐尚未测量。
 
 | Critic输入 | 隐藏层 | 参数量 |
 |---|---|---:|
 | 旧81D | 256／128／64 | 62,209 |
-| 讨论过的84D基础 | 256／128／64 | 62,977 |
 | 参考141D环境＋3D估计，实际144D | 256／128／64 | 78,337 |
-| **本版191D** | **256／128／64** | **90,369** |
+| **本版185D** | **256／128／64** | **88,833** |
 
-扩成并集后，Critic比参考144D约大15.4%，不再称其更小。单份`393216×191`的float32 Critic张量约286.5MiB，比81D增加165MiB，不含终点缓存、优势或激活。
+扩成并集后，Critic比参考144D约大13.4%，不再称其更小。单份`393216×185`的float32 Critic张量约277.5MiB，比81D增加156MiB，不含终点缓存、优势或激活。
 
 同拓扑缩宽仍改变权重形状；新Critic也改变第一层。不能将旧checkpoint直接strict resume到新尺寸，不能用`strict=False`冒充无损接续。旧release与旧记录保留；需要迁移时另行定义张量和Adam映射，不能把新参数初始化称为保留全部学习状态。
 
-新recipe显式保存全部隐藏层尺寸和Critic维数；归一化标识为`fixed_manual35_191_no_running_statistics`。该标识只绑定合同，不证明输入字段实际齐全。显式设置全部旧尺寸和81D输入仍可构造旧网络；缺少新字段的旧checkpoint recipe不会被自动迁移为新结构。
+新recipe显式保存全部隐藏层尺寸和Critic维数；归一化标识为`fixed_manual35_185_no_running_statistics`。该标识只绑定合同，不证明输入字段实际齐全。显式设置全部旧尺寸和81D输入仍可构造旧网络；缺少新字段的旧checkpoint recipe不会被自动迁移为新结构。
 
 同规格计划启停保存模型、两套Adam、RNG、update、课程／请求源状态与累计预算。冷恢复按既有规则重建物理回合与历史。Lab学习状态checkpoint不自动等价于完整structured恢复，也不保证断电恢复未保存进度。
 
@@ -273,20 +265,20 @@ from transformer_rl.formal.policy import StructuredActorCritic, StructuredPolicy
 
 model = StructuredActorCritic(StructuredPolicyConfig())
 mean, raw_state, context = model.actor.policy.outputs(frames)  # [B,5,35]
-critic_input = model.critic_features(privileged188, raw_state)  # [B,191], detached
+critic_input = model.critic_features(privileged182, raw_state)  # [B,185], detached
 value = model.critic(critic_input)  # [B]
 ```
 
-`configs/formal_training.json`已显式写出空间32／时间64、各头隐藏层和Critic191。创建网络与batch校验支持这些尺寸，但当前环境组装器、Lab合同、采样器仍有81D路径，必须接好188D物理块、77点扫描及188＋3拼接后，才能启动这一版正式PPO。
+`configs/formal_training.json`已显式写出空间32／时间64、各头隐藏层和Critic185。创建网络与batch校验支持这些尺寸，但当前环境组装器、Lab合同、采样器仍有81D路径，必须接好182D物理块、77点扫描及182＋3拼接后，才能启动这一版正式PPO。
 
 | 对接位置 | 已完成或仍需处理 |
 |---|---|
 | `formal/policy.py` | 已配置化头尺寸与Critic宽度；提供`critic_features` |
 | `learning/optimization.py` | 已按模型配置校验Critic维数，PPO数学不变 |
 | `learning/checkpoint.py` | 已按配置绑定归一化标识，仍严格检查recipe和权重 |
-| `control/observation.py`及仿真／Lab观测桥 | 待生成本文188D物理块；不能把旧81D补零 |
-| `learning/collection.py`及`lab_env/collector.py` | 待复用本次状态估计拼191D，并保留PRE-reset终点窗口 |
-| `lab_env/contract.py`及训练入口 | 待区分188D环境块与191D网络输入，显式采用新冻结配置 |
+| `control/observation.py`及仿真／Lab观测桥 | 待生成本文182D物理块；不能把旧81D补零 |
+| `learning/collection.py`及`lab_env/collector.py` | 待复用本次状态估计拼185D，并保留PRE-reset终点窗口 |
+| `lab_env/contract.py`及训练入口 | 待区分182D环境块与185D网络输入，显式采用新冻结配置 |
 | 地形查询 | 待绑定77点布局、同源几何、固定缩放与批量采集 |
 | 导出／恢复／正式运行 | 网络检查和数据源接入后分别验收，不热改现有release |
 
@@ -294,8 +286,10 @@ value = model.critic(critic_input)  # [B]
 
 部署只导出Actor：移除Critic、地形、高斯采样／探索与预测头，保留状态头。输入仍`B×5×35`，输出仍`B×6`，调用方管理历史。
 
-本版在Kaiser私有目录通过94项CPU检查，包括参数量、因果mask、梯度隔离、PPO分块、checkpoint往返、TorchScript及ONNX导出。没有启动仿真或正式训练；这些检查不等于188D环境来源已接好、8192吞吐验证或物理控制验收。完整物理能力仍由人工评价决定，训练保持暂停。
+本版在Kaiser私有目录，以已提交基线加本次网络变更的隔离快照通过95项CPU检查，包括参数量、因果mask、梯度隔离、PPO分块、checkpoint往返、TorchScript及ONNX导出。本次未验证工作区正在并行修改的课程。没有启动仿真或正式训练；这些检查不等于182D环境来源已接好、8192吞吐验证或物理控制验收。完整物理能力仍由人工评价决定，训练保持暂停。
 
 源码：[网络](../src/transformer_rl/formal/policy.py) · [观测](../src/transformer_rl/formal/control/observation.py) · [动作映射](../src/transformer_rl/formal/control/actuation.py) · [窗口与mask](../src/transformer_rl/formal/learning/contracts.py) · [PPO](../src/transformer_rl/formal/learning/optimization.py) · [恢复](../src/transformer_rl/formal/learning/checkpoint.py)。
 
 参考77点布局、观测组成与144D口径分别见[固定配置](https://github.com/yly-true/fudan_rl_wheel_leg/blob/8204e853dfd2ed06d85a322e1a998c3d20a3be2c/plane/wheel_legged_gym/envs/base/legged_robot_config.py)、[观测组装](https://github.com/yly-true/fudan_rl_wheel_leg/blob/8204e853dfd2ed06d85a322e1a998c3d20a3be2c/plane/wheel_legged_gym/envs/base/legged_robot.py)、[runner](https://github.com/yly-true/fudan_rl_wheel_leg/blob/8204e853dfd2ed06d85a322e1a998c3d20a3be2c/plane/wheel_legged_gym/rsl_rl/runners/on_policy_runner.py)。参考用于信息类别与尺寸核对，不引入其训练框架依赖。
+
+78D参考的实际启用字段见[观测组装与特权块](https://github.com/scutrobotlab/wheeled-legged_RL/blob/1a26356d6f591734d4f6f666f5cead1a6925da67/source/agent_tasks/agent_tasks/direct/wheelbipe/wheelbipe25_v3/env.py#L3370)、[基础配置与39D特权扩展](https://github.com/scutrobotlab/wheeled-legged_RL/blob/1a26356d6f591734d4f6f666f5cead1a6925da67/source/agent_tasks/agent_tasks/direct/wheelbipe/wheelbipe_V14/env_cfg.py#L790)。注释中的候选项不计入已启用输入。

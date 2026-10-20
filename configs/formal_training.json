@@ -17,7 +17,7 @@
     "leg_hidden_dims": [64, 32],
     "wheel_hidden_dims": [64, 32],
     "prediction_hidden_dim": 32,
-    "critic_input_dim": 191,
+    "critic_input_dim": 185,
     "critic_hidden_dims": [256, 128, 64]
   },
   "ppo": {
