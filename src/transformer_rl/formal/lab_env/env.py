@@ -112,6 +112,7 @@ class WheeledLabEnv(DirectRLEnv):
         self._contact_source, self._contact_target = self._contact_mapping()
         self._command = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self._device)
         self._command[:, 3] = self._task.nominal_height_m
+        self._request_height = torch.zeros(self.num_envs, dtype=torch.float32, device=self._device)
         self._command_mode = torch.full((self.num_envs,), int(CommandMode.NORMAL),
                                         dtype=torch.long, device=self._device)
         self._reward_phase = torch.full((self.num_envs,), 0, dtype=torch.long, device=self._device)
@@ -277,7 +278,7 @@ class WheeledLabEnv(DirectRLEnv):
         return CommandFeatures(
             admitted_body_command=self._command,
             mode=self._command_mode.clone(),
-            request_height_m=torch.zeros(self.num_envs, dtype=torch.float32, device=self._device),
+            request_height_m=self._request_height.clone(),
             command_clock_s=self._clock().to(torch.float32),
             previous_issued_action=self._previous_action,
         )
@@ -469,6 +470,7 @@ class WheeledLabEnv(DirectRLEnv):
         self._command_mode[ids] = int(CommandMode.NORMAL)
         self._reward_phase[ids] = 0
         self._recovery_posture[ids] = 0
+        self._request_height[ids] = 0
         recover_plan = None
         if self._recover_task is not None:
             self._command[ids].zero_()
@@ -483,7 +485,10 @@ class WheeledLabEnv(DirectRLEnv):
                     or task_sample.command.dtype != torch.float32 or task_sample.command.device != self._device
                     or not torch.isfinite(task_sample.command).all()):
                 raise ValueError("task sampler 必须返回有限 LabTaskSample")
+            if (task_sample.terrain_kind != 0).any() or (task_sample.mode == int(CommandMode.JUMP)).any():
+                raise RuntimeError("LabEnv 尚未安装 terrain/jump FSM 路由")
             self._command[ids] = task_sample.command
+            self._request_height[ids] = task_sample.request_height_m
             self._command_mode[ids] = task_sample.mode
             self._reward_phase[ids] = task_sample.phase
             self._recovery_posture[ids] = task_sample.draw.recovery_posture

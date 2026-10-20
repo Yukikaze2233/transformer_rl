@@ -18,6 +18,7 @@ from ..tasks.curriculum import (
     TOTAL_BUDGET, ContinuousTaskSampler, CurriculumBudget, TaskDomain, TaskDraw,
     TaskFamily,
 )
+from ..tasks.geometry import TerrainKind
 from ..tasks.reward import RewardPhase
 
 
@@ -197,22 +198,27 @@ class LabTaskSample:
 
     draw: TaskDraw
     command: torch.Tensor
+    request_height_m: torch.Tensor
+    terrain_kind: torch.Tensor
     mode: torch.Tensor
     phase: torch.Tensor
 
     def __post_init__(self):
         n = len(self.draw.family)
-        if (self.command.shape != (n, 4) or self.mode.shape != (n,)
+        if (self.command.shape != (n, 4) or self.request_height_m.shape != (n,)
+                or self.terrain_kind.shape != (n,) or self.mode.shape != (n,)
                 or self.phase.shape != (n,) or self.mode.dtype != torch.long
-                or self.phase.dtype != torch.long):
-            raise ValueError("LabTaskSample 的 command/mode/phase 布局不一致")
+                or self.terrain_kind.dtype != torch.long or self.phase.dtype != torch.long
+                or self.command.dtype != torch.float32
+                or self.request_height_m.dtype != torch.float32):
+            raise ValueError("LabTaskSample 的 command/request/terrain/mode/phase 布局不一致")
 
 
 class LabTaskDrawSampler:
-    """把正式 TaskDraw 转成 LabEnv 可执行的命令/模式。
+    """把正式 TaskDraw 转成 LabEnv 命令、请求高度、地形类别和模式。
 
-    当前 LabEnv 只实现 height/motion/rotation/recovery reset；terrain 和
-    jump/request 仍未接入，遇到这些 family 会显式报错，不降级成平地。
+    环境是否已经具备 terrain/jump 路由由环境层显式检查；这里不把未知
+    family 降级成平地，也不把请求高度写入普通高度命令。
     """
 
     def __init__(self, curriculum: FormalTaskCurriculum):
@@ -220,19 +226,34 @@ class LabTaskDrawSampler:
             raise TypeError("curriculum 必须是 FormalTaskCurriculum")
         self.curriculum = curriculum
 
-    def __call__(self, env_ids) -> LabTaskSample:
-        draw = self.curriculum.sample(env_ids)
+    def map_draw(self, draw: TaskDraw) -> LabTaskSample:
+        if not isinstance(draw, TaskDraw):
+            raise TypeError("draw 必须是 TaskDraw")
         family = draw.family
-        if (family == int(TaskFamily.TERRAIN)).any() or (family == int(TaskFamily.REQUEST)).any():
-            raise UnsupportedCurriculumTask("LabEnv 尚未接入 terrain/jump request，不能执行该 TaskDraw")
+        recovery = family == int(TaskFamily.RECOVERY)
+        request = family == int(TaskFamily.REQUEST)
+        terrain = family == int(TaskFamily.TERRAIN)
         command = draw.requested_command.clone()
         command[:, 1] = 0
-        recovery = family == int(TaskFamily.RECOVERY)
         command[recovery, 0] = 0
         command[recovery, 2] = 0
-        mode = torch.where(recovery, int(CommandMode.RECOVERY), int(CommandMode.NORMAL))
+        stairs = torch.isin(draw.terrain_kind, torch.tensor(
+            [int(TerrainKind.STEP_UP), int(TerrainKind.STEP_DOWN),
+             int(TerrainKind.STAIRS), int(TerrainKind.TWO_PLATFORMS)],
+            dtype=torch.long, device=draw.terrain_kind.device))
+        slope = draw.terrain_kind == int(TerrainKind.SLOPE)
+        terrain_mode = torch.where(slope, int(CommandMode.SLOPE),
+                                   torch.where(stairs, int(CommandMode.STAIR), int(CommandMode.NORMAL)))
+        mode = torch.where(recovery, int(CommandMode.RECOVERY),
+                           torch.where(request, int(CommandMode.JUMP),
+                                       torch.where(terrain, terrain_mode, int(CommandMode.NORMAL))))
         phase = torch.where(recovery, int(RewardPhase.RECOVERY), int(RewardPhase.SUPPORT))
-        return LabTaskSample(draw, command, mode, phase)
+        request_height = torch.where(request, draw.jump_height_m,
+                                     torch.zeros_like(draw.jump_height_m))
+        return LabTaskSample(draw, command, request_height, draw.terrain_kind, mode, phase)
+
+    def __call__(self, env_ids) -> LabTaskSample:
+        return self.map_draw(self.curriculum.sample(env_ids))
 
     def begin_update(self):
         return self.curriculum.begin_update()

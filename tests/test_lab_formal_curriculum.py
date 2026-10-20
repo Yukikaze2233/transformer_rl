@@ -1,5 +1,6 @@
 """正式 3-phase 课程调度单测；不启动 Isaac。"""
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 import torch
@@ -88,14 +89,24 @@ def test_task_draw_sampler_maps_recovery_to_mode_and_phase():
     assert (sample.command[recovery, 0] == 0).all() and (sample.command[recovery, 2] == 0).all()
 
 
-def test_task_draw_sampler_refuses_unimplemented_terrain_and_jump():
-    curriculum = FormalTaskCurriculum(8, capabilities=FormalCurriculumCapabilities(
+def test_task_draw_sampler_maps_terrain_and_request_metadata():
+    curriculum = FormalTaskCurriculum(32, capabilities=FormalCurriculumCapabilities(
         terrain=True, requests=True, recovery=True), seed=5)
     sampler = LabTaskDrawSampler(curriculum)
     curriculum.budget.stage = 1
-    with pytest.raises(UnsupportedCurriculumTask, match="terrain/jump"):
-        for _ in range(32):
-            sampler(torch.arange(8))
+    sample = sampler(torch.arange(32))
+    terrain = sample.draw.family == int(TaskFamily.TERRAIN)
+    assert terrain.any()
+    assert set(sample.terrain_kind[terrain].tolist()) <= set(range(1, 8))
+    assert set(sample.mode[terrain].tolist()) <= {
+        int(CommandMode.NORMAL), int(CommandMode.STAIR), int(CommandMode.SLOPE)}
+    assert (sample.request_height_m[~terrain] == 0).all()
+
+    draw = replace(sample.draw, family=torch.full((32,), int(TaskFamily.REQUEST)),
+                   jump_height_m=torch.full((32,), .1))
+    jump = sampler.map_draw(draw)
+    assert (jump.mode == int(CommandMode.JUMP)).all()
+    torch.testing.assert_close(jump.request_height_m, torch.full((32,), .1))
 
 
 def test_request_course_is_separate_and_does_not_change_main_phase_weights():
