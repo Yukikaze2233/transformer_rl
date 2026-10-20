@@ -44,3 +44,5 @@ git diff --check
 Lab 快速采样的受控入口使用 `transformer_rl.formal.lab_env.runtime:runtime`，由现有 `StructuredTrainingSession` 管理进程、资源准入和完整学习 checkpoint；不把诊断入口的 `lab_ppo_v1` 当成可直接转换的正式端点。`managed_lab_runtime_v1` 私有配置冻结当前 boot、机械资产目录、响应记录与 atlas 的文件 pin、环境间距、完整 `FlatTaskSpec`、`PairTargetDomain`、五项 PhysX 容量和诊断开关。课程与 learner 共用 sampler、预算和请求去重状态；地形路由、任务独立 RNG 和 reward 缺失原因存入完整 checkpoint 的 task source。冷恢复在新回合采样前恢复这些状态，再由 worker 在物理准备后恢复全局 RNG；活动物理请求不重放。低频 reward 投影只描述最后一个完整策略区间，不称为整轮汇总，也不触发评价或课程晋级。此入口仍须完成原生场地、全规模更新与实际控制边界验收后，才能用于正式长训。
 
 阶段覆盖诊断的日志和 checkpoint 保留 `validation_only`、`diagnostic_stage` 与 `budget_scope`；预填的阶段偏移不代表实际 PPO 消费，不能作为学习 resume 的来源。旧未标记的 Lab 端点仍须核对课程累计消费与实际 update，不能用诊断偏移扩充预算。warm start 与 resume 必须二选一；完整正式恢复继续使用 managed checkpoint 与 journal。
+
+直接 Lab 诊断与 managed 路径复用 `NativePhysicsHealth`：绑定当前进程继承的独占 stdout/stderr 文件，每轮采样返回后、PPO 更新前只读取新追加部分，不从仿真线程同步回调 Python。managed worker 已由父进程重定向；直接诊断需把两路输出重定向到该验证目录的文件。容量溢出或漏交互区间不能变成有效学习结果；这项检查不在逐 step 路径重做所有权或协议校验。

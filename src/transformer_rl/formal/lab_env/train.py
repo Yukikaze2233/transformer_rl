@@ -140,6 +140,7 @@ def main(argv=None):
 
     from isaaclab.app import AppLauncher
     launcher = AppLauncher(headless=True, device=args.device, enable_cameras=False, livestream=0)
+    health = None
     try:
         import torch
         import omni.kit.app
@@ -152,6 +153,7 @@ def main(argv=None):
         from ...common.random_state import capture_rng, restore_rng
         from ..learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
         from ..policy import StructuredActorCritic, StructuredPolicyConfig
+        from ..simulation.health import NativePhysicsHealth
         from .adapter import LabLabeledEnv
         from .cfg import build_env_cfg
         from .collector import LabCollector
@@ -241,6 +243,7 @@ def main(argv=None):
                             terrain_profile=args.terrain_profile,
                             terrain_atlas_manifest=(None if args.terrain_atlas is None else str(args.terrain_atlas)),
                             expected_manifest_sha256=expected_asset)
+        health = NativePhysicsHealth.for_native_process(args.output.parent)
         cfg.sim.enable_scene_query_support = True
         cfg.sim.physics = PhysxCfg(
             enable_external_forces_every_iteration=True,
@@ -301,6 +304,7 @@ def main(argv=None):
                       f"consumed={formal_task_sampler.curriculum.snapshot().consumed}", flush=True)
             collection_started = time.perf_counter()
             batch = collector.collect(args.rollout_steps)
+            health.check()
             collected = time.perf_counter()
             update_metrics = trainer.update(batch)
             if torch.cuda.is_available():
@@ -370,7 +374,11 @@ def main(argv=None):
         env.close()
         print("LAB PPO done", flush=True)
     finally:
-        launcher.app.close()
+        try:
+            if health is not None:
+                health.close()
+        finally:
+            launcher.app.close()
 
 
 if __name__ == "__main__":

@@ -98,8 +98,6 @@ def runtime(recipe, components, configuration, *, control):
             launcher = AppLauncher(headless=True, device=recipe.device, enable_cameras=False, livestream=0)
         finally:
             sys.argv = argv
-        import carb
-        import carb.logging
         import omni.kit.app
         import torch
         from isaaclab.app.settings_manager import SettingsManager
@@ -118,10 +116,7 @@ def runtime(recipe, components, configuration, *, control):
             extensions.set_extension_enabled_immediate('omni.physx.gpu', True)
         torch.cuda.set_device(0)
         torch.cuda.init()
-        health = NativePhysicsHealth(carb.logging.acquire_logging())
-        carb.log_warn('managed Lab physics error monitor attached')
-        if health.messages_seen == 0:
-            raise RuntimeError('installed SDK did not invoke its physics logging callback')
+        health = NativePhysicsHealth.for_native_process(control.binding['attempt'])
         cfg = build_env_cfg(
             str(asset.directory), num_envs=recipe.num_envs,
             env_spacing_m=configuration['environment_spacing_m'], device=recipe.device,
