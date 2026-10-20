@@ -58,12 +58,19 @@ def parse_configuration(recipe, configuration, authorized_boot):
     response = ResponseParameters.from_recorded_response(json.loads(response_path.read_text())['actuator_response'])
     atlas = verify_pin(configuration['terrain_atlas_pin'])
     atlas_document = json.loads(atlas.read_text())
-    if atlas_document.get('format') != 'terrain_course_atlas_v1':
+    payloads = atlas_document.get('files')
+    if (atlas_document.get('format') != 'terrain_course_atlas_v1'
+            or not isinstance(payloads, dict)
+            or not {'terrain.usda', 'geometry.npz', 'query_index.npz'} <= payloads.keys()):
         raise ValueError('managed Lab requires the prepared static course atlas')
-    for pin in atlas_document['files'].values():
-        path = verify_pin(pin)
-        if path.parent != atlas.parent:
+    for name, pin in payloads.items():
+        # Prepared atlases deliberately store basename pins, so their whole
+        # directory can move without rewriting the source manifest identity.
+        if (not isinstance(name, str) or Path(name).name != name or name in ('.', '..')
+                or not isinstance(pin, dict) or set(pin) != {'file', 'bytes', 'sha256'}
+                or pin['file'] != name):
             raise ValueError('managed Lab atlas payload escapes its frozen directory')
+        verify_pin({'path': str(atlas.parent / name), 'bytes': pin['bytes'], 'sha256': pin['sha256']})
     pair = configuration['pair_domain']
     pair = None if pair is None else PairTargetDomain(**pair)
     identity = {'runtime_sha256': hashlib.sha256(json.dumps(configuration, sort_keys=True,

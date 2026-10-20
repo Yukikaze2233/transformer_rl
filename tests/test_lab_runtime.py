@@ -11,6 +11,7 @@ from transformer_rl.common.training_control import boot_id, file_pin
 from transformer_rl.formal.contracts import ACTION_ORDER
 from transformer_rl.formal.lab_env.contract import FlatTaskSpec
 from transformer_rl.formal.lab_env import runtime as module
+from transformer_rl.formal.tasks.terrain_assets import file_pin as terrain_file_pin
 
 
 def inputs(tmp_path, monkeypatch):
@@ -31,8 +32,11 @@ def inputs(tmp_path, monkeypatch):
         'damping': [0.] * 6, 'time_constant_s': [0.] * 6}}))
     mesh = tmp_path / 'terrain.usda'
     mesh.write_text('# unit fixture; not physical geometry\n')
+    for name in ('geometry.npz', 'query_index.npz'):
+        (tmp_path / name).write_bytes(b'pin-only unit fixture; not an array or physical acceptance')
     atlas = tmp_path / 'atlas.json'
-    atlas.write_text(json.dumps({'format': 'terrain_course_atlas_v1', 'files': {'terrain.usda': file_pin(mesh)}}))
+    atlas.write_text(json.dumps({'format': 'terrain_course_atlas_v1', 'files': {
+        name: terrain_file_pin(tmp_path / name) for name in ('terrain.usda', 'geometry.npz', 'query_index.npz')}}))
     config = {'format': 'managed_lab_runtime_v1', 'authorized_boot': boot_id(),
               'asset_directory': str(asset.directory), 'response_source_pin': file_pin(response),
               'terrain_atlas_pin': file_pin(atlas), 'environment_spacing_m': 1.,
@@ -95,3 +99,27 @@ def test_sdk_open_failure_is_published_without_building_a_scene(tmp_path, monkey
         with module.runtime(replace(recipe, device='cpu'), components, config, control=control):
             pytest.fail('runtime must not yield after a startup failure')
     assert len(failures) == 1 and str(failures[0]) == 'owned SDK startup failure'
+
+
+def test_atlas_relative_payload_pins_survive_directory_relocation(tmp_path, monkeypatch):
+    import shutil
+
+    recipe, _, journal, config, _ = inputs(tmp_path, monkeypatch)
+    moved = tmp_path / 'moved'
+    moved.mkdir()
+    for name in ('atlas.json', 'terrain.usda', 'geometry.npz', 'query_index.npz'):
+        shutil.copyfile(tmp_path / name, moved / name)
+    config['terrain_atlas_pin'] = file_pin(moved / 'atlas.json')
+    with journal:
+        assert module.parse_configuration(recipe, config, boot_id())[4] == moved / 'atlas.json'
+
+
+def test_atlas_payload_cannot_redirect_the_manifest_to_another_directory(tmp_path, monkeypatch):
+    recipe, _, journal, config, _ = inputs(tmp_path, monkeypatch)
+    atlas = tmp_path / 'atlas.json'
+    document = json.loads(atlas.read_text())
+    document['files']['../response.json'] = {'file': '../response.json', 'bytes': 1, 'sha256': 'a' * 64}
+    atlas.write_text(json.dumps(document))
+    config['terrain_atlas_pin'] = file_pin(atlas)
+    with journal, pytest.raises(ValueError, match='escapes'):
+        module.parse_configuration(recipe, config, boot_id())
