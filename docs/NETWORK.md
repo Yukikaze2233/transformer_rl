@@ -19,32 +19,11 @@
 
 ## 2. 网络框图
 
-```mermaid
-flowchart TD
-    H["原始窗口 B×5×35，旧→新，含当前帧"]
-    S["命令／机身／左右腿／左右轮<br/>6个32D token＋身体身份嵌入<br/>1层空间门控注意力，2头，FFN64"]
-    T["每帧拼接192→64＋固定位置编码<br/>2层时间门控注意力，4头，FFN128<br/>因果mask，输出 B×5×64"]
-    Q["当前身体token＋11D命令<br/>4个动作Query＋1个状态Query<br/>5个64D Query读取时间memory"]
-    E["状态头64→32→8<br/>速度均值3／log标准差3／接触logits2"]
-    D["Query＋当前局部原始状态<br/>＋机身6／命令11／估计8直连"]
-    A["腿95→64→32→2，左右共享<br/>轮91→64→32→1，左右共享<br/>拼成6D原始动作均值"]
-    C["训练Gaussian采样／部署使用均值<br/>执行层限幅与同轴成对映射<br/>四轴位置＋两轴轮速"]
-    X["环境特权182D<br/>基础78＋地形77＋补充状态27"]
-    V["独立Critic：185→256→128→64→1<br/>ELU，仅训练，输出V"]
-    N["仅训练预测头70→32→6<br/>状态Query64＋已发出动作6"]
-    H --> S --> T --> Q
-    Q --> E
-    Q --> D
-    H -->|"当前局部观测、机身、命令"| D
-    E -->|"经过clamp／sigmoid的估计8D"| D
-    D --> A --> C
-    X --> V
-    E -->|"速度均值3D，detach"| V
-    Q -->|"状态Query上下文"| N
-    C -->|"已发出归一化动作"| N
-```
+![结构化Transformer：32D空间层、64D时间层与185D Critic](figures/formal-policy.png)
 
-Actor与Critic分别持有参数和Adam。环境不导入网络；采样器复用一次Actor前向的估计量拼接Critic输入。旧[图片](figures/formal-policy.png)与[SVG](figures/formal-policy.svg)对应64D／96D／81D版本，不作为本版尺寸依据。
+[可编辑SVG](figures/formal-policy.svg)与[绘图源码](figures/formal-policy.py)。绘图尺寸读取正式配置，参数量按层公式计算；不导入网络或启动仿真。
+
+Actor与Critic分别持有参数和Adam。环境不导入网络；采样器复用一次Actor前向的估计量拼接Critic输入。图中虚线支路表示门控信号，底部虚线框为仅训练使用的Critic、预测头与探索。
 
 ## 3. Actor每帧35D
 
