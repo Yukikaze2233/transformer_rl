@@ -45,6 +45,8 @@ def test_lab_formal_reward_keeps_formal_terms_and_omits_unavailable_ones():
     assert torch.isfinite(result.learning_reward).all()
     assert result.raw_cost_densities["contact_slip"].eq(0).all()
     assert result.raw_cost_densities["joint_boundary"].eq(0).all()
+    assert "contact_slip" in reward.missing_terms
+    assert "contact_slip" not in LAB_AVAILABLE_TERMS
     assert result.gate_fractions["ordinary"].all()
     assert "bounded_cost.contact_slip" in result.component_densities
 

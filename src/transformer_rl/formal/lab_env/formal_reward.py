@@ -1,7 +1,9 @@
 """把 LabEnv 的物理采样接入正式 PhysicalRewardComposer。
 
-只转换数据，不重写 reward 数学。轮底切向速度由环境显式提供；被动膝
-边界仍由边界 producer 提供。缺失的正式项不会被悄悄填零。
+只转换数据，不重写 reward 数学。被动膝边界由边界 producer 提供。
+``contact_slip`` 需要真实接触点相对切向速度；当前 LabEnv 没有该测量，
+因此不作为可用项，也不从机身速度或轮速伪造。缺失项由 ``missing_terms``
+显式记录。
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ from ..tasks.reward import (
 
 LAB_AVAILABLE_TERMS = tuple(dict.fromkeys(
     name for name in REWARD_POSITIVE_TERMS + REWARD_COST_TERMS
-    if name != "joint_boundary"
+    if name not in ("joint_boundary", "contact_slip")
 ))
 
 

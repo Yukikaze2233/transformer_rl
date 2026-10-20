@@ -425,22 +425,11 @@ class WheeledLabEnv(DirectRLEnv):
                     self._as_torch(self.robot.data.joint_pos),
                     self._targets, knee_margin_rad=.05,
                 ).shortfall_rad
-            body_velocity = getattr(self.robot.data, "body_lin_vel_w", None)
-            if body_velocity is None:
-                if "contact_slip" in self._formal_reward.config.available_terms:
-                    raise RuntimeError("formal reward 需要 body_lin_vel_w 产生轮底滑移")
-                wheel_tangent_speed = torch.zeros(self.num_envs, 2, device=self._device)
-            else:
-                velocity = self._as_torch(body_velocity)
-                relative = velocity.index_select(1, self._wheel_body_indices) - velocity.index_select(
-                    1, torch.tensor([self._base_body_index], device=self._device))
-                wheel_tangent_speed = relative[..., :2].norm(dim=-1)
             self._formal_reward.observe(
                 sample, state, effort_nm=self._last_effort, episode_id=self._episode_id,
                 control_epoch=self._control_epoch, command=self._command,
                 mode=self._command_mode, phase=self._reward_phase,
                 joint_boundary_shortfall_rad=boundary,
-                wheel_contact_tangent_speed_m_s=wheel_tangent_speed,
             )
         if self._recover_task is not None:
             base_load = sample.terrain_contact_force_world_n[:, self._base_body_index].norm(dim=-1)
