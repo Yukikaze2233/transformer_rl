@@ -10,7 +10,7 @@ from ..simulation.ground import WheelCollisionCentres
 from ..tasks.reward import RewardPhase
 from ..tasks.geometry import TerrainKind
 from ..tasks.terrain_courses import TerrainCourseRouter
-from ..tasks.terrain_query import StaticTerrainQuery
+from ..tasks.terrain_query import StaticTerrainQuery, wheel_lookahead_points
 from ..tasks.trajectory import DriveEnvelope
 from .course_tasks import LabCourseTasks, RequestCommand, StairRequestProtocol
 
@@ -104,6 +104,32 @@ class LabTerrainCourse:
             raise RuntimeError('privileged terrain scan left the authored collision geometry')
         relative = env._root_link_position()[:, 2, None] - heights - env._task.nominal_height_m
         return (5 * relative).clamp(-1, 1), heights[:, 38]
+
+    def wheel_lookahead(self):
+        """Privileged near/far supervision; never called by command/FSM code."""
+        quaternion = self.env._root_link_quat()
+        x, y, z, w = quaternion.unbind(-1)
+        yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+        points = wheel_lookahead_points(self._wheel_centres(), yaw, self.env._command[:, 0])
+        height, valid, _, _ = self.query(points, self.router.tile[:, None, None].expand(-1, 2, 3))
+        # Invalid heights stay NaN. Missing columns cannot be labelled as a
+        # downward edge or silently replaced with the wheel's current ground.
+        delta = height[:, :, 1:] - height[:, :, :1]
+        paired_valid = valid[:, :, 1:] & valid[:, :, :1]
+        return height, valid, delta, paired_valid
+
+    def lookahead_summary(self):
+        height, valid, delta, paired_valid = self.wheel_lookahead()
+        measured = delta[paired_valid]
+        return {'scope': 'privileged_training_diagnostic_only',
+                'policy_or_request_consumption': False,
+                'distances_m': [0., .25, .8], 'direction': 'signed_body_forward_command_and_world_yaw',
+                'query_points': height.numel(), 'misses': int((~valid).sum()),
+                'valid_relative_columns': int(paired_valid.sum()),
+                'upward_columns_over_1mm': int((paired_valid & (delta > .001)).sum()),
+                'downward_columns_over_1mm': int((paired_valid & (delta < -.001)).sum()),
+                'relative_height_range_m': ([float(measured.min()), float(measured.max())]
+                                            if measured.numel() else None)}
 
     def submit_stair_request(self, ids, height_m, request_id=None):
         """Submit one manual stair ID; it is consumed even if BUSY/invalid."""
@@ -352,4 +378,11 @@ class LabTerrainCourse:
                     self._last_stair_response, minlength=9).tolist(),
                 'stair_command_source': 'external packet or sampled episode command; no terrain sensing',
                 'request_responses': self.tasks.request_counters.tolist(),
-                'external_request_responses': self.tasks.external_request_counters.tolist()}
+                'external_request_responses': self.tasks.external_request_counters.tolist(),
+                'request_end_counts': dict(zip(
+                    ('none', 'estimated_complete', 'cancelled', 'safety_abort', 'timeout', 'reset', 'cold_restore'),
+                    self.tasks.request_end_counts.tolist())),
+                'request_end_count_scope': 'live protocol boundaries; cold setup is reported separately',
+                'physical_request_outcomes': dict(zip(
+                    ('verified_success', 'reset_before_verified_success', 'closed_before_verified_success'),
+                    self.tasks.physical_outcome_counts.tolist()))}

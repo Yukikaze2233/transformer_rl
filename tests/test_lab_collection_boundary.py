@@ -54,6 +54,7 @@ def test_native_step_bootstrap_captures_next_command_before_physical_reset():
     assert observation[:2].eq(99).all() and observation[2] == terminal[0][2]
     assert terminated.tolist() == [True, False, False]
     assert truncated.tolist() == [False, True, False]
+    assert env.extras['termination_counts'].tolist() == [1, 1, 0, 0]
 
 
 def _labels(timestamp, episode, control):
@@ -103,6 +104,9 @@ class _TerminalEnv(LabLabeledEnv):
     def step(self, issued_action, completed_estimate):
         assert issued_action.shape == (1, 6)
         self.calls += 1
+        self.last_counts = dict(zip(
+            ('true_failure', 'time_limit', 'spatial_exit', 'simultaneous_truncations'),
+            torch.tensor([0, 1, 1, 1])))
         next_obs = _observation(self.frame + 1, self.critic + 3, .01, 2, 2)
         return LabeledStep(
             observation=next_obs,
@@ -131,6 +135,8 @@ def test_lab_collector_preserves_terminal_reward_and_uses_five_frame_critic():
     assert torch.isfinite(batch.advantages).all()
     assert collector.last_metrics["terminated_rows"] == 0
     assert collector.last_metrics["truncated_rows"] == 1
+    assert collector.last_metrics['termination_causes'] == {
+        'true_failure': 0, 'time_limit': 1, 'spatial_exit': 1, 'simultaneous_truncations': 1}
 
 
 def test_adapter_excludes_script_hold_and_separates_handoff_from_partial_reset():

@@ -86,6 +86,8 @@ class LabCollector:
         mask_records = {}
         reset_before = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         outcomes = torch.zeros(2, dtype=torch.long, device=self.device)
+        cause_names = ('true_failure', 'time_limit', 'spatial_exit', 'simultaneous_truncations')
+        cause_counts = torch.zeros(len(cause_names), dtype=torch.long, device=self.device)
         environment_timing: dict[str, float] = {}
 
         for step in range(steps):
@@ -106,6 +108,9 @@ class LabCollector:
             self.returned_vector_steps += 1
             for name, elapsed in self.env.last_timing.items():
                 environment_timing[name] = environment_timing.get(name, 0.0) + elapsed
+            for index, name in enumerate(cause_names):
+                if name in self.env.last_counts:
+                    cause_counts[index] += self.env.last_counts[name]
 
             next_observation = returned.observation
             final = returned.final_labels
@@ -216,6 +221,7 @@ class LabCollector:
             "returned_vector_steps_lifetime": self.returned_vector_steps,
             "terminated_rows": int(outcomes[0]),
             "truncated_rows": int(outcomes[1]),
+            "termination_causes": dict(zip(cause_names, cause_counts.cpu().tolist())),
             "policy_owned_fraction": float(flat_masks.actor.float().mean()),
             "reward_mean": float(records["reward"].mean()),
             "return_mean": float(returns.mean()),

@@ -728,9 +728,17 @@ class WheeledLabEnv(DirectRLEnv):
             self._observe_substep()
         self.episode_length_buf += 1
         self.common_step_counter += 1
-        truncated = self.episode_length_buf >= self.max_episode_length - 1
+        time_limit = self.episode_length_buf >= self.max_episode_length - 1
+        spatial_exit = torch.zeros_like(time_limit)
         if self._terrain_course is not None:
-            truncated |= self._terrain_course.router.observe_end(self._root_link_position(), self._terminated)
+            spatial_exit = self._terrain_course.router.observe_end(self._root_link_position(), self._terminated)
+        truncated = time_limit | spatial_exit
+        # Keep causes separate even when both share bootstrap/trace masks.
+        # The collector transfers these small counters once per rollout.
+        self.extras['termination_counts'] = torch.stack((
+            self._terminated.sum(), (time_limit & ~self._terminated).sum(),
+            (spatial_exit & ~self._terminated).sum(),
+            (time_limit & spatial_exit & ~self._terminated).sum()))
         if self._formal_reward is not None:
             self._formal_result = self._formal_reward.finish(
                 terminated=self._terminated, truncated=truncated & ~self._terminated,

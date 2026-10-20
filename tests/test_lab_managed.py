@@ -35,6 +35,7 @@ def scene(tmp_path, components, *, seed=13):
     course.stair_requests = StairRequestProtocol(4)
     course.stair_next_id = torch.zeros(4, dtype=torch.long)
     course._last_stair_response = torch.zeros(4, dtype=torch.long)
+    course.lookahead_summary = lambda: {'scope': 'synthetic_geometry_fixture', 'misses': 0}
     reward = SimpleNamespace(config=FormalRewardConfig(16.),
                              missing_term_reasons={'contact_slip': 'No verified contact-point relative tangent velocity producer',
                                                    'joint_boundary': 'No selected-asset geometric boundary producer'})
@@ -168,6 +169,8 @@ def test_cold_source_keeps_stair_deduplication_and_cumulative_request_counters(t
         course.stair_next_id[0] = 20
         course.tasks.external_request_counters[1] = 4
         course.tasks.kind_counts[0] = 17
+        course.tasks.physical_outcome_counts[:] = torch.tensor([2, 3, 4])
+        course.tasks.request_end_counts[4] = 7
         store.save('stair.pt', components)
         restored = store.load('stair.pt')
         cold_env = scene(tmp_path, restored.components)
@@ -177,6 +180,8 @@ def test_cold_source_keeps_stair_deduplication_and_cumulative_request_counters(t
         assert cold.course.stair_next_id.tolist() == [20, 0, 0, 0]
         assert cold.course.tasks.external_request_counters[1] == 4
         assert cold.course.tasks.kind_counts[0] == 17
+        assert cold.course.tasks.physical_outcome_counts.tolist() == [2, 3, 4]
+        assert cold.course.tasks.request_end_counts[4] == 7
 
 
 def test_managed_collector_uses_the_full_learner_without_rebuilding_it(tmp_path):

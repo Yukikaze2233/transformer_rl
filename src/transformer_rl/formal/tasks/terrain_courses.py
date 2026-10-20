@@ -243,7 +243,9 @@ class TerrainCourseRouter:
         nonflat = self.kinds[self.tile] != 0
         self.last_success.copy_(nonflat & ~terminated & (progress > 4.5))
         self.last_failure.copy_(nonflat & terminated)
-        exits = nonflat & outside & ~terminated
+        # The flat tile is large but still finite; use its declared boundary
+        # too, without treating a flat exit as terrain-skill success.
+        exits = outside & ~terminated
         self.course_exits.add_(exits.long())
         return exits
 

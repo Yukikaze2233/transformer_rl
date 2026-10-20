@@ -64,9 +64,26 @@ def test_physical_success_is_ready_in_current_interval_and_paid_once():
         tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .32), angular_speed_rad_s=torch.zeros(2))
     assert tasks.success_id.eq(1).all()
     assert tasks.paid_id.eq(1).all()
+    assert tasks.physical_outcome_counts.tolist() == [2, 0, 0]
     tasks.success_id.fill_(-1)
     tasks.observe_physics(torch.full((2, 2), 100.), torch.zeros(2), torch.zeros(2), torch.full((2,), .32), angular_speed_rad_s=torch.zeros(2))
     assert tasks.success_id.eq(-1).all()
+    assert tasks.physical_outcome_counts.tolist() == [2, 0, 0]
+
+
+def test_request_end_and_unverified_physical_counts_survive_cold_restore():
+    from transformer_rl.formal.tasks.protocol import RequestEnd
+
+    tasks = supported_jump()
+    now = torch.full((2,), 6.01, dtype=torch.float64)
+    tasks.step(now, _touch_estimate(now - .01), torch.zeros(2))
+    assert tasks.request_end_counts[int(RequestEnd.TIMEOUT)] == 2
+    assert tasks.physical_outcome_counts.tolist() == [0, 0, 2]
+    saved = tasks.state_dict()
+    restored, _ = fixture()
+    restored.restore_after_physical_reset(saved, torch.zeros(2, dtype=torch.float64))
+    torch.testing.assert_close(restored.request_end_counts, tasks.request_end_counts)
+    torch.testing.assert_close(restored.physical_outcome_counts, tasks.physical_outcome_counts)
 
 
 def test_request_decision_rejects_same_tick_estimate_and_keeps_ids_across_reset():

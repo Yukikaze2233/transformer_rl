@@ -9,6 +9,33 @@ import numpy as np
 import torch
 
 
+@torch.no_grad()
+def wheel_lookahead_points(centres_world_m, yaw_rad, forward_m_s, *, near_m=.25, far_m=.8):
+    """Current, near and far wheel columns for privileged diagnostics only.
+
+    Direction follows the signed body-forward command and world yaw. These
+    are exact geometry-query origins, not deployable ToF measurements.
+    """
+    if not all(isinstance(v, torch.Tensor) for v in (centres_world_m, yaw_rad, forward_m_s)):
+        raise TypeError('wheel lookahead inputs must be tensors')
+    n = len(centres_world_m)
+    if (centres_world_m.shape != (n, 2, 3) or centres_world_m.dtype != torch.float32
+            or yaw_rad.shape != (n,) or forward_m_s.shape != (n,)
+            or yaw_rad.dtype != torch.float32 or forward_m_s.dtype != torch.float32
+            or yaw_rad.device != centres_world_m.device or forward_m_s.device != centres_world_m.device
+            or not all(torch.isfinite(v).all() for v in (centres_world_m, yaw_rad, forward_m_s))
+            or type(near_m) not in (int, float) or type(far_m) not in (int, float)
+            or not 0 < near_m < far_m < float('inf')):
+        raise ValueError('wheel lookahead requires finite wheel centres, yaw, command and ordered metre offsets')
+    distances = centres_world_m.new_tensor([0., near_m, far_m])
+    direction = torch.where(forward_m_s < 0, -1., 1.)
+    axis = torch.stack((yaw_rad.cos(), yaw_rad.sin(), torch.zeros_like(yaw_rad)), -1)
+    points = centres_world_m[:, :, None, :] + (
+        direction[:, None, None, None] * axis[:, None, None, :] * distances[None, None, :, None])
+    points[..., 2] += 5.
+    return points
+
+
 def build_query_index(vertices, faces, face_tiles, tile_count, *, cell_size_m=.25):
     """Build a conservative XY cell -> triangle CSR table before simulation."""
     vertices = np.asarray(vertices, np.float32)

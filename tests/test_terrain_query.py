@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from transformer_rl.formal.tasks.terrain_courses import surface_height
-from transformer_rl.formal.tasks.terrain_query import build_query_index, StaticTerrainQuery
+from transformer_rl.formal.tasks.terrain_query import build_query_index, StaticTerrainQuery, wheel_lookahead_points
 
 
 @pytest.fixture
@@ -45,3 +45,35 @@ def test_query_starts_at_ray_height_and_rejects_invalid_tile_without_memory_acce
     assert valid.tolist() == [True, False, False, False]
     assert float(height[0]) == 0
     assert int(query.misses) == 3
+
+
+def test_wheel_columns_preserve_left_right_positions_near_far_and_reverse():
+    centres = torch.tensor([[[-.2, -.1, .3], [.2, .1, .3]]]).expand(3, -1, -1).clone()
+    points = wheel_lookahead_points(centres, torch.tensor([0., 0., np.pi / 2]),
+                                    torch.tensor([1., -1., 1.]))
+    torch.testing.assert_close(points[0, :, :, 0], torch.tensor([[-.2, .05, .6], [.2, .45, 1.]]))
+    torch.testing.assert_close(points[1, :, :, 0], torch.tensor([[-.2, -.45, -1.], [.2, -.05, -.6]]))
+    torch.testing.assert_close(points[2, :, :, 1], torch.tensor([[-.1, .15, .7], [.1, .35, .9]]))
+    torch.testing.assert_close(points[:, :, 0, :2], centres[:, :, :2])
+    assert points[..., 2].eq(5.3).all()
+
+
+def test_wheel_query_detects_downward_edge_and_keeps_missing_columns_invalid(tmp_path):
+    from transformer_rl.formal.tasks.terrain_courses import _rectangle
+    high, high_faces = _rectangle(-1, 0, -1, 1, .2, .2)
+    low, low_faces = _rectangle(0, 2, -1, 1, 0, 0)
+    vertices, faces = np.concatenate((high, low)), np.concatenate((high_faces, low_faces + 4))
+    mesh, index = tmp_path/'geometry.npz', tmp_path/'index.npz'
+    np.savez(mesh, vertices_m=vertices, triangles=faces,
+             face_material=np.zeros(4, np.int32), material_coefficients=np.asarray([.7], np.float32))
+    np.savez(index, **build_query_index(vertices, faces, np.zeros(4, np.int32), 1))
+    query = StaticTerrainQuery(mesh, index)
+    points = wheel_lookahead_points(torch.tensor([[[-.2, -.1, .3], [.2, .1, .3]]]),
+                                    torch.zeros(1), torch.ones(1))
+    height, valid, _, _ = query(points, torch.zeros(1, 2, 3, dtype=torch.long))
+    assert valid.all()
+    torch.testing.assert_close(height[0, :, 0], torch.tensor([.2, 0.]))
+    torch.testing.assert_close(height[0, 0, 1:] - height[0, 0, 0], torch.tensor([-.2, -.2]))
+    points[:, :, :, 1] += 2.
+    missed, valid, _, _ = query(points, torch.zeros(1, 2, 3, dtype=torch.long))
+    assert not valid.any() and torch.isnan(missed).all() and int(query.misses) == 6

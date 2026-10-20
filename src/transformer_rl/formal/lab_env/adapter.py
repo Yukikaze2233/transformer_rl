@@ -31,7 +31,7 @@ class LabLabeledEnv:
         self._episode_id = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._control_epoch = torch.zeros_like(self._episode_id)
         self.last_timing: dict[str, float] = {}
-        self.last_counts: dict[str, int] = {}
+        self.last_counts: dict[str, torch.Tensor] = {}
         self.terrain_stream = None
 
     def validate_collection_config(self, config):
@@ -100,7 +100,9 @@ class LabLabeledEnv:
         self.env._completed_estimate = completed_estimate
         obs, reward, terminated, truncated, extras = self.env.step(issued_action)
         self.last_timing = dict(extras.get("timing", {}))
-        self.last_counts = {}
+        counts = extras.get('termination_counts')
+        self.last_counts = ({} if counts is None else dict(zip(
+            ('true_failure', 'time_limit', 'spatial_exit', 'simultaneous_truncations'), counts)))
         final_state = self.env._terminal_state
         final_sample = self.env._terminal_sample
         if final_state is None or final_sample is None or self.env._terminal_critic_182 is None:

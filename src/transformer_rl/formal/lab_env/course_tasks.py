@@ -196,7 +196,8 @@ class StairRequestProtocol:
 
 
 class LabCourseTasks:
-    _COUNTERS = ('request_counters', 'external_request_counters', 'kind_counts', 'mode_counts')
+    _COUNTERS = ('request_counters', 'external_request_counters', 'kind_counts', 'mode_counts',
+                 'request_end_counts', 'physical_outcome_counts')
 
     def __init__(self, num_envs, envelope: DriveEnvelope, *, seed=2102, device='cpu'):
         self.num_envs, self.device = num_envs, torch.device(device)
@@ -237,8 +238,13 @@ class LabCourseTasks:
         self.kind_counts = torch.zeros(8, dtype=torch.long, device=self.device)
         self.mode_counts = torch.zeros(6, dtype=torch.long, device=self.device)
         self.external_request_counters = torch.zeros(9, dtype=torch.long, device=self.device)
+        self.request_end_counts = torch.zeros(len(RequestEnd), dtype=torch.long, device=self.device)
+        # Verified success, reset while unverified, closed while unverified.
+        # The latter two are incomplete evidence, not invented physical failures.
+        self.physical_outcome_counts = torch.zeros(3, dtype=torch.long, device=self.device)
 
     def reset(self, ids, task, now):
+        self.physical_outcome_counts[1].add_((self.physical_id[ids] >= 0).sum())
         self.kind_counts.add_(torch.bincount(task.terrain_kind, minlength=8))
         self.mode_counts.add_(torch.bincount(task.mode, minlength=6))
         self.family[ids] = task.draw.family
@@ -263,7 +269,8 @@ class LabCourseTasks:
         self.stream.current[ids] = self.stream.envelope.project(start)[0]
         mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         mask[ids] = True
-        self.protocol.reset(mask, now)
+        aborted = self.protocol.reset(mask, now)
+        self.request_end_counts[int(RequestEnd.RESET)].add_((aborted >= 0).sum())
         self.active_id[ids] = -1
         self.physical_id[ids] = -1
         self._physical_accepted_at_s[ids] = 0
@@ -332,6 +339,10 @@ class LabCourseTasks:
                    & (condition.end_reason != int(RequestEnd.NONE)))
                   | ((self.physical_id >= 0)
                      & (now - self._physical_accepted_at_s >= self.protocol.config.timeout_s)))
+        self.physical_outcome_counts[2].add_(((self.physical_id >= 0) & closed).sum())
+        ended = torch.bincount(condition.end_reason, minlength=len(RequestEnd))
+        ended[0] = 0
+        self.request_end_counts.add_(ended)
         self.physical_id.masked_fill_(closed, -1)
         self.physical_id.copy_(torch.where(accepted, condition.active_id, self.physical_id))
         self._physical_accepted_at_s.copy_(torch.where(accepted, now, self._physical_accepted_at_s))
@@ -391,6 +402,7 @@ class LabCourseTasks:
         # leave FLIGHT on a timer, but it cannot manufacture this event.
         success = (stable & ~self._physical_cancelled & (self.landed_s >= 2.)
                    & (self.physical_id > self.paid_id))
+        self.physical_outcome_counts[0].add_(success.sum())
         self.success_id.copy_(torch.where(success, self.physical_id, self.success_id))
         self.paid_id.copy_(torch.where(success, self.physical_id, self.paid_id))
         self.physical_id.masked_fill_(success, -1)
@@ -401,7 +413,7 @@ class LabCourseTasks:
 
     def state_dict(self):
         # Cold restoration aborts physical requests, preserving IDs and RNG.
-        return {'format': 'lab_course_tasks_v2', 'protocol': self.protocol.state_dict(),
+        return {'format': 'lab_course_tasks_v3', 'protocol': self.protocol.state_dict(),
                 'next_id': self.next_id.clone(), 'paid_id': self.paid_id.clone(),
                 'rng': self.generator.get_state().clone(),
                 **{name: getattr(self, name).clone() for name in self._COUNTERS}}
@@ -409,7 +421,7 @@ class LabCourseTasks:
     def restore_after_physical_reset(self, state, now):
         expected = {'format', 'protocol', 'next_id', 'paid_id', 'rng', *self._COUNTERS}
         if (not isinstance(state, dict) or set(state) != expected
-                or state.get('format') != 'lab_course_tasks_v2'):
+                or state.get('format') != 'lab_course_tasks_v3'):
             raise ValueError('course request checkpoint differs')
         for name in ('next_id', 'paid_id', *self._COUNTERS):
             value, reference = state[name], getattr(self, name)

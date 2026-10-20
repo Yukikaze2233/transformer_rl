@@ -52,7 +52,7 @@ class ManagedLabRuntime:
     task quota and independent RNG streams survive the new physical reset.
     """
 
-    _FORMAT = 'managed_lab_task_source_v3'
+    _FORMAT = 'managed_lab_task_source_v4'
 
     def __init__(self, env, recipe, components, identity, *, profile=False, physics_health=None):
         if type(profile) is not bool or not isinstance(identity, dict):
@@ -178,7 +178,8 @@ class ManagedLabRuntime:
             summary[group][name] = value
         return {'scope': 'last_completed_policy_interval_across_environments',
                 'pooled_rollout_statistics': False, 'reward': summary,
-                'reward_contract': self._reward_contract(), 'course': self.course.metrics()}
+                'reward_contract': self._reward_contract(), 'course': self.course.metrics(),
+                'wheel_lookahead': self.course.lookahead_summary()}
 
 
 class _ManagedCollector(LabCollector):

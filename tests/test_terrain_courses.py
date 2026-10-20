@@ -42,6 +42,20 @@ def test_difficulty_uses_completed_episode_and_does_not_move_live_geometry(atlas
     assert router.level.tolist() == [2, 0]
 
 
+def test_finite_flat_boundary_is_a_spatial_exit_without_skill_promotion(atlas):
+    router = TerrainCourseRouter(atlas, 2)
+    router.reset(torch.arange(2), torch.zeros(2, dtype=torch.long), stage=0,
+                 command_forward=torch.ones(2))
+    position = router.origins.clone()
+    position[:, 0] += router.finishes[router.tile] + .01
+    exits = router.observe_end(position, torch.tensor([False, True]))
+    assert exits.tolist() == [True, False]
+    assert not router.last_success.any()
+    router.reset(torch.arange(2), torch.zeros(2, dtype=torch.long), stage=0,
+                 command_forward=torch.ones(2))
+    assert router.level.eq(0).all()
+
+
 def test_restore_preserves_route_rng_and_rejects_different_atlas(atlas):
     first = TerrainCourseRouter(atlas, 8, seed=3)
     first.reset(torch.arange(8), torch.arange(8), stage=2, command_forward=torch.ones(8))
