@@ -104,13 +104,13 @@ def test_material_course_changes_real_materials_without_a_geometry_step():
 def test_generator_resume_preserves_geometry_choices_and_uses_no_global_rng():
     global_before = torch.random.get_rng_state().clone()
     sampler = ContinuousTaskSampler(2101)
-    draws = sampler.sample(256, 5)
+    draws = sampler.sample(256, 2)
     first = generator()
     first.from_draw(draws, (TerrainExtent((-8., 8.), (-3., 3.)),) * 256)
     saved = first.state_dict()
     restored = generator(999)
     restored.load_state_dict(saved)
-    more = sampler.sample(128, 5)
+    more = sampler.sample(128, 2)
     extents = (TerrainExtent((-8., 8.), (-3., 3.)),) * 128
     assert first.from_draw(more, extents) == restored.from_draw(more, extents)
     assert torch.equal(global_before, torch.random.get_rng_state())
@@ -120,7 +120,7 @@ def test_generator_resume_preserves_geometry_choices_and_uses_no_global_rng():
 
 def test_full_sampler_emits_both_stairs_and_two_platforms_without_relabeling_them():
     sampler = ContinuousTaskSampler(2101)
-    draw = sampler.sample(1024, 5)
+    draw = sampler.sample(1024, 2)
     terrain_rows = draw.family == TaskFamily.TERRAIN
     assert set(draw.terrain_kind[terrain_rows].tolist()) == set(range(1, 8))
     courses = generator().from_draw(draw, (TerrainExtent((-8., 8.), (-3., 3.)),) * 1024)

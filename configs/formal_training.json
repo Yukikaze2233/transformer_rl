@@ -50,6 +50,7 @@
   "terrain": {
     "nominal_friction": 0.7,
     "material_friction_bounds": [0.2, 1.1],
-    "rough_grid_spacing_m": 0.25
+    "rough_grid_spacing_m": 0.25,
+    "platform_tread_m": 0.8
   }
 }
