@@ -13,6 +13,49 @@ from transformer_rl.formal.lab_env.collector import LabCollector
 from transformer_rl.formal.policy import StructuredActorCritic, StructuredPolicyConfig
 
 
+def test_native_step_bootstrap_captures_next_command_before_physical_reset():
+    """Exercise the actual step body without creating a simulator application."""
+    import ast
+    from pathlib import Path
+    import time
+
+    path = Path(__file__).resolve().parents[1] / 'src/transformer_rl/formal/lab_env/env.py'
+    definition = next(node for node in ast.parse(path.read_text()).body
+                      if isinstance(node, ast.ClassDef) and node.name == 'WheeledLabEnv')
+    step = next(node for node in definition.body if isinstance(node, ast.FunctionDef) and node.name == 'step')
+    namespace = {'torch': torch, 'time': time}
+    exec(compile(ast.Module(body=[step], type_ignores=[]), str(path), 'exec'), namespace)
+
+    command = torch.zeros(3)
+    terminal = []
+    def observe():
+        env._terminated[0] = True
+    def capture():
+        terminal.append(command.clone())
+    def reset(ids):
+        command[ids] = 99.
+    env = SimpleNamespace(
+        _device=torch.device('cpu'), cfg=SimpleNamespace(decimation=1, sim=SimpleNamespace(render_interval=1)),
+        sim=SimpleNamespace(is_rendering=False, step=lambda **kwargs: None),
+        scene=SimpleNamespace(write_data_to_sim=lambda: None, update=lambda **kwargs: None),
+        _pre_physics_step=lambda action: None, _apply_action=lambda: None, _observe_substep=observe,
+        _sim_step_counter=0, _physical_tick=0, physics_dt=.005,
+        episode_length_buf=torch.tensor([0, 8, 0]), max_episode_length=10, common_step_counter=0,
+        _terrain_course=None, _formal_reward=None, _terminated=torch.zeros(3, dtype=torch.bool),
+        _reward_policy_step=lambda: command.clone() + 2., _last_reward=torch.zeros(3),
+        _last_truncated=torch.zeros(3, dtype=torch.bool), _last_terminated=torch.zeros(3, dtype=torch.bool),
+        reset_terminated=torch.zeros(3, dtype=torch.bool), reset_time_outs=torch.zeros(3, dtype=torch.bool),
+        _previous_action=torch.zeros(3, 6), _issued_action=torch.full((3, 6), .5),
+        _capture_terminal=capture, _update_skill=lambda: command.add_(.03), _reset_idx=reset,
+        _get_observations=lambda: command.clone(), extras={}, _reward_terms={})
+    observation, reward, terminated, truncated, _ = namespace['step'](env, torch.zeros(3, 6))
+    torch.testing.assert_close(reward, torch.full((3,), 2.))
+    torch.testing.assert_close(terminal[0], torch.full((3,), .03))
+    assert observation[:2].eq(99).all() and observation[2] == terminal[0][2]
+    assert terminated.tolist() == [True, False, False]
+    assert truncated.tolist() == [False, True, False]
+
+
 def _labels(timestamp, episode, control):
     return PhysicalLabels(
         velocity_body_m_s=torch.zeros(1, 3),

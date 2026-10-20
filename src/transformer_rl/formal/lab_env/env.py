@@ -758,8 +758,11 @@ class WheeledLabEnv(DirectRLEnv):
         truncated_out = self._last_truncated.clone()
         self._previous_action.copy_(self._issued_action)
         reset_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1).int()
-        self._capture_terminal()
         self._update_skill()
+        # Reward used this interval's command. Bootstrap describes the next
+        # decision endpoint, including its newly advanced command, before any
+        # physical row reset changes the terminal state or sensor packet.
+        self._capture_terminal()
         if reset_ids.numel() > 0:
             self._reset_idx(reset_ids)
         self.obs_buf = self._get_observations()
