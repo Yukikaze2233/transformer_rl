@@ -11,7 +11,7 @@ from ..tasks.reward import RewardPhase
 from ..tasks.terrain_courses import TerrainCourseRouter
 from ..tasks.terrain_query import StaticTerrainQuery
 from ..tasks.trajectory import DriveEnvelope
-from .course_tasks import LabCourseTasks
+from .course_tasks import LabCourseTasks, RequestResponse, StairRequestProtocol
 from .skill_fsm import StairState
 
 
@@ -34,6 +34,7 @@ class LabTerrainCourse:
                                                 torch.zeros(1, 3, dtype=torch.float64))
         self.nominal_spawn_height_m = float(nominal_spawn.root_pose_xyzw[0, 2])
         self.tasks = LabCourseTasks(env.num_envs, envelope, seed=int(env.cfg.seed or 0), device=env._device)
+        self.stair_requests = StairRequestProtocol(env.num_envs, device=env._device)
         self.body_contact_allowed = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
         self.wheel_ground = torch.zeros(env.num_envs, 2, device=env._device)
         self.wheel_material = torch.zeros_like(self.wheel_ground)
@@ -47,7 +48,11 @@ class LabTerrainCourse:
         # stair request sources; a future ToF driver fills the same tensors.
         self.manual_stair_request = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
         self.manual_stair_height_m = torch.zeros(env.num_envs, dtype=torch.float32, device=env._device)
+        self.manual_stair_request_id = torch.full((env.num_envs,), -1, dtype=torch.long, device=env._device)
+        self.stair_cancel_id = torch.full((env.num_envs,), -1, dtype=torch.long, device=env._device)
+        self.stair_next_id = torch.zeros(env.num_envs, dtype=torch.long, device=env._device)
         self.tof_step_height_m = torch.zeros(env.num_envs, dtype=torch.float32, device=env._device)
+        self.tof_request_id = torch.full((env.num_envs,), -1, dtype=torch.long, device=env._device)
 
     def _wheel_centres(self):
         env = self.env
@@ -94,21 +99,38 @@ class LabTerrainCourse:
         relative = env._root_link_position()[:, 2, None] - heights - env._task.nominal_height_m
         return (5 * relative).clamp(-1, 1), heights[:, 38]
 
-    def submit_stair_request(self, ids, height_m):
-        """Manual stair request; the ToF driver uses the same height field."""
+    def submit_stair_request(self, ids, height_m, request_id=None):
+        """Submit one manual stair ID; it is consumed even if BUSY/invalid."""
         ids = torch.as_tensor(ids, dtype=torch.long, device=self.env._device)
         value = torch.as_tensor(height_m, dtype=torch.float32, device=self.env._device)
         if (ids.ndim != 1 or value.shape != ids.shape or (ids < 0).any()
                 or (ids >= self.env.num_envs).any() or not torch.isfinite(value).all()):
             raise ValueError('stair request requires finite row heights')
+        if request_id is None:
+            request_id = self.stair_next_id[ids].clone()
+            self.stair_next_id[ids] += 1
+        request_id = torch.as_tensor(request_id, dtype=torch.long, device=self.env._device)
+        if request_id.shape != ids.shape or (request_id < 0).any():
+            raise ValueError('stair request ID must be nonnegative per row')
         self.manual_stair_request[ids] = True
         self.manual_stair_height_m[ids] = value
+        self.manual_stair_request_id[ids] = request_id
+        self.stair_cancel_id[ids] = -1
 
-    def submit_tof_step_height(self, height_m):
+    def cancel_stair_request(self, ids, request_id):
+        ids = torch.as_tensor(ids, dtype=torch.long, device=self.env._device)
+        request_id = torch.as_tensor(request_id, dtype=torch.long, device=self.env._device)
+        if ids.shape != request_id.shape or (ids < 0).any() or (ids >= self.env.num_envs).any():
+            raise ValueError('stair cancel requires matching row IDs')
+        self.stair_cancel_id[ids] = request_id
+
+    def submit_tof_step_height(self, height_m, request_id):
         value = torch.as_tensor(height_m, dtype=torch.float32, device=self.env._device)
-        if value.shape != (self.env.num_envs,) or not torch.isfinite(value).all():
-            raise ValueError('ToF step height must match all environment rows')
+        ids = torch.as_tensor(request_id, dtype=torch.long, device=self.env._device)
+        if value.shape != (self.env.num_envs,) or ids.shape != value.shape or not torch.isfinite(value).all():
+            raise ValueError('ToF step height and request ID must match all environment rows')
         self.tof_step_height_m.copy_(value)
+        self.tof_request_id.copy_(ids)
 
     def place_reset(self, ids, task, pose):
         if task is None:
@@ -139,29 +161,48 @@ class LabTerrainCourse:
         self.body_contact_allowed[ids] = False
         self.manual_stair_request[ids] = False
         self.manual_stair_height_m[ids] = 0
+        self.manual_stair_request_id[ids] = -1
+        self.stair_cancel_id[ids] = -1
         self.tof_step_height_m[ids] = 0
+        self.tof_request_id[ids] = -1
+        self.stair_requests.reset(ids, env._clock())
 
     def advance_skill(self):
         # Deployment-visible request decision: env._completed_estimate comes
         # from the preceding actor observation. Terrain truth is not a stair
         # sensor; manual/ToF input is latched in the fields below.
         env = self.env
-        admission, mode, rise, _ = self.tasks.step(env._clock(), env._completed_estimate, env._ground_at_root)
+        blocked = self.stair_requests.active_id >= 0
+        admission, mode, rise, _ = self.tasks.step(
+            env._clock(), env._completed_estimate, env._ground_at_root, blocked_by_stair=blocked)
         env._command_base.copy_(admission.admitted)
         env._base_command_mode.copy_(mode)
-        # No wheel_lookahead()/terrain truth enters the stair decision. The
-        # manual request and a future ToF signal share step_height_m; the
-        # remaining FSM inputs are deployable command/contact/attitude values.
-        manual = self.manual_stair_request
-        manual_height = self.manual_stair_height_m
-        step = torch.where(manual, manual_height, self.tof_step_height_m)
-        load = env._last_sample.terrain_contact_force_world_n[:, env._base_body_index].norm(dim=-1)
-        load = torch.where(env._skill_fsm.stair.state == int(StairState.BODY_BUMP), 0, load)
-        stair = env._skill_fsm.stair.step(
-            step_height_m=step, wheel_force_n=env._last_sample.terrain_contact_force_world_n[:, env._wheel_body_indices].norm(dim=-1),
-            body_height_m=env._command[:, 3], tilt_rad=env._last_tilt,
-            base_contact_force_n=load, command_height_m=admission.admitted[:, 3],
-            auto_enabled=False, manual_request=manual, manual_height_m=manual_height)
+        # One-shot manual/ToF stair requests; jump has arbitration priority.
+        request_id = torch.where(self.manual_stair_request, self.manual_stair_request_id,
+                                 self.tof_request_id)
+        height_request = torch.where(self.manual_stair_request, self.manual_stair_height_m,
+                                     self.tof_step_height_m)
+        condition = self.stair_requests.step(
+            now_s=env._clock(), request_id=request_id, height_m=height_request,
+            cancel_id=self.stair_cancel_id, jump_active=self.tasks.active_id >= 0)
+        accepted = condition.response == int(RequestResponse.ACCEPTED)
+        self.manual_stair_request.masked_fill_(accepted, False)
+        finished = condition.finished_id >= 0
+        self.stair_cancel_id.masked_fill_(finished, -1)
+        estimate = env._completed_estimate
+        if estimate is None:
+            contact_probability = torch.zeros(env._command.shape[0], 2, device=env._device)
+            tilt = torch.zeros(env._command.shape[0], device=env._device)
+        else:
+            contact_probability = estimate.wheel_contact_probability
+            tilt = estimate.tilt_rad
+        stair = env._skill_fsm.stair.deployment_step(
+            step_height_m=torch.where(condition.active, condition.height_m,
+                                      torch.zeros_like(condition.height_m)),
+            wheel_contact_probability=contact_probability, tilt_rad=tilt,
+            command_height_m=admission.admitted[:, 3],
+            manual_request=condition.active, manual_height_m=condition.height_m)
+        self.stair_requests.clear(stair.exited)
         active = stair.mode != int(CommandMode.NORMAL)
         env._command.copy_(admission.admitted)
         env._command[:, 0] *= torch.where(active, stair.speed_scale, 1)

@@ -50,6 +50,92 @@ class RequestCommand:
                 raise ValueError(f'{name} requires [{count}] {dtype} on {device}')
 
 
+@dataclass(frozen=True)
+class StairCondition:
+    active: torch.Tensor
+    height_m: torch.Tensor
+    clock_s: torch.Tensor
+    active_id: torch.Tensor
+    response: torch.Tensor
+    finished_id: torch.Tensor
+
+
+@dataclass(frozen=True)
+class StairRequestConfig:
+    policy_dt_s: float = .01
+    min_height_m: float = .04
+    max_height_m: float = .25
+    timeout_s: float = 6.
+
+
+class StairRequestProtocol:
+    """One-shot stair request IDs, sharing BUSY/cancel/timeout semantics."""
+
+    def __init__(self, num_envs, device="cpu", config=StairRequestConfig()):
+        self.num_envs, self.device, self.config = num_envs, torch.device(device), config
+        self.max_seen_id = torch.full((num_envs,), -1, dtype=torch.long, device=self.device)
+        self.active_id = torch.full_like(self.max_seen_id, -1)
+        self.height_m = torch.zeros(num_envs, device=self.device)
+        self.accepted_at_s = torch.zeros(num_envs, dtype=torch.float64, device=self.device)
+        self.last_time_s = torch.full_like(self.accepted_at_s, -float("inf"))
+
+    def _check(self, now_s, request_id, height_m, cancel_id, jump_active):
+        n = self.num_envs
+        for name, value, dtype, shape in (
+            ("now", now_s, torch.float64, (n,)), ("request", request_id, torch.long, (n,)),
+            ("height", height_m, torch.float32, (n,)), ("cancel", cancel_id, torch.long, (n,)),
+            ("jump", jump_active, torch.bool, (n,))):
+            if (not isinstance(value, torch.Tensor) or value.shape != shape or value.dtype != dtype
+                    or value.device != self.device):
+                raise ValueError(f"stair {name} requires {shape}/{dtype} on {self.device}")
+
+    @torch.no_grad()
+    def step(self, *, now_s, request_id, height_m, cancel_id, jump_active):
+        self._check(now_s, request_id, height_m, cancel_id, jump_active)
+        clock = torch.isfinite(now_s) & (now_s > self.last_time_s)
+        now = torch.where(clock, now_s, self.last_time_s)
+        new = (request_id >= 0) & (request_id > self.max_seen_id) & clock
+        replay = (request_id >= 0) & ~new & clock
+        valid_height = torch.isfinite(height_m) & (height_m >= self.config.min_height_m) & (height_m <= self.config.max_height_m)
+        busy = new & ((self.active_id >= 0) | jump_active)
+        accept = new & ~busy & valid_height & (cancel_id != request_id)
+        response = torch.where(new, int(RequestResponse.NOT_READY), torch.zeros_like(self.active_id))
+        response = torch.where(replay, int(RequestResponse.REPLAY), response)
+        response = torch.where(new & ~valid_height, int(RequestResponse.INVALID), response)
+        response = torch.where(busy, int(RequestResponse.BUSY), response)
+        response = torch.where(accept, int(RequestResponse.ACCEPTED), response)
+        self.max_seen_id.copy_(torch.where(new, request_id, self.max_seen_id))
+        self.active_id.copy_(torch.where(accept, request_id, self.active_id))
+        self.height_m.copy_(torch.where(accept, height_m, self.height_m))
+        self.accepted_at_s.copy_(torch.where(accept, now, self.accepted_at_s))
+        active = self.active_id >= 0
+        elapsed = torch.where(active, now - self.accepted_at_s, 0)
+        cancel = active & (cancel_id == self.active_id) & clock
+        timeout = active & clock & (elapsed >= self.config.timeout_s)
+        finished = cancel | timeout
+        finished_id = torch.where(finished, self.active_id, -1)
+        self.active_id.masked_fill_(finished, -1)
+        self.height_m.masked_fill_(finished, 0)
+        self.accepted_at_s.masked_fill_(finished, 0)
+        self.last_time_s.copy_(now)
+        active = self.active_id >= 0
+        return StairCondition(active, torch.where(active, self.height_m, 0),
+                              torch.where(active, elapsed, 0).float(), self.active_id.clone(),
+                              response, finished_id)
+
+    def reset(self, ids, now_s):
+        ids = torch.as_tensor(ids, dtype=torch.long, device=self.device)
+        self.active_id[ids] = -1
+        self.height_m[ids] = 0
+        self.accepted_at_s[ids] = 0
+        self.last_time_s[ids] = now_s[ids] - self.config.policy_dt_s
+
+    def clear(self, mask):
+        self.active_id.masked_fill_(mask, -1)
+        self.height_m.masked_fill_(mask, 0)
+        self.accepted_at_s.masked_fill_(mask, 0)
+
+
 class LabCourseTasks:
     def __init__(self, num_envs, envelope: DriveEnvelope, *, seed=2102, device='cpu'):
         self.num_envs, self.device = num_envs, torch.device(device)
@@ -121,7 +207,8 @@ class LabCourseTasks:
         self.phase[ids] = 0
         self.success_id[ids] = -1
 
-    def step(self, now, estimate, ground, *, command: RequestCommand | None = None):
+    def step(self, now, estimate, ground, *, command: RequestCommand | None = None,
+             blocked_by_stair=None):
         self.success_id.fill_(-1)
         if command is not None:
             command.validate(self.num_envs, self.device)
@@ -134,8 +221,12 @@ class LabCourseTasks:
                 torch.zeros(self.num_envs, device=self.device), torch.zeros(self.num_envs, 2, device=self.device),
                 torch.zeros(self.num_envs, device=self.device), torch.zeros(self.num_envs, device=self.device),
                 now.clone(), torch.zeros(self.num_envs, dtype=torch.bool, device=self.device))
+        blocked = (torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+                   if blocked_by_stair is None else torch.as_tensor(blocked_by_stair, dtype=torch.bool, device=self.device))
+        if blocked.shape != (self.num_envs,):
+            raise ValueError('blocked_by_stair requires [N] bool')
         if command is None:
-            due = ((self.family == int(TaskFamily.REQUEST)) & (self.elapsed >= self.next_request_s)
+            due = ((self.family == int(TaskFamily.REQUEST)) & ~blocked & (self.elapsed >= self.next_request_s)
                    & (self.protocol.active_id < 0))
             automatic_id = torch.where(due, self.next_id, -1)
             self.next_id.add_(due.long())
@@ -156,7 +247,7 @@ class LabCourseTasks:
                             if command.safety_abort is None else command.safety_abort)
         condition = self.protocol.step(
             now_s=now, estimate=estimate, request_id=request_id, requested_height_m=requested_height,
-            cancel_id=cancel_id, allow_new=self.family == int(TaskFamily.REQUEST),
+            cancel_id=cancel_id, allow_new=(self.family == int(TaskFamily.REQUEST)) & ~blocked,
             safety_abort=safety_abort)
         # External IDs may skip far ahead. Auto scheduling must resume above
         # the highest consumed ID, otherwise its next ID is a replay.

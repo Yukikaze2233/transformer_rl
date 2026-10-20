@@ -149,18 +149,39 @@ class StairFSM:
                             torch.full_like(state, int(StairState.BODY_BUMP)), state)
         return state
 
-    def step(self, *, step_height_m, wheel_force_n, body_height_m, tilt_rad,
-             base_contact_force_n, command_height_m, auto_enabled=True,
-             manual_request=None, manual_height_m=None):
+    def step(self, *, step_height_m, wheel_force_n=None, body_height_m, tilt_rad,
+             base_contact_force_n=None, command_height_m, auto_enabled=True,
+             manual_request=None, manual_height_m=None,
+             wheel_contact_probability=None, base_contact_probability=None,
+             success_from_height=True):
         n, device = self.num_envs, self.device
         step = _tensor("step height", step_height_m, n, device)
-        force = torch.as_tensor(wheel_force_n, dtype=torch.float32, device=device)
         body = _tensor("body height", body_height_m, n, device)
         tilt = _tensor("tilt", tilt_rad, n, device)
-        base = _tensor("base contact", base_contact_force_n, n, device)
         command_height = _tensor("command height", command_height_m, n, device)
-        if force.shape != (n, 2) or not torch.isfinite(force).all() or (force < 0).any():
-            raise ValueError("wheel force 需要有限非负 [N,2]")
+        if wheel_contact_probability is not None:
+            contact = torch.as_tensor(wheel_contact_probability, dtype=torch.float32, device=device)
+            if (contact.shape != (n, 2) or not torch.isfinite(contact).all()
+                    or ((contact < 0) | (contact > 1)).any()):
+                raise ValueError("wheel contact probability must be in [0,1]")
+            contact = (contact >= .5).all(-1)
+        else:
+            if wheel_force_n is None:
+                raise ValueError("stair FSM requires wheel force or contact probability")
+            force = torch.as_tensor(wheel_force_n, dtype=torch.float32, device=device)
+            if force.shape != (n, 2) or not torch.isfinite(force).all() or (force < 0).any():
+                raise ValueError("wheel force 需要有限非负 [N,2]")
+            contact = (force > self.config.wheel_contact_force_n).all(-1)
+        if base_contact_probability is not None:
+            base_prob = torch.as_tensor(base_contact_probability, dtype=torch.float32, device=device)
+            if (base_prob.shape != (n,) or not torch.isfinite(base_prob).all()
+                    or ((base_prob < 0) | (base_prob > 1)).any()):
+                raise ValueError("base contact probability must be in [0,1]")
+            base = base_prob >= .5
+        elif base_contact_force_n is None:
+            base = torch.zeros(n, dtype=torch.bool, device=device)
+        else:
+            base = _tensor("base contact", base_contact_force_n, n, device) > self.config.base_contact_force_n
         auto = torch.as_tensor(auto_enabled, dtype=torch.bool, device=device).expand(n)
         manual = (torch.zeros(n, dtype=torch.bool, device=device) if manual_request is None
                   else torch.as_tensor(manual_request, dtype=torch.bool, device=device))
@@ -196,16 +217,16 @@ class StairFSM:
         is_step = self.state == int(StairState.STEP_UP)
         is_stair = self.state == int(StairState.STAIR)
         is_bump = self.state == int(StairState.BODY_BUMP)
-        contact = (force > self.config.wheel_contact_force_n).all(-1)
         height_ok = body >= self.target_height - self.config.success_height_error_m
         progress_ok = body >= self.reference_height + self.config.min_progress_m
-        success_cond = (is_stair | is_bump) & contact & height_ok & progress_ok
+        success_cond = ((is_stair | is_bump) & contact & height_ok & progress_ok
+                        if success_from_height else torch.zeros_like(is_stair))
         self.success_time = torch.where(success_cond, self.success_time + self.config.policy_dt_s,
                                         torch.where(active, torch.zeros_like(self.success_time), self.success_time))
         drop = body < self.reference_height - self.config.failure_drop_m
         wall_active = active & (step > self.config.ledge_max_m)
         hard_failure = active & (drop | (tilt > self.config.failure_tilt_rad)
-                                 | (base > self.config.base_contact_force_n) | wall_active)
+                                 | base | wall_active)
         timeout = active & (self.state_time > torch.where(
             is_bump, torch.full_like(self.state_time, self.config.body_bump_timeout_s),
             torch.full_like(self.state_time, self.config.timeout_s)))
@@ -248,6 +269,23 @@ class StairFSM:
             self.state.clone(), self._mode.clone(), self._height.clone(), self._speed.clone(),
             self._body_allowed.clone(), self._tuck.clone(), self._stage.clone(),
             entered, exited, success, failure, wall,
+        )
+
+    def deployment_step(self, *, step_height_m, wheel_contact_probability, tilt_rad,
+                        command_height_m, manual_request, manual_height_m=None):
+        """Command-process stair step without force or body-height success truth.
+
+        The body height is only a target baseline here. ``success`` remains
+        false; real landing/step success is measured by the training-side
+        physical evidence path.
+        """
+        return self.step(
+            step_height_m=step_height_m, wheel_force_n=None,
+            wheel_contact_probability=wheel_contact_probability,
+            body_height_m=command_height_m, tilt_rad=tilt_rad,
+            base_contact_force_n=None, command_height_m=command_height_m,
+            auto_enabled=False, manual_request=manual_request,
+            manual_height_m=manual_height_m, success_from_height=False,
         )
 
 

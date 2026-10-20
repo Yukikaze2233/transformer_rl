@@ -78,6 +78,7 @@ def test_complete_course_reaches_jump_without_reinitializing_sampler():
 
 def test_course_spawn_is_on_declared_approach_not_inside_first_rise(atlas):
     from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+    from transformer_rl.formal.lab_env.course_tasks import StairRequestProtocol
     course = LabTerrainCourse.__new__(LabTerrainCourse)
     course.router = TerrainCourseRouter(atlas, 2)
     course.nominal_spawn_height_m = .32
@@ -113,6 +114,7 @@ def test_authored_assets_remain_available_below_their_atlas_level(atlas):
 def test_body_bump_clears_only_allowed_contact_not_other_failures():
     from types import SimpleNamespace
     from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+    from transformer_rl.formal.lab_env.course_tasks import StairRequestProtocol
 
     course = LabTerrainCourse.__new__(LabTerrainCourse)
     course.env = SimpleNamespace(_task=SimpleNamespace(minimum_height_m=.17, failure_tilt_rad=.9))
@@ -129,12 +131,15 @@ def _stair_command_with_truth(truth_height):
     from types import SimpleNamespace
     from transformer_rl.formal.lab_env.skill_fsm import SkillFSM
     from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+    from transformer_rl.formal.lab_env.course_tasks import StairRequestProtocol
 
     n = 2
     fsm = SkillFSM(n)
     command = torch.tensor([[1., 0., 0., .32], [1., 0., 0., .32]])
     sample = SimpleNamespace(terrain_contact_force_world_n=torch.zeros(n, 19, 3))
     env = SimpleNamespace(
+        num_envs=n,
+        _device=torch.device('cpu'),
         _clock=lambda: torch.zeros(n, dtype=torch.float64),
         _completed_estimate=None,
         _ground_at_root=torch.full((n,), truth_height),
@@ -150,16 +155,21 @@ def _stair_command_with_truth(truth_height):
         _skill_fsm=fsm,
     )
     admission = SimpleNamespace(admitted=command.clone())
-    tasks = SimpleNamespace(step=lambda *args: (
-        admission, torch.zeros(n, dtype=torch.long), torch.zeros(n), None))
+    tasks = SimpleNamespace(
+        active_id=torch.full((n,), -1, dtype=torch.long),
+        step=lambda *args, **kwargs: (admission, torch.zeros(n, dtype=torch.long), torch.zeros(n), None))
     course = LabTerrainCourse.__new__(LabTerrainCourse)
     course.env = env
     course.tasks = tasks
     course._skill_fsm = fsm
     course.body_contact_allowed = torch.zeros(n, dtype=torch.bool)
+    course.stair_requests = StairRequestProtocol(n)
     course.manual_stair_request = torch.ones(n, dtype=torch.bool)
     course.manual_stair_height_m = torch.full((n,), .20)
+    course.manual_stair_request_id = torch.zeros(n, dtype=torch.long)
+    course.stair_cancel_id = torch.full((n,), -1, dtype=torch.long)
     course.tof_step_height_m = torch.zeros(n)
+    course.tof_request_id = torch.full((n,), -1, dtype=torch.long)
     course.advance_skill()
     return env._command.clone(), env._command_mode.clone(), fsm.stair.state.clone()
 
