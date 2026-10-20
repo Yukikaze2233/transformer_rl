@@ -8,7 +8,14 @@
       "rise_m": 0.20,
       "front_panel_m": 0.15,
       "underpanel_gap_m": 0.05,
-      "width_m": 1.12
+      "width_m": 1.12,
+      "front_collision_extension": {
+        "source_face_indices": [282, 283, 284, 285],
+        "source_mesh_index": 1,
+        "height_interval_m": [0.0, 0.20],
+        "scope": "front_only_close_50mm_gap",
+        "authorization": "user_requested_continuous_0_to_200mm_front_collision_20261020"
+      }
     },
     "central_steps": {
       "directory": "two_level_steps",

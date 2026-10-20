@@ -97,3 +97,26 @@ def test_archive_rejects_wrong_identity_without_creating_output(tmp_path):
     with pytest.raises(ValueError, match='SHA256'):
         prepare_assets(archive, config, output)
     assert not output.exists()
+
+
+def test_approved_front_is_continuous_from_ground_to_200mm_with_separate_lineage(real_assets):
+    _, output, manifest = real_assets
+    record = manifest['assets']['road_step']
+    addition = record['processing']['training_additions'][0]
+    assert addition['result_front_height_interval_m'] == [0., .2]
+    assert not addition['visual_source_changed'] and not addition['other_gap_regions_filled']
+    with np.load(output / 'road_step/collision.npz') as geometry:
+        vertices, faces = geometry['vertices_m'], geometry['triangles']
+        generated = geometry['derived_face_kind'] == 1
+        assert generated.sum() == 2
+        assert geometry['output_to_input_face'][generated].tolist() == [-1, -1]
+        assert geometry['source_triangle_index'][generated].tolist() == [-1, -1]
+        source_front = np.isin(geometry['output_to_input_face'], addition['source_face_indices'])
+    # Cast horizontally through a dense X/Z grid over the full frontal plane.
+    x, z = np.meshgrid(np.linspace(-.559, .559, 19), np.linspace(.00001, .19999, 101))
+    points = np.column_stack((x.ravel(), z.ravel()))
+    hit_y = surface_height(vertices[:, [0, 2, 1]], faces[generated | source_front], points)
+    assert np.isfinite(hit_y).all()
+    assert np.max(np.abs(hit_y + .0052374)) < 1e-6
+    old_only = surface_height(vertices[:, [0, 2, 1]], faces[source_front], np.array([[0., .025]]))
+    assert np.isnan(old_only[0])

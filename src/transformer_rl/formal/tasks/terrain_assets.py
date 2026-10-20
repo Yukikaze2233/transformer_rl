@@ -1,7 +1,7 @@
 """Source-backed static terrain preparation; no simulator or learning imports.
 
-The original archive stays immutable. A derived collision mesh removes only
-float32 zero-area faces and coplanar overlap, and retains source-face lineage.
+The original archive stays immutable. Collision cleanup and explicitly approved
+training additions have distinct provenance; neither changes the visual source.
 """
 from __future__ import annotations
 
@@ -133,6 +133,52 @@ def clean_collision(vertices, faces, *, plane_tolerance_m=1e-7):
     }
 
 
+def extend_front_contact(source_vertices, source_faces, specification):
+    """Close only the reviewed front's lower gap, keeping its actual plane.
+
+    The source's 50..200mm panel remains. Two added triangles connect its lower
+    edge to Z=0. No top, rear, side, or under-platform surface is invented.
+    """
+    extension = specification['front_collision_extension']
+    selected = np.asarray(extension['source_face_indices'], dtype=np.int64)
+    triangles = np.asarray(source_vertices, float)[np.asarray(source_faces)[selected]]
+    approach = specification['approach_axis']
+    if approach not in ('+X', '+Y') or extension['scope'] != 'front_only_close_50mm_gap':
+        raise ValueError('unsupported front collision extension')
+    along, across = (0, 1) if approach == '+X' else (1, 0)
+    points = triangles.reshape(-1, 3)
+    bottom, top = points[:, 2].min(), points[:, 2].max()
+    low, high = points[:, across].min(), points[:, across].max()
+    interval = extension['height_interval_m']
+    if (len(interval) != 2 or interval != [0., .2]
+            or abs(bottom - specification['underpanel_gap_m']) > 1e-5
+            or abs(top - interval[1]) > 1e-5
+            or abs(high - low - specification['width_m']) > 1e-5):
+        raise ValueError('reviewed panel dimensions differ from the approved extension')
+    # Fit the measured panel plane; retain its tiny source rotation/roundoff.
+    design = np.column_stack((points[:, across], points[:, 2], np.ones(len(points))))
+    plane = np.linalg.lstsq(design, points[:, along], rcond=None)[0]
+    if np.max(np.abs(design @ plane - points[:, along])) > 1e-6:
+        raise ValueError('reviewed front faces are not a single plane')
+    vertices = np.zeros((4, 3), np.float32)
+    vertices[:, across] = (low, high, high, low)
+    vertices[:, 2] = (interval[0], interval[0], bottom, bottom)
+    vertices[:, along] = np.column_stack((vertices[:, across], vertices[:, 2], np.ones(4))) @ plane
+    faces = np.asarray(((0, 1, 2), (0, 2, 3)), np.int64)
+    normal = np.cross(vertices[1] - vertices[0], vertices[2] - vertices[0])
+    if normal[along] > 0:
+        faces = faces[:, [0, 2, 1]]
+    return vertices, faces, {
+        'kind': 'approved_front_gap_closure', 'source_face_indices': selected.tolist(),
+        'source_mesh_index': extension['source_mesh_index'], 'added_triangles': 2,
+        'added_height_interval_m': [interval[0], float(bottom)],
+        'result_front_height_interval_m': interval, 'width_m': float(high - low),
+        'plane_along_from_lateral_z_constant': plane.tolist(),
+        'visual_source_changed': False, 'other_gap_regions_filled': False,
+        'authorization': extension['authorization'],
+    }
+
+
 def write_collision_usda(path, vertices, faces, *, static_friction, dynamic_friction,
                          restitution=0.0, visual_reference=None, face_material=None,
                          material_coefficients=None):
@@ -224,9 +270,29 @@ def prepare_assets(archive, configuration, output):
                     vertices, faces, lineage, report = clean_collision(arrays["vertices_m"], arrays["triangles"])
                     source_mesh = arrays["source_mesh_index"][lineage]
                     source_triangle = arrays["source_triangle_index"][lineage]
+                    face_kind = np.zeros(len(faces), np.uint8)
+                    additions = []
+                    if 'front_collision_extension' in spec:
+                        expected_mesh = spec['front_collision_extension']['source_mesh_index']
+                        selected = spec['front_collision_extension']['source_face_indices']
+                        if not np.all(arrays['source_mesh_index'][selected] == expected_mesh):
+                            raise ValueError('front extension source mesh binding differs')
+                        extra_v, extra_f, addition = extend_front_contact(arrays['vertices_m'], arrays['triangles'], spec)
+                        faces = np.concatenate((faces, extra_f + len(vertices)))
+                        vertices = np.concatenate((vertices, extra_v))
+                        lineage = np.concatenate((lineage, np.full(2, -1, np.int64)))
+                        source_mesh = np.concatenate((source_mesh, np.full(2, -1, np.int64)))
+                        source_triangle = np.concatenate((source_triangle, np.full(2, -1, np.int64)))
+                        face_kind = np.concatenate((face_kind, np.ones(2, np.uint8)))
+                        additions.append(addition)
+                    report['training_additions'] = additions
+                    report['final_output_triangles'] = len(faces)
+                    report['cleanup_filled_holes'] = False
+                    report['filled_holes'] = bool(additions)
+                    report['filled_holes_scope'] = 'approved_front_lower_gap_only' if additions else None
                 np.savez_compressed(folder / "collision.npz", vertices_m=vertices, triangles=faces,
                                     output_to_input_face=lineage, source_mesh_index=source_mesh,
-                                    source_triangle_index=source_triangle)
+                                    source_triangle_index=source_triangle, derived_face_kind=face_kind)
                 (folder / "source.usdc").write_bytes(source.read(root + "/terrain.usdc"))
                 (folder / "source_manifest.json").write_bytes(raw_manifest)
                 (folder / "NOTICE.md").write_bytes(source.read(root + "/NOTICE.md"))
