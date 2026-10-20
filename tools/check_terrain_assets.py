@@ -139,6 +139,7 @@ class TerrainAssetCheck:
             name, path = entry['asset'], entry['collision_path']
             _folder, record, geometry = self.assets[name]
             counts, maximum, failed, diagnostics, occluded = {}, 0., 0, [], 0
+            maximum_distance_error, maximum_position_residual = 0., 0.
             triangles = geometry['vertices_m'][geometry['triangles']].astype(np.float64)
             origin = np.asarray(entry['origin_m'])
             for kind, index, start, direction, distance, centroid in self._probes(record, geometry):
@@ -147,6 +148,7 @@ class TerrainAssetCheck:
                 expected, start = expected + origin, start + origin
                 errors = []
                 positions = []
+                hit_details = []
 
                 def report(hit):
                     if str(hit.collision) == path:
@@ -154,6 +156,14 @@ class TerrainAssetCheck:
                         if np.isfinite(actual).all():
                             errors.append(float(np.linalg.norm(actual - expected)))
                             positions.append(actual.tolist())
+                            reported_distance = float(hit.distance)
+                            ray_point = start + reported_distance * direction
+                            hit_details.append({
+                                'distance_m': reported_distance,
+                                'distance_point_error_m': float(np.linalg.norm(ray_point - expected)),
+                                'position_ray_residual_m': float(np.linalg.norm(actual - ray_point)),
+                                'normal': list(hit.normal),
+                            })
                     return True
 
                 query.raycast_all(tuple(start), tuple(direction), float(distance), report, True)
@@ -162,13 +172,19 @@ class TerrainAssetCheck:
                     failed += 1
                     if len(diagnostics) < 64:
                         diagnostics.append({'kind': kind, 'probe': index, 'error_m': error,
-                                            'expected_m': expected.tolist(), 'actual_positions_m': positions})
+                                            'expected_m': expected.tolist(), 'actual_positions_m': positions,
+                                            'hit_details': hit_details})
                 if error is not None:
                     maximum = max(maximum, error)
+                for detail in hit_details:
+                    maximum_distance_error = max(maximum_distance_error, detail['distance_point_error_m'])
+                    maximum_position_residual = max(maximum_position_residual, detail['position_ray_residual_m'])
                 counts[kind] = counts.get(kind, 0) + 1
             results.append({**entry, 'probes': counts, 'maximum_error_m': maximum})
             results[-1].update(failed_probes=failed, first_failures=diagnostics,
-                               occluded_source_centroids=occluded)
+                               occluded_source_centroids=occluded,
+                               maximum_distance_point_error_m=maximum_distance_error,
+                               maximum_position_ray_residual_m=maximum_position_residual)
         return {'format': 'native_terrain_asset_probes_v1', 'completed': True,
                 'passed': all(entry['failed_probes'] == 0 for entry in results),
                 'prepared_manifest_pin': self.manifest_pin, 'results': results,

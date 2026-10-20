@@ -39,6 +39,8 @@ git diff --check
 
 模型、unit/interface、性能和仿真检查在 Kaiser 已配置的环境执行，不在本机建 venv、下载依赖或启动模型测试。GitHub 的静态检查通过不代表 Kaiser 数值、闭链、物理或部署检查通过。新提交完成相关检查后再冻结新训练 release；训练期间保持该 release 不变。
 
-场地派生资产可在 Kaiser 完成原资源准入并持有四个 lease 后，用 `tools/check_terrain_assets.py --manifest <prepared/manifest.json> --output <new-directory>` 检查原生碰撞。工具核对输入 SHA、组合后的顶点与物理材质，再比较逐面射线和新增前立面网格；结果必须有 `completed=true`、`passed=true`，不能只看进程 exit 0。`--disable-mesh-welding` 只在独立检查场景覆盖焊接容差，供保留基线的 A/B 排查使用，不改源资产。静态射线通过仍不等于动态接触、整车或8192环境训练验收。
+场地派生资产可在 Kaiser 完成原资源准入并持有四个 lease 后，用 `tools/check_terrain_assets.py --manifest <prepared/manifest.json> --output <new-directory>` 检查原生碰撞。工具核对输入 SHA、组合后的顶点与物理材质，再比较逐面射线和新增前立面网格；结果必须有 `completed=true`、`passed=true`，不能只看进程 exit 0。同时记录命中距离换算点误差和返回坐标偏离射线的误差，区分几何差异与字段数值问题；诊断不改变通过阈值。`--disable-mesh-welding` 只在独立检查场景覆盖焊接容差，供保留基线的 A/B 排查使用，不改源资产。静态射线通过仍不等于动态接触、整车或8192环境训练验收。
 
 Lab 快速采样的受控入口使用 `transformer_rl.formal.lab_env.runtime:runtime`，由现有 `StructuredTrainingSession` 管理进程、资源准入和完整学习 checkpoint；不把诊断入口的 `lab_ppo_v1` 当成可直接转换的正式端点。`managed_lab_runtime_v1` 私有配置冻结当前 boot、机械资产目录、响应记录与 atlas 的文件 pin、环境间距、完整 `FlatTaskSpec`、`PairTargetDomain`、五项 PhysX 容量和诊断开关。课程与 learner 共用 sampler、预算和请求去重状态；地形路由、任务独立 RNG 和 reward 缺失原因存入完整 checkpoint 的 task source。冷恢复在新回合采样前恢复这些状态，再由 worker 在物理准备后恢复全局 RNG；活动物理请求不重放。低频 reward 投影只描述最后一个完整策略区间，不称为整轮汇总，也不触发评价或课程晋级。此入口仍须完成原生场地、全规模更新与实际控制边界验收后，才能用于正式长训。
+
+阶段覆盖诊断的日志和 checkpoint 保留 `validation_only`、`diagnostic_stage` 与 `budget_scope`；预填的阶段偏移不代表实际 PPO 消费，不能作为学习 resume 的来源。旧未标记的 Lab 端点仍须核对课程累计消费与实际 update，不能用诊断偏移扩充预算。warm start 与 resume 必须二选一；完整正式恢复继续使用 managed checkpoint 与 journal。
