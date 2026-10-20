@@ -1,5 +1,6 @@
 """Reset routing, exposure, and cold-state checks; no SDK application."""
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -73,3 +74,20 @@ def test_complete_course_reaches_jump_without_reinitializing_sampler():
     assert restored.snapshot() == curriculum.snapshot()
     with pytest.raises(RuntimeError):
         restored.begin_update()
+
+
+def test_course_spawn_is_on_declared_approach_not_inside_first_rise(atlas):
+    from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+    course = LabTerrainCourse.__new__(LabTerrainCourse)
+    course.router = TerrainCourseRouter(atlas, 2)
+    course.nominal_spawn_height_m = .32
+    origins = torch.tensor([[3., 4, 0], [7., 8, 0]])
+    course.env = SimpleNamespace(scene=SimpleNamespace(env_origins=origins),
+                                 _task_sampler=SimpleNamespace(stage=2), _as_torch=lambda value: value)
+    task = SimpleNamespace(terrain_kind=torch.tensor([3, 0]), command=torch.zeros(2, 4))
+    pose = torch.tensor([[3., 4, .32, 0, 0, 0, 1], [7., 8, .32, 0, 0, 0, 1]])
+    course.place_reset(torch.arange(2), task, pose)
+    local = pose[:, :3] - course.router.origins
+    torch.testing.assert_close(local[:, 0], torch.tensor([-1., 0.]))
+    assert local[:, 1].eq(0).all()
+    torch.testing.assert_close(local[:, 2], course.router.spawn_z[course.router.tile] + .32)

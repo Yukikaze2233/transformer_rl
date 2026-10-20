@@ -113,6 +113,10 @@ class LabTerrainCourse:
                                              command_forward=task.command[:, 0])
         pose[:, :3] -= env._as_torch(env.scene.env_origins).index_select(0, ids)
         pose[:, :3] += origins
+        # Spawn on the declared approach, rather than at the tile's first rise.
+        nonflat = task.terrain_kind != 0
+        approach_x = self.router.starts[self.router.tile[ids]] + .5
+        pose[:, 0] += torch.where(nonflat, approach_x, 0.)
         pose[:, 2] = origins[:, 2] + ground + self.nominal_spawn_height_m
         reverse = (task.command[:, 0] < 0) & (task.terrain_kind != 0)
         pose[reverse, 5] = 1
