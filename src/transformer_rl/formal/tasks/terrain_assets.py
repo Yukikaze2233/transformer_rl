@@ -181,22 +181,50 @@ def extend_front_contact(source_vertices, source_faces, specification):
 
 def write_collision_usda(path, vertices, faces, *, static_friction, dynamic_friction,
                          restitution=0.0, visual_reference=None, face_material=None,
-                         material_coefficients=None):
-    """One static Mesh is also the unambiguous RayCaster target."""
+                         material_coefficients=None, material_parameters=None):
+    """Write one collision mesh with complete per-face physical materials.
+
+    ``material_parameters`` rows are [static friction, dynamic friction,
+    restitution]. Legacy scalar coefficients explicitly mean [mu, mu, 0].
+    Both representations use the source preparation's multiply combine mode.
+    """
+    default = np.asarray((static_friction, dynamic_friction, restitution), dtype=float)
+    if face_material is None:
+        if material_coefficients is not None or material_parameters is not None:
+            raise ValueError('material parameters require a face material assignment')
+        table = default[None]
+    else:
+        ids = np.asarray(face_material)
+        if ids.shape != (len(faces),) or not np.issubdtype(ids.dtype, np.integer):
+            raise ValueError('one integer physical material ID is required per triangle')
+        if (material_coefficients is None) == (material_parameters is None):
+            raise ValueError('provide one material table: parameters or legacy coefficients')
+        if material_parameters is None:
+            coefficients = np.asarray(material_coefficients, dtype=float)
+            if coefficients.ndim != 1:
+                raise ValueError('legacy material coefficients must be a vector')
+            table = np.column_stack((coefficients, coefficients, np.zeros_like(coefficients)))
+        else:
+            table = np.asarray(material_parameters, dtype=float)
+        if table.ndim != 2 or table.shape[1] != 3 or len(table) == 0:
+            raise ValueError('material parameters require nonempty [static, dynamic, restitution] rows')
+        if np.any(ids < 0) or np.any(ids >= len(table)):
+            raise ValueError('triangle material ID is outside the material table')
+    for values in (default[None], table):
+        if (not np.isfinite(values).all() or np.any(values < 0)
+                or np.any(values[:, 2] > 1)):
+            raise ValueError('physical material parameters must be finite and within physical bounds')
     points = ",\n".join("(" + ", ".join(format(float(x), ".9g") for x in p) + ")" for p in vertices)
     indices = ", ".join(str(int(i)) for i in np.asarray(faces).ravel())
     visual = ("" if visual_reference is None else
               f'    def Xform "Visual" (prepend references = @{visual_reference}@</Terrain/Visual>) {{}}\n')
     material_text, subsets = '', ''
     if face_material is not None:
-        ids = np.asarray(face_material)
-        if ids.shape != (len(faces),):
-            raise ValueError('one physical material is required per triangle')
-        for index, coefficient in enumerate(material_coefficients):
+        for index, (static, dynamic, bounce) in enumerate(table):
             material_text += f'''    def Material "Surface_{index}" (prepend apiSchemas = ["PhysicsMaterialAPI", "PhysxMaterialAPI"]) {{
-        float physics:staticFriction = {float(coefficient)}
-        float physics:dynamicFriction = {float(coefficient)}
-        float physics:restitution = 0
+        float physics:staticFriction = {float(static)}
+        float physics:dynamicFriction = {float(dynamic)}
+        float physics:restitution = {float(bounce)}
         token physxMaterial:frictionCombineMode = "multiply"
         token physxMaterial:restitutionCombineMode = "multiply"
     }}

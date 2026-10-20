@@ -45,6 +45,9 @@ def _rectangle(x0, x1, y0, y1, z0, z1):
 
 def _asset_geometry(root, name):
     record = json.loads((root / 'manifest.json').read_text())['assets'][name]
+    material = record['material']
+    if material['combine_mode'] != 'multiply':
+        raise ValueError('prepared terrain material combine mode is unsupported')
     path = root / name / 'collision.npz'
     if file_pin(path) != record['files']['collision.npz']:
         raise ValueError('prepared terrain geometry identity differs')
@@ -67,6 +70,7 @@ def _asset_geometry(root, name):
         'source_roi_m': [low.tolist(), high.tolist()],
         'training_padding_only': True, 'valid_half_width_m': float(min(abs(low[1]), high[1]) - .15),
         'spawn_z_m': float(ends[0]),
+        'physical_material': material,
     }
 
 
@@ -89,17 +93,17 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
     def append(parts, material_values, tile):
         nonlocal vertex_count
         origin = np.asarray(tile['origin_m'], np.float32)
-        for (points, triangles), mu in zip(parts, material_values):
+        for (points, triangles), material in zip(parts, material_values):
             points = np.asarray(points, np.float32) + origin
             triangles = np.asarray(triangles, np.int64)
             vertices.append(points)
             faces.append(triangles + vertex_count)
             vertex_count += len(points)
-            materials.extend([float(mu)] * len(triangles))
+            materials.extend([material] * len(triangles))
             face_tiles.extend([len(tiles)] * len(triangles))
         tiles.append(tile)
 
-    append([_rectangle(-90, 90, -90, 90, 0, 0)], [.7], {
+    append([_rectangle(-90, 90, -90, 90, 0, 0)], [(.7, .7, 0.)], {
         'name': 'flat', 'kind': 0, 'level': 0, 'origin_m': [-200., 0., 0.],
         'spawn_z_m': 0., 'valid_half_width_m': 88., 'finish_x_m': 88., 'start_x_m': -88.,
         'parameters': {'friction': .7},
@@ -122,7 +126,7 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
             tile_index = len(tiles) - 1
             origin = [float(tile_index % 8 * 12), float(tile_index // 8 * 12), 0.]
             append([(mesh.vertices_m, mesh.triangles) for mesh in surface.meshes],
-                   [mesh.friction for mesh in surface.meshes], {
+                   [(mesh.friction, mesh.friction, 0.) for mesh in surface.meshes], {
                        'name': kind.name.lower(), 'kind': int(kind), 'level': level, 'origin_m': origin,
                        'spawn_z_m': 0., 'valid_half_width_m': 3., 'finish_x_m': 5., 'start_x_m': -1.5,
                        'parameters': asdict(request),
@@ -130,18 +134,21 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
     for name, kind in (('road_step', TerrainKind.STEP_UP), ('central_steps', TerrainKind.TWO_PLATFORMS)):
         parts, metadata = _asset_geometry(prepared_assets, name)
         index = len(tiles) - 1
-        append(parts, [.6] * len(parts), {
+        material = metadata['physical_material']
+        parameters = tuple(material[key] for key in ('static_friction', 'dynamic_friction', 'restitution'))
+        append(parts, [parameters] * len(parts), {
             'name': name, 'kind': int(kind), 'level': levels - 1,
             'origin_m': [float(index % 8 * 12), float(index // 8 * 12), 0.],
             'finish_x_m': 5., 'start_x_m': -1.5, 'parameters': metadata, **metadata,
         })
     vertices, faces = np.concatenate(vertices), np.concatenate(faces)
     # Use one physical/scanning mesh with per-face material subsets.
-    coefficients, material_ids = np.unique(np.asarray(materials), return_inverse=True)
+    parameters, material_ids = np.unique(np.asarray(materials, dtype=float), axis=0, return_inverse=True)
     write_collision_usda(output / 'terrain.usda', vertices, faces, static_friction=.7,
-                         dynamic_friction=.7, face_material=material_ids, material_coefficients=coefficients)
+                         dynamic_friction=.7, face_material=material_ids, material_parameters=parameters)
     np.savez_compressed(output / 'geometry.npz', vertices_m=vertices, triangles=faces,
-                        face_material=material_ids, material_coefficients=coefficients,
+                        face_material=material_ids, material_coefficients=parameters[:, 0],
+                        material_parameters=parameters,
                         face_tile=np.asarray(face_tiles, np.int32))
     np.savez_compressed(output / 'query_index.npz',
                         **build_query_index(vertices, faces, face_tiles, len(tiles)))
@@ -149,7 +156,12 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
                 'source_assets': file_pin(prepared_assets / 'manifest.json'), 'tuning': asdict(tuning),
                 'tiles': tiles, 'files': {p.name: file_pin(p) for p in sorted(output.iterdir())},
                 'collision_mesh': '/Terrain/Collision', 'robot_qualified': False,
-                'geometry_sampling': 'seeded_continuous_bins_with_exact_upper_endpoints'}
+                'geometry_sampling': 'seeded_continuous_bins_with_exact_upper_endpoints',
+                'material_parameter_order': ['static_friction', 'dynamic_friction', 'restitution'],
+                'material_combine_mode': 'multiply',
+                'material_coefficients_semantics': 'static_friction_only',
+                'material_policy': {'authored': 'source_manifest_values',
+                                    'procedural': 'static_equals_dynamic_zero_restitution'}}
     (output / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
     return manifest
 
