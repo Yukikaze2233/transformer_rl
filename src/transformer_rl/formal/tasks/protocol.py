@@ -75,6 +75,26 @@ class CompletedEstimate:
     available_at_s: torch.Tensor
     valid: torch.Tensor
 
+    @classmethod
+    def _from_actor_observation(cls, frame, raw_state, timestamp):
+        """Decode the shared 35D sensor normalization, without privileged data."""
+        if (not isinstance(frame, torch.Tensor) or frame.ndim != 2 or frame.shape[1] != 35
+                or not isinstance(raw_state, torch.Tensor) or raw_state.shape != (len(frame), 8)
+                or frame.dtype != torch.float32 or raw_state.dtype != frame.dtype
+                or raw_state.device != frame.device or not isinstance(timestamp, torch.Tensor)
+                or timestamp.shape != (len(frame),) or timestamp.dtype != torch.float64
+                or timestamp.device != frame.device):
+            raise ValueError('completed estimate requires float32 actor/state rows and their float64 clock')
+        gravity = frame[:, 7:10]
+        norm = gravity.norm(dim=-1)
+        unit = gravity / norm[:, None].clamp_min(1e-8)
+        # The actor carries gyro * 0.5; the protocol compares SI rad/s.
+        angular_speed = (frame[:, 4:7] * 2).norm(dim=-1)
+        return cls(-(unit * raw_state[:, :3]).sum(-1), raw_state[:, 6:8].sigmoid(),
+                   (-unit[:, 2]).clamp(-1, 1).acos(), angular_speed, timestamp.clone(),
+                   torch.isfinite(raw_state).all(-1) & torch.isfinite(frame[:, 4:10]).all(-1)
+                   & (norm > 1e-6))
+
 
 @dataclass(frozen=True)
 class RequestCondition:

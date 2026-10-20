@@ -165,9 +165,4 @@ class LabCourseTasks:
 
 def completed_policy_estimate(frame, raw_state, timestamp):
     """Deployment-reproducible estimate: no critic, terrain truth, or future state."""
-    gravity = frame[:, 7:10]
-    unit = gravity / gravity.norm(dim=-1, keepdim=True).clamp_min(1e-8)
-    return CompletedEstimate(
-        -(unit * raw_state[:, :3]).sum(-1), raw_state[:, 6:8].sigmoid(),
-        torch.acos((-unit[:, 2]).clamp(-1, 1)), frame[:, 4:7].norm(dim=-1),
-        timestamp.clone(), torch.isfinite(raw_state).all(-1))
+    return CompletedEstimate._from_actor_observation(frame, raw_state, timestamp)

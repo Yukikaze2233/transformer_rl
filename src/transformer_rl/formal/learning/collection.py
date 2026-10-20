@@ -153,15 +153,7 @@ class StructuredCollector:
     def completed_estimate(self, current, raw_state):
         """Shared causal projection for collection and deterministic evaluation."""
         self._tensor('policy estimated state', raw_state, 8)
-        gravity = current.frame[:, 7:10]
-        norm = gravity.norm(dim=-1)
-        return CompletedEstimate(
-            (-(raw_state[:, :3] * gravity).sum(-1) / norm.clamp_min(1e-8)).clone(),
-            raw_state[:, 6:8].sigmoid().clone(),
-            (-gravity[:, 2] / norm.clamp_min(1e-8)).clamp(-1, 1).acos(),
-            (current.frame[:, 4:7] * 2).norm(dim=-1), current.timestamp_s.clone(),
-            torch.isfinite(raw_state).all(-1) & (norm > 1e-6),
-        )
+        return CompletedEstimate._from_actor_observation(current.frame, raw_state, current.timestamp_s)
 
     @torch.no_grad()
     def reset(self, seed=None):
