@@ -55,6 +55,7 @@ class LearningRecipe:
     device: str = 'cpu'
     curriculum_promotion: str = 'exposure'
     checkpoint_interval: int = 25
+    target_rollouts: int = 30000
 
     def __post_init__(self):
         for name in ('asset_manifest_sha256', 'learner_source_sha256', 'task_contract_sha256', 'initial_model_sha256'):
@@ -66,6 +67,7 @@ class LearningRecipe:
                 or type(self.num_envs) is not int or self.num_envs < 1
                 or type(self.rollout_steps) is not int or self.rollout_steps < 1
                 or type(self.checkpoint_interval) is not int or self.checkpoint_interval < 1
+                or type(self.target_rollouts) is not int or not 1 <= self.target_rollouts <= 35000
                 or self.device not in ('cpu', 'cuda:0')
                 or self.curriculum_promotion not in ('exposure', 'audited')
                 or any(not isinstance(getattr(self, name), cls) for name, cls in self._config_types().items())):
@@ -100,7 +102,8 @@ class LearningRecipe:
 
     def journal_spec(self):
         return LearningJournalSpec(self.run_id, self.sha256, self.num_envs, self.rollout_steps,
-                                   self.ppo.epochs, self.ppo.minibatches)
+                                   self.ppo.epochs, self.ppo.minibatches,
+                                   target_rollouts=self.target_rollouts)
 
 
 @dataclass

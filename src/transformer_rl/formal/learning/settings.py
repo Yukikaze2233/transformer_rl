@@ -9,7 +9,7 @@ from .checkpoint import LearningRecipe
 from .optimization import StructuredPPOConfig
 from ..contracts import StructuredCollectionConfig
 from ..policy import StructuredPolicyConfig
-from ..tasks.curriculum import STAGE_BUDGETS, TaskDomain
+from ..tasks.curriculum import COMPLETE_STAGE_BUDGETS, TaskDomain
 from ..tasks.protocol import RequestProtocolConfig
 from ..tasks.terrain import TerrainTuning
 
@@ -32,7 +32,7 @@ class FormalTrainingSettings:
         if (not isinstance(self.training_seeds, (tuple, list)) or not self.training_seeds
                 or any(type(seed) is not int or not 0 <= seed < 2**32 for seed in self.training_seeds)
                 or len(set(self.training_seeds)) != len(self.training_seeds)
-                or type(self.updates_per_seed) is not int or self.updates_per_seed != sum(STAGE_BUDGETS)
+                or type(self.updates_per_seed) is not int or self.updates_per_seed != sum(COMPLETE_STAGE_BUDGETS)
                 or any(type(getattr(self, name)) is not int or getattr(self, name) < 1
                        for name in ('num_envs', 'rollout_steps', 'checkpoint_interval'))
                 or any(not isinstance(getattr(self, name), cls)
@@ -72,7 +72,8 @@ class FormalTrainingSettings:
             run_id, training_seed, self.num_envs, self.rollout_steps,
             asset_manifest_sha256, learner_source_sha256, task_contract_sha256, initial_model_sha256,
             **{name: getattr(self, name) for name in LearningRecipe._config_types()},
-            checkpoint_interval=self.checkpoint_interval, device=device, curriculum_promotion='exposure')
+            checkpoint_interval=self.checkpoint_interval, device=device, curriculum_promotion='exposure',
+            target_rollouts=self.updates_per_seed)
         if recipe.journal_spec().target_rollouts != self.updates_per_seed:
             raise ValueError('learning journal and formal course budgets differ')
         return recipe

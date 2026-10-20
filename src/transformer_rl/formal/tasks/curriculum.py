@@ -35,6 +35,9 @@ STAGE_WEIGHTS = (
 TOTAL_BUDGET = sum(STAGE_BUDGETS)
 JUMP_BUDGET = 5000
 JUMP_WEIGHTS = (0.20, 0.10, 0.10, 0.10, 0.50, 0.00)
+COMPLETE_STAGE_NAMES = (*STAGE_NAMES, 'jump')
+COMPLETE_STAGE_BUDGETS = (*STAGE_BUDGETS, JUMP_BUDGET)
+COMPLETE_STAGE_WEIGHTS = (*STAGE_WEIGHTS, JUMP_WEIGHTS)
 PHASE_NAMES = STAGE_NAMES
 PHASE_BUDGETS = STAGE_BUDGETS
 PHASE_WEIGHTS = STAGE_WEIGHTS
@@ -48,7 +51,7 @@ class TaskDomain:
     jump_m: tuple[float, float] = (0.03, 0.20)
     slope_rad: tuple[float, float] = (-math.pi / 12, math.pi / 12)
     roughness_m: tuple[float, float] = (0.0, 0.02)
-    step_up_m: tuple[float, float] = (0.0, 0.25)
+    step_up_m: tuple[float, float] = (0.0, 0.20)
     step_down_m: tuple[float, float] = (0.0, 0.15)
     nominal_height_m: float = 0.32
     nominal_fraction: float = 0.20
@@ -120,13 +123,14 @@ class ContinuousTaskSampler:
     cover the interior within each family block, then rows are shuffled.
     """
 
-    def __init__(self, seed, device='cpu', domain=TaskDomain()):
+    def __init__(self, seed, device='cpu', domain=TaskDomain(), *, stage_weights=STAGE_WEIGHTS):
         if type(seed) is not int or not 0 <= seed < 2**63 or not isinstance(domain, TaskDomain):
             raise ValueError('sampler requires a nonnegative seed and parsed task domain')
         self.device, self.domain = torch.device(device), domain
+        self.stage_weights = tuple(tuple(row) for row in stage_weights)
         self.generator = torch.Generator(device=self.device).manual_seed(seed)
-        self._families = [_FairQuota(weights) for weights in STAGE_WEIGHTS]
-        self._strata = [[_FairQuota((0.70, 0.15, 0.15)) for _ in TaskFamily] for _ in STAGE_NAMES]
+        self._families = [_FairQuota(weights) for weights in self.stage_weights]
+        self._strata = [[_FairQuota((0.70, 0.15, 0.15)) for _ in TaskFamily] for _ in self.stage_weights]
 
     def _random(self, count):
         return torch.rand(count, device=self.device, generator=self.generator)
@@ -147,7 +151,7 @@ class ContinuousTaskSampler:
         return torch.where(stratum == 1, boundary, torch.where(stratum == 2, near, interior))
 
     def sample(self, count, stage):
-        if type(count) is not int or count < 1 or type(stage) is not int or not 0 <= stage < len(STAGE_NAMES):
+        if type(count) is not int or count < 1 or type(stage) is not int or not 0 <= stage < len(self.stage_weights):
             raise ValueError('sampling requires positive row count and a valid curriculum stage')
         allocation = self._families[stage].allocate(count)
         blocks = []
@@ -188,9 +192,12 @@ class ContinuousTaskSampler:
                           for field in fields(TaskDraw)))
 
     def state_dict(self):
-        return {'domain': asdict(self.domain), 'rng': self.generator.get_state().clone(),
+        result = {'domain': asdict(self.domain), 'rng': self.generator.get_state().clone(),
                 'family_credit': [list(quota.credit) for quota in self._families],
                 'stratum_credit': [[list(quota.credit) for quota in stage] for stage in self._strata]}
+        if self.stage_weights != STAGE_WEIGHTS:
+            result['stage_weights'] = self.stage_weights
+        return result
 
     def load_state_dict(self, state):
         expected = self.state_dict()
@@ -199,7 +206,9 @@ class ContinuousTaskSampler:
         prepared_families = deepcopy(self._families)
         prepared_strata = deepcopy(self._strata)
         self._restore_credits(prepared_families, state['family_credit'])
-        if not isinstance(state['stratum_credit'], list) or len(state['stratum_credit']) != len(STAGE_NAMES):
+        if state.get('stage_weights', STAGE_WEIGHTS) != self.stage_weights:
+            raise ValueError('sampler checkpoint curriculum differs')
+        if not isinstance(state['stratum_credit'], list) or len(state['stratum_credit']) != len(self.stage_weights):
             raise ValueError('sampler checkpoint has invalid stratum stages')
         for stage, credit in zip(prepared_strata, state['stratum_credit']):
             self._restore_credits(stage, credit)
@@ -243,12 +252,20 @@ class CurriculumBudget:
     separate mode for callers retaining the earlier research contract.
     """
 
-    def __init__(self, *, promotion='exposure'):
+    def __init__(self, *, promotion='exposure', stage_names=None, stage_budgets=None):
         if promotion not in ('exposure', 'audited'):
             raise ValueError('curriculum promotion must be exposure or explicitly audited')
         self.promotion = promotion
+        # Resolve at call time so tests and explicit schedules do not get a
+        # stale default captured at import time.
+        self.stage_names = tuple(STAGE_NAMES if stage_names is None else stage_names)
+        self.stage_budgets = tuple(STAGE_BUDGETS if stage_budgets is None else stage_budgets)
+        if (not self.stage_names or len(self.stage_names) != len(self.stage_budgets)
+                or len(set(self.stage_names)) != len(self.stage_names)
+                or any(type(value) is not int or value <= 0 for value in self.stage_budgets)):
+            raise ValueError('curriculum requires named positive stage budgets')
         self.stage = 0
-        self.consumed = [0] * len(STAGE_NAMES)
+        self.consumed = [0] * len(self.stage_names)
         self.transferred_to_consolidation = 0
         self.decisions = []
         self.consecutive_passes = 0
@@ -260,14 +277,14 @@ class CurriculumBudget:
 
     @property
     def stage_limit(self):
-        return STAGE_BUDGETS[self.stage] + (self.transferred_to_consolidation if self.stage == len(STAGE_NAMES) - 1 else 0)
+        return self.stage_budgets[self.stage] + (self.transferred_to_consolidation if self.stage == len(self.stage_names) - 1 else 0)
 
     def charge_rollout(self):
         self.prepare_rollout()
         if self.status != 'running' or self.consumed[self.stage] >= self.stage_limit:
             raise RuntimeError('curriculum cannot spend beyond a stopped or exhausted stage')
         self.consumed[self.stage] += 1
-        if self.stage == len(STAGE_NAMES) - 1 and self.total_updates == sum(STAGE_BUDGETS):
+        if self.stage == len(self.stage_names) - 1 and self.total_updates == sum(self.stage_budgets):
             self.status = ('training_budget_complete' if self.promotion == 'exposure'
                            else 'training_budget_complete_evaluation_pending')
         elif self.promotion == 'audited' and self.consumed[self.stage] == self.stage_limit:
@@ -275,7 +292,7 @@ class CurriculumBudget:
 
     def prepare_rollout(self):
         """Advance only between rollouts,never during the last old-stage sample."""
-        if (self.promotion == 'exposure' and self.status == 'running' and self.stage < len(STAGE_NAMES) - 1
+        if (self.promotion == 'exposure' and self.status == 'running' and self.stage < len(self.stage_names) - 1
                 and self.consumed[self.stage] == self.stage_limit):
             self.stage += 1
         return self.stage
@@ -283,11 +300,11 @@ class CurriculumBudget:
     def submit_stage_validation(self, decision: AuditedStageDecision):
         if self.promotion != 'audited':
             raise RuntimeError('manual evaluation does not change the exposure training schedule')
-        if self.stage == len(STAGE_NAMES) - 1 or self.status not in ('running', 'stage_budget_complete_validation_pending'):
+        if self.stage == len(self.stage_names) - 1 or self.status not in ('running', 'stage_budget_complete_validation_pending'):
             raise RuntimeError('stage promotion is unavailable in the current curriculum state')
         if not isinstance(decision, AuditedStageDecision):
             raise TypeError('stage decisions require the independent audited-decision contract')
-        if (decision.stage != STAGE_NAMES[self.stage] or type(decision.update) is not int
+        if (decision.stage != self.stage_names[self.stage] or type(decision.update) is not int
                 or decision.update != self.total_updates
                 or any(type(getattr(decision, name)) is not bool for name in
                        ('passed', 'coverage_passed', 'all_introduced_cases_present', 'heldout_used'))
@@ -295,7 +312,7 @@ class CurriculumBudget:
                 or any(not isinstance(sha, str) or re.fullmatch('[0-9a-f]{64}', sha) is None
                        for sha in (decision.checkpoint_sha256, decision.validation_source_sha256))):
             raise ValueError('stage decision has the wrong stage, checkpoint, seeds or source identity')
-        if self.consumed[self.stage] < math.ceil(STAGE_BUDGETS[self.stage] * 0.25):
+        if self.consumed[self.stage] < math.ceil(self.stage_budgets[self.stage] * 0.25):
             raise ValueError('promotion validation requires at least 25 percent of stage exposure')
         previous = [item for item in self.decisions if item.stage == decision.stage]
         if len(previous) >= 4 or any(item.update == decision.update or item.checkpoint_sha256 == decision.checkpoint_sha256
@@ -305,7 +322,7 @@ class CurriculumBudget:
         passed = decision.passed and decision.coverage_passed and decision.all_introduced_cases_present
         self.consecutive_passes = self.consecutive_passes + 1 if passed else 0
         if self.consecutive_passes >= 2:
-            self.transferred_to_consolidation += STAGE_BUDGETS[self.stage] - self.consumed[self.stage]
+            self.transferred_to_consolidation += self.stage_budgets[self.stage] - self.consumed[self.stage]
             self.stage += 1
             self.consecutive_passes = 0
             self.status = 'running'
@@ -313,21 +330,25 @@ class CurriculumBudget:
             self.status = 'failed_qualification'
 
     def state_dict(self):
-        return {'promotion': self.promotion, 'stage': self.stage, 'consumed': list(self.consumed),
+        result = {'promotion': self.promotion, 'stage': self.stage, 'consumed': list(self.consumed),
                 'transferred_to_consolidation': self.transferred_to_consolidation,
                 'decisions': [asdict(item) for item in self.decisions],
                 'consecutive_passes': self.consecutive_passes, 'status': self.status}
+        if self.stage_names != STAGE_NAMES or self.stage_budgets != STAGE_BUDGETS:
+            result['schedule'] = {'names': self.stage_names, 'budgets': self.stage_budgets}
+        return result
 
     def load_state_dict(self, state):
         """Reconstruct the budget by replaying consumption and accepted decisions."""
         if (not isinstance(state, dict) or state.keys() != self.state_dict().keys()
                 or state['promotion'] != self.promotion
-                or not isinstance(state['consumed'], list) or len(state['consumed']) != len(STAGE_NAMES)
+                or state.get('schedule') != self.state_dict().get('schedule')
+                or not isinstance(state['consumed'], list) or len(state['consumed']) != len(self.stage_names)
                 or any(type(value) is not int or value < 0 for value in state['consumed'])
-                or sum(state['consumed']) > sum(STAGE_BUDGETS)
+                or sum(state['consumed']) > sum(self.stage_budgets)
                 or not isinstance(state['decisions'], list) or len(state['decisions']) > 20):
             raise ValueError('invalid curriculum checkpoint fields or consumption')
-        restored = CurriculumBudget(promotion=self.promotion)
+        restored = CurriculumBudget(promotion=self.promotion, stage_names=self.stage_names, stage_budgets=self.stage_budgets)
         try:
             for item in state['decisions']:
                 decision = AuditedStageDecision(**item)

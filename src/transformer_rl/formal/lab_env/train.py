@@ -51,12 +51,16 @@ def _parse_args(argv=None):
                         help="M1 command stage 0-3；正式 3-phase 课程 fresh run 只能从 0 开始")
     parser.add_argument("--init-checkpoint", type=Path)
     parser.add_argument("--resume", type=Path)
-    parser.add_argument("--checkpoint-interval", type=int, default=1)
+    parser.add_argument("--checkpoint-interval", type=int, default=100)
     parser.add_argument("--asset-directory", type=str)
     parser.add_argument("--formal-reward", action="store_true",
                         help="使用正式 PhysicalRewardComposer")
     parser.add_argument("--formal-curriculum", action="store_true",
-                        help="使用正式 3-phase TaskDraw 课程；当前只支持 height/motion/rotation/recovery")
+                        help="使用正式 TaskDraw 课程；默认包含 jump 巩固段")
+    parser.add_argument("--include-jump", action="store_true", default=True,
+                        help="正式课程包含第 4 段 jump（默认开启）")
+    parser.add_argument("--no-jump", action="store_false", dest="include_jump",
+                        help="只跑 30k 三段主课程")
     parser.add_argument("--recover", action="store_true",
                         help="使用随机翻倒 recover task：随机翻倒 reset + action hold + 5s episode")
     parser.add_argument("--recover-hold-s", type=float, default=.5)
@@ -67,12 +71,17 @@ def _parse_args(argv=None):
                         help="启用 11x7 地形扫描；185D critic 自动开启")
     parser.add_argument("--forward-scan", action="store_true",
                         help="启用左右轮轮下/轮前 raycast 和 StairFSM")
-    parser.add_argument("--terrain-profile", choices=("plane", "rough"), default="plane")
+    parser.add_argument("--terrain-profile", choices=("plane", "rough", "course"), default="plane")
+    parser.add_argument('--terrain-atlas', type=Path, help='Prepared terrain atlas manifest; never a raw source USD')
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = _parse_args(argv)
+    if args.terrain_profile == 'course' and (args.terrain_atlas is None or not args.formal_curriculum):
+        raise ValueError('course requires --terrain-atlas and --formal-curriculum')
+    if args.terrain_atlas is not None and args.terrain_profile != 'course':
+        raise ValueError('--terrain-atlas requires --terrain-profile course')
     if args.updates < 1 or args.num_envs < 1 or args.rollout_steps < 1 or args.checkpoint_interval < 1:
         raise ValueError("updates/num_envs/rollout_steps/checkpoint_interval 必须为正")
     if "cuda" in args.device and "/usr/lib/wsl/lib" not in os.environ.get("LD_LIBRARY_PATH", ""):
@@ -102,6 +111,7 @@ def main(argv=None):
 
         from ..control.actuation import PairTargetDomain, ResponseParameters
         from ...common.training_control import verify_pin
+        from ...common.random_state import capture_rng, restore_rng
         from ..learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
         from ..policy import StructuredActorCritic, StructuredPolicyConfig
         from .adapter import LabLabeledEnv
@@ -189,6 +199,7 @@ def main(argv=None):
                             terrain_scan=(args.terrain_scan or policy.critic_input_dim == 185),
                             forward_scan=args.forward_scan,
                             terrain_profile=args.terrain_profile,
+                            terrain_atlas_manifest=(None if args.terrain_atlas is None else str(args.terrain_atlas)),
                             expected_manifest_sha256=expected_asset)
         cfg.sim.enable_scene_query_support = True
         cfg.sim.physics = PhysxCfg(
@@ -203,11 +214,16 @@ def main(argv=None):
         if args.recover:
             stage = 0
         elif args.formal_curriculum:
-            capabilities = FormalCurriculumCapabilities(recovery=True)
+            capabilities = FormalCurriculumCapabilities(
+                recovery=True, requests=True, terrain=args.terrain_profile == 'course')
             formal_curriculum = FormalTaskCurriculum(
                 args.num_envs, device=args.device, seed=args.seed,
                 promotion="exposure", capabilities=capabilities,
+                include_jump=args.include_jump,
             )
+            # Fail before spending warmup when a later stage is not wired.
+            for index in range(1, len(formal_curriculum.stage_names)):
+                formal_curriculum.require_supported(index)
             if args.resume is not None:
                 state = payload.get("curriculum")
                 if state is None:
@@ -221,17 +237,25 @@ def main(argv=None):
                 args.num_envs, device=args.device, stage=stage, seed=args.seed)
             env.set_command_sampler(command_curriculum.sample)
         collector = LabCollector(LabLabeledEnv(env), model)
+        if args.resume is not None and env._terrain_course is not None:
+            if payload.get('terrain_course') is None or payload.get('global_rng') is None:
+                raise ValueError('course resume requires terrain/request state and global RNG; no implicit migration')
+            env._terrain_course.restore_after_physical_reset(payload['terrain_course'])
         args.output.mkdir(parents=True, exist_ok=True)
         metrics_path = args.output / "metrics.jsonl"
         collector.reset()
+        if args.resume is not None and payload.get('global_rng') is not None:
+            restore_rng(payload['global_rng'])
         print(f"LAB PPO start update={trainer.update_index} envs={args.num_envs} steps={args.rollout_steps} stage={stage} formal_reward={args.formal_reward} formal_curriculum={args.formal_curriculum} recover={args.recover}", flush=True)
         if args.formal_curriculum:
             print("FORMAL curriculum", formal_task_sampler.curriculum.snapshot(), flush=True)
         if args.formal_reward:
             print(f"FORMAL reward missing terms={env._formal_reward.missing_terms}", flush=True)
 
-        for _ in range(args.updates):
+        for run_update in range(args.updates):
             if formal_task_sampler is not None:
+                if formal_task_sampler.curriculum.status != 'running':
+                    break
                 stage = formal_task_sampler.begin_update()
                 print(f"FORMAL stage update={trainer.update_index + 1} stage={stage} "
                       f"consumed={formal_task_sampler.curriculum.snapshot().consumed}", flush=True)
@@ -253,6 +277,8 @@ def main(argv=None):
                 "collector": collector.last_metrics,
                 "ppo": update_metrics,
             }
+            if env._terrain_course is not None:
+                record['terrain_course'] = env._terrain_course.metrics()
             with metrics_path.open("a") as stream:
                 stream.write(json.dumps(_jsonable(record), ensure_ascii=False, allow_nan=False) + "\n")
             print("LAB PPO update", json.dumps({
@@ -268,7 +294,10 @@ def main(argv=None):
                 "formal_reward": args.formal_reward,
                 "recover": args.recover,
             }, ensure_ascii=False), flush=True)
-            if trainer.update_index % args.checkpoint_interval == 0:
+            course_finished = (formal_task_sampler is not None
+                               and formal_task_sampler.curriculum.status != 'running')
+            if (trainer.update_index % args.checkpoint_interval == 0
+                    or run_update == args.updates - 1 or course_finished):
                 checkpoint = args.output / f"update_{trainer.update_index:05d}.pt"
                 temporary = checkpoint.with_suffix(".tmp")
                 torch.save({
@@ -285,8 +314,12 @@ def main(argv=None):
                     "recover": args.recover,
                     "curriculum": (None if formal_task_sampler is None
                                    else _cpu(formal_task_sampler.state_dict())),
+                    'global_rng': _cpu(capture_rng()),
+                    'terrain_course': (None if env._terrain_course is None else _cpu(env._terrain_course.state_dict())),
                     "formal_reward_available_terms": (
-                        None if formal_reward is None else list(formal_reward.available_terms)),
+                        None if env._formal_reward is None else list(env._formal_reward.config.available_terms)),
+                    'formal_reward_missing_terms': ({} if env._formal_reward is None
+                                                    else env._formal_reward.missing_term_reasons),
                     "asset_manifest_sha256": cfg.asset_manifest_sha256,
                     "response_source_sha256": runtime["response_source_pin"]["sha256"],
                 }, temporary)

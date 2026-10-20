@@ -296,6 +296,7 @@ class JumpOutput:
     request_height_m: torch.Tensor
     speed_scale: torch.Tensor
     phase: torch.Tensor
+    request_id: torch.Tensor
     entered: torch.Tensor
     exited: torch.Tensor
     success: torch.Tensor
@@ -317,6 +318,8 @@ class JumpFSM:
         self.request_height = torch.zeros(num_envs, device=self.device)
         self._height = torch.zeros(num_envs, device=self.device)
         self._speed = torch.ones(num_envs, device=self.device)
+        self.request_id = torch.full((num_envs,), -1, dtype=torch.long, device=self.device)
+        self.request_counter = torch.zeros(num_envs, dtype=torch.long, device=self.device)
 
     @property
     def active(self):
@@ -336,6 +339,7 @@ class JumpFSM:
         self.request_height[ids] = 0
         self._height[ids] = 0
         self._speed[ids] = 1
+        self.request_id[ids] = -1
 
     def step(self, *, request, request_height_m, command_height_m, body_height_m,
              wheel_force_n, tilt_rad, base_contact_force_n, vertical_velocity_m_s=None):
@@ -363,6 +367,9 @@ class JumpFSM:
         self.settle_time = torch.where(entered, torch.zeros_like(self.settle_time), self.settle_time)
         self.request_height = torch.where(entered, rise, self.request_height)
         self.target_height = torch.where(entered, command + rise, self.target_height)
+        next_request_id = self.request_counter + 1
+        self.request_id = torch.where(entered, next_request_id, self.request_id)
+        self.request_counter = torch.where(entered, next_request_id, self.request_counter)
         active = self.state != int(JumpState.NORMAL)
         self.state_time = torch.where(active, self.state_time + self.config.policy_dt_s, self.state_time)
 
@@ -411,7 +418,8 @@ class JumpFSM:
                            torch.full_like(self.state, int(CommandMode.NORMAL)))
         request_out = torch.where(active_out, self.request_height, torch.zeros_like(self.request_height))
         return JumpOutput(self.state.clone(), mode, self._height.clone(), request_out,
-                          self._speed.clone(), self.state.clone(), entered, exited, success, failure)
+                          self._speed.clone(), self.state.clone(), self.request_id.clone(),
+                          entered, exited, success, failure)
 
     def reset_after_success(self, ids=None):
         self.reset(ids)
@@ -425,6 +433,8 @@ class SkillOutput:
     speed_scale: torch.Tensor
     stair_state: torch.Tensor
     jump_state: torch.Tensor
+    jump_success: torch.Tensor
+    jump_request_id: torch.Tensor
     entered: torch.Tensor
     exited: torch.Tensor
     success: torch.Tensor
@@ -488,6 +498,8 @@ class SkillFSM:
         return SkillOutput(
             mode=mode, height_command_m=height, request_height_m=request_height,
             speed_scale=speed, stair_state=stair_out.state, jump_state=jump_out.state,
+            jump_success=jump_out.success,
+            jump_request_id=jump_out.request_id,
             entered=stair_out.entered | jump_out.entered,
             exited=stair_out.exited | jump_out.exited,
             success=stair_out.success | jump_out.success,

@@ -18,7 +18,7 @@ import re
 import stat
 
 from ...common.training_control import boot_id, read_json, write_json
-from ..tasks.curriculum import STAGE_NAMES
+from ..tasks.curriculum import COMPLETE_STAGE_NAMES, STAGE_NAMES
 
 
 @dataclass(frozen=True)
@@ -29,14 +29,14 @@ class LearningJournalSpec:
     rollout_steps: int
     epochs: int
     minibatches: int
-    target_rollouts: int = 30000
+    target_rollouts: int = 35000
 
     def __post_init__(self):
         if (not isinstance(self.run_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', self.run_id)
                 or not isinstance(self.contract_sha256, str) or not re.fullmatch(r'[0-9a-f]{64}', self.contract_sha256)
                 or any(type(v) is not int or v < 1 for v in
                        (self.num_envs, self.rollout_steps, self.epochs, self.minibatches, self.target_rollouts))
-                or self.target_rollouts > 30000):
+                or self.target_rollouts > 35000):
             raise ValueError('learning journal requires an explicit run, contract and positive nonrefundable budget')
 
 
@@ -90,8 +90,10 @@ class LearningJournal:
             except BaseException:
                 os.close(descriptor)
                 raise
+        stage_count = len(COMPLETE_STAGE_NAMES) if self.spec.target_rollouts > 30000 else len(STAGE_NAMES)
+        self._stage_count = stage_count
         self._state = {'rollouts_reserved': 0, 'reserved_transitions': 0,
-                       'reserved_by_stage': [0] * len(STAGE_NAMES), **{key: 0 for key in self._ACTUAL},
+                       'reserved_by_stage': [0] * stage_count, **{key: 0 for key in self._ACTUAL},
                        'active_elapsed_s': 0., 'pending': None, 'failed': False}
         self._sequence, self._head = 0, None
         try:
@@ -138,7 +140,7 @@ class LearningJournal:
         if kind == 'reserve':
             if (set(payload) != {'index', 'stage'} or type(payload['index']) is not int
                     or payload['index'] != state['rollouts_reserved'] + 1 or type(payload['stage']) is not int
-                    or not 0 <= payload['stage'] < len(STAGE_NAMES) or state['pending'] is not None or state['failed']
+                    or not 0 <= payload['stage'] < self._stage_count or state['pending'] is not None or state['failed']
                     or payload['index'] > self.spec.target_rollouts):
                 raise ValueError('journal cannot reserve a replayed, failed, pending or exhausted rollout')
             prepared['pending'] = dict(payload)

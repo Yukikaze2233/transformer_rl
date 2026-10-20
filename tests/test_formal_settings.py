@@ -25,7 +25,7 @@ def test_complete_plan_keeps_rollout_duration_and_accounts_all_three_training_se
     assert settings.collection.gamma**2 == pytest.approx(.99)
     assert settings.collection.gae_lambda**2 == pytest.approx(.95)
     assert settings.budget() == {
-        'fresh_per_update': 393216, 'fresh_per_seed': 11796480000, 'total_fresh': 35389440000,
+        'fresh_per_update': 393216, 'fresh_per_seed': 13762560000, 'total_fresh': 41287680000,
         'rollout_duration_s': .48, 'logical_minibatch_endpoints': 24576,
         'maximum_actor_steps_per_update': 64, 'maximum_actor_endpoint_uses_per_update': 1572864}
     for seed in settings.training_seeds:
@@ -34,7 +34,7 @@ def test_complete_plan_keeps_rollout_duration_and_accounts_all_three_training_se
                                  initial_model_sha256='d' * 64)
         assert LearningRecipe.from_dict(recipe.to_dict()) == recipe
         assert recipe.journal_spec().num_envs == 8192
-        assert recipe.journal_spec().target_rollouts == 30000
+        assert recipe.journal_spec().target_rollouts == 35000
         assert recipe.checkpoint_interval == 100 and recipe.curriculum_promotion == 'exposure'
     assert FormalTrainingSettings.from_dict(settings.to_dict()) == settings
 

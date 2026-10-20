@@ -28,7 +28,7 @@ from .formal_curriculum import LabTaskSample
 from .formal_reward import FormalRewardConfig, LabFormalReward
 from .critic_features import TERRAIN_SCAN_DIM, environment_features_182
 from .forward_scan import ForwardStepDetector
-from .skill_fsm import SkillFSM
+from .skill_fsm import JumpState, SkillFSM
 from ..tasks.reward import RewardPhase
 from .recover import LabRecoverTask, RecoverTaskSpec
 from .recovery import LabRecoveryReset
@@ -62,6 +62,8 @@ class WheeledLabEnv(DirectRLEnv):
             task=self._task,
         )
         self._device = torch.device(self.device)
+        self._terrain_course = None
+        self._completed_estimate = None
         self._active_indices = torch.tensor(self._binding.policy_joint_indices,
                                            dtype=torch.long, device=self._device)
         self._spring_indices = torch.tensor(
@@ -134,10 +136,13 @@ class WheeledLabEnv(DirectRLEnv):
                                         dtype=torch.long, device=self._device)
         self._base_command_mode = self._command_mode.clone()
         self._skill_fsm = (SkillFSM(self.num_envs, device=str(self._device))
-                           if len(cfg.forward_scanners) else None)
+                           if (len(cfg.forward_scanners) or self._formal_reward is not None)
+                           else None)
         self._forward_detector = (ForwardStepDetector(self.num_envs, device=str(self._device))
                                   if self._skill_fsm is not None else None)
         self._reward_phase = torch.full((self.num_envs,), 0, dtype=torch.long, device=self._device)
+        self._pending_success_id = torch.full((self.num_envs,), -1, dtype=torch.long,
+                                              device=self._device)
         self._recovery_posture = torch.zeros(self.num_envs, dtype=torch.long, device=self._device)
         self._command_sampler = None
         self._task_sampler = None
@@ -193,6 +198,9 @@ class WheeledLabEnv(DirectRLEnv):
         if sampler is not None:
             # 资产/碰撞源只读一次；8192 行共享同一 flat source。
             self._recovery_reset = LabRecoveryReset(self._asset, self.num_envs, device=str(self._device))
+            if getattr(self.cfg, 'course_manifest', None):
+                from .terrain import LabTerrainCourse
+                self._terrain_course = LabTerrainCourse(self, self.cfg.course_manifest)
 
     def _build_pressure(self):
         asset = self._asset.directory
@@ -352,6 +360,9 @@ class WheeledLabEnv(DirectRLEnv):
             state, sample, joint_acceleration=terminal_acceleration).detach().clone()
 
     def _update_skill(self):
+        if self._terrain_course is not None:
+            self._terrain_course.advance_skill()
+            return
         if self._skill_fsm is None or self._last_state is None or self._last_sample is None:
             return
         current, ahead, valid = self._scan_ground()
@@ -361,6 +372,7 @@ class WheeledLabEnv(DirectRLEnv):
         base_force = self._last_sample.terrain_contact_force_world_n[
             :, self._base_body_index].norm(dim=-1)
         recovery = self._base_command_mode == int(CommandMode.RECOVERY)
+        jump_request = (self._request_height > 0) & ~recovery
         out = self._skill_fsm.step(
             step_height_m=step_height,
             wheel_force_n=state.wheel_ground_force_n,
@@ -369,12 +381,34 @@ class WheeledLabEnv(DirectRLEnv):
             base_contact_force_n=base_force,
             command_height_m=self._command_base[:, 3],
             auto_enabled=~recovery,
+            jump_request=jump_request,
+            jump_request_height_m=self._request_height,
+            vertical_velocity_m_s=self._last_sample.root_com_velocity_world_m_s[:, 2],
         )
         active = out.mode != int(CommandMode.NORMAL)
         self._command[:, 3] = torch.where(active, out.height_command_m, self._command_base[:, 3])
         self._command[:, 0] = self._command_base[:, 0] * torch.where(
             active, out.speed_scale, torch.ones_like(out.speed_scale))
         self._command_mode.copy_(torch.where(active, out.mode, self._base_command_mode))
+        self._request_height.copy_(torch.where(
+            out.mode == int(CommandMode.JUMP), out.request_height_m,
+            torch.zeros_like(out.request_height_m)))
+        jump_phase = torch.where(
+            (out.jump_state == int(JumpState.PRELOAD)) | (out.jump_state == int(JumpState.TAKEOFF)),
+            torch.full_like(out.jump_state, int(RewardPhase.TAKEOFF)),
+            torch.where(out.jump_state == int(JumpState.FLIGHT),
+                        torch.full_like(out.jump_state, int(RewardPhase.FLIGHT)),
+                        torch.where(out.jump_state == int(JumpState.LANDING),
+                                    torch.full_like(out.jump_state, int(RewardPhase.LANDING)),
+                                    torch.full_like(out.jump_state, int(RewardPhase.SETTLING)))))
+        self._reward_phase.copy_(torch.where(
+            out.mode == int(CommandMode.JUMP), jump_phase,
+            torch.where(self._base_command_mode == int(CommandMode.RECOVERY),
+                        torch.full_like(out.mode, int(RewardPhase.RECOVERY)),
+                        torch.full_like(out.mode, int(RewardPhase.SUPPORT)))))
+        self._pending_success_id.copy_(torch.where(
+            out.jump_success, out.jump_request_id,
+            torch.full_like(out.jump_request_id, -1)))
 
 
     def _root_link_position(self):
@@ -407,6 +441,11 @@ class WheeledLabEnv(DirectRLEnv):
         # observation. _sample stays free of GPU ray-hit reductions, which can
         # stall on large rough-terrain batches.
         ground = self._ground_at_root
+        wheels_ground = ground[:, None].expand(-1, 2)
+        origins = self._as_torch(self.scene.env_origins)
+        if self._terrain_course is not None:
+            ground, wheels_ground = self._terrain_course.ground()
+            origins = self._terrain_course.router.origins
         return NativePhysicalSample(
             self._as_torch(data.joint_pos),
             self._as_torch(data.joint_vel),
@@ -417,8 +456,8 @@ class WheeledLabEnv(DirectRLEnv):
             angular_velocity,
             self._contact_force,
             ground,
-            ground[:, None].expand(-1, 2),
-            self._as_torch(self.scene.env_origins),
+            wheels_ground,
+            origins,
             torch.ones(self.num_envs, 2, dtype=torch.float32, device=self._device),
             self._clock(),
         )
@@ -428,7 +467,8 @@ class WheeledLabEnv(DirectRLEnv):
             admitted_body_command=self._command,
             mode=self._command_mode.clone(),
             request_height_m=self._request_height.clone(),
-            command_clock_s=self._clock().to(torch.float32),
+            command_clock_s=(self._terrain_course.tasks.request_clock.clone()
+                             if self._terrain_course is not None else self._clock().to(torch.float32)),
             previous_issued_action=self._previous_action,
         )
 
@@ -504,6 +544,8 @@ class WheeledLabEnv(DirectRLEnv):
             state.height_above_ground_m < self._task.minimum_recovery_height_m,
             terminated,
         )
+        if self._terrain_course is not None:
+            terminated = self._terrain_course.termination(terminated, state, tilt, base_contact)
         self._terminated |= terminated
         self._last_sample = sample
         self._last_state = state
@@ -518,12 +560,20 @@ class WheeledLabEnv(DirectRLEnv):
                     self._as_torch(self.robot.data.joint_pos),
                     self._targets, knee_margin_rad=.05,
                 ).shortfall_rad
-            self._formal_reward.observe(
-                sample, state, effort_nm=self._last_effort, episode_id=self._episode_id,
-                control_epoch=self._control_epoch, command=self._command,
-                mode=self._command_mode, phase=self._reward_phase,
-                joint_boundary_shortfall_rad=boundary,
-            )
+            jump = self._command_mode == int(CommandMode.JUMP)
+            zero = torch.zeros(self.num_envs, dtype=torch.float32, device=self._device)
+            jump_height_world = self._ground_at_root + self._command[:, 3] + self._request_height
+            if self._terrain_course is not None:
+                self._terrain_course.observe_reward(sample, state, boundary)
+            else:
+                self._formal_reward.observe(
+                    sample, state, effort_nm=self._last_effort, episode_id=self._episode_id,
+                    control_epoch=self._control_epoch, command=self._command,
+                    mode=self._command_mode, phase=self._reward_phase,
+                    jump_height_world_z_m=torch.where(jump, jump_height_world, zero),
+                    jump_velocity_world_z_m_s=zero,
+                    joint_boundary_shortfall_rad=boundary,
+                )
         if self._recover_task is not None:
             base_load = sample.terrain_contact_force_world_n[:, self._base_body_index].norm(dim=-1)
             self._recover_task.success_mask(
@@ -570,10 +620,15 @@ class WheeledLabEnv(DirectRLEnv):
         self.episode_length_buf += 1
         self.common_step_counter += 1
         truncated = self.episode_length_buf >= self.max_episode_length - 1
+        if self._terrain_course is not None:
+            truncated |= self._terrain_course.router.observe_end(self._root_link_position(), self._terminated)
         if self._formal_reward is not None:
             self._formal_result = self._formal_reward.finish(
                 terminated=self._terminated, truncated=truncated & ~self._terminated,
+                physical_success_request_id=(self._terrain_course.tasks.success_id
+                                             if self._terrain_course is not None else self._pending_success_id),
             )
+            self._pending_success_id.fill_(-1)
             self._last_reward.copy_(self._formal_result.learning_reward)
             self._reward_terms = self._formal_result.component_densities
             if self._recover_task is not None:
@@ -616,6 +671,7 @@ class WheeledLabEnv(DirectRLEnv):
         self._reward_phase[ids] = 0
         self._recovery_posture[ids] = 0
         self._request_height[ids] = 0
+        self._pending_success_id[ids] = -1
         recover_plan = None
         if self._recover_task is not None:
             self._command[ids].zero_()
@@ -630,8 +686,8 @@ class WheeledLabEnv(DirectRLEnv):
                     or task_sample.command.dtype != torch.float32 or task_sample.command.device != self._device
                     or not torch.isfinite(task_sample.command).all()):
                 raise ValueError("task sampler 必须返回有限 LabTaskSample")
-            if (task_sample.terrain_kind != 0).any() or (task_sample.mode == int(CommandMode.JUMP)).any():
-                raise RuntimeError("LabEnv 尚未安装 terrain/jump FSM 路由")
+            if self._terrain_course is None and (task_sample.terrain_kind != 0).any():
+                raise RuntimeError("LabEnv 尚未安装 terrain FSM 路由")
             self._command[ids] = task_sample.command
             self._request_height[ids] = task_sample.request_height_m
             self._command_mode[ids] = task_sample.mode
@@ -654,6 +710,8 @@ class WheeledLabEnv(DirectRLEnv):
         root_pose[:, 2] = self._task.nominal_height_m
         root_pose[:, 6] = 1.0
         root_pose[:, :3] += self.scene.env_origins.index_select(0, ids)
+        if self._terrain_course is not None:
+            self._terrain_course.place_reset(ids, task_sample, root_pose)
         root_velocity = torch.zeros(count, 6, dtype=torch.float32, device=self._device)
         joint_position = self._as_torch(self.robot.data.default_joint_pos).index_select(0, ids).clone()
         joint_velocity = torch.zeros_like(joint_position)
@@ -669,7 +727,9 @@ class WheeledLabEnv(DirectRLEnv):
                     raise RuntimeError("recovery task 需要已安装的 recovery reset")
                 local = recovery_rows.nonzero(as_tuple=False).flatten()
                 recovery_ids = ids.index_select(0, local)
-                origins = self.scene.env_origins.index_select(0, recovery_ids).detach().cpu().to(torch.float64)
+                all_origins = (self._terrain_course.router.origins if self._terrain_course is not None
+                               else self.scene.env_origins)
+                origins = all_origins.index_select(0, recovery_ids).detach().cpu().to(torch.float64)
                 pose = self._recovery_reset.pose(
                     recovery_ids.cpu(), task_sample.draw.recovery_posture.index_select(0, local).cpu(),
                     torch.zeros(local.numel(), dtype=torch.float64), origins)
@@ -701,6 +761,8 @@ class WheeledLabEnv(DirectRLEnv):
         self._previous_action[ids] = 0.0
         self._before_action[ids] = 0.0
         self._reset_mask[ids] = True
+        if self._terrain_course is not None:
+            self._terrain_course.reset_commands(ids, task_sample)
         if self._formal_reward is not None:
             fresh = ~self._formal_initialized[ids]
             self._episode_id[ids] += 1

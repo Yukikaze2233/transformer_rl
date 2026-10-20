@@ -11,7 +11,8 @@ from transformer_rl.formal.lab_env.formal_curriculum import (
 )
 from transformer_rl.formal.control.observation import CommandMode
 from transformer_rl.formal.tasks.curriculum import (
-    JUMP_BUDGET, JUMP_WEIGHTS, STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS, TaskFamily,
+    COMPLETE_STAGE_BUDGETS, COMPLETE_STAGE_WEIGHTS, JUMP_BUDGET, JUMP_WEIGHTS,
+    STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS, TaskFamily,
 )
 
 
@@ -21,12 +22,13 @@ def all_capabilities():
 
 def test_stage_weights_and_budgets_are_exactly_the_frozen_course():
     plan = FormalPPOPlan()
-    assert plan.stage_budgets == STAGE_BUDGETS
-    assert plan.stage_weights == STAGE_WEIGHTS
-    assert sum(plan.stage_budgets) == 30000
+    assert plan.stage_budgets == COMPLETE_STAGE_BUDGETS
+    assert plan.stage_weights == COMPLETE_STAGE_WEIGHTS
+    assert sum(plan.stage_budgets) == 35000
     assert plan.stage(0)["weights"] == STAGE_WEIGHTS[0]
     assert plan.stage(2)["name"] == "hard"
-    assert plan.jump()["budget"] == 5000
+    assert plan.jump()["name"] == "jump"
+    assert plan.jump()["budget"] == JUMP_BUDGET
 
 
 def test_default_capabilities_refuse_recovery_stage_zero_instead_of_faking_it():

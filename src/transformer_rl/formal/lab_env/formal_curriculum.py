@@ -14,6 +14,7 @@ import torch
 
 from ..control.observation import CommandMode
 from ..tasks.curriculum import (
+    COMPLETE_STAGE_BUDGETS, COMPLETE_STAGE_NAMES, COMPLETE_STAGE_WEIGHTS,
     JUMP_BUDGET, JUMP_WEIGHTS, STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS,
     TOTAL_BUDGET, ContinuousTaskSampler, CurriculumBudget, TaskDomain, TaskDraw,
     TaskFamily,
@@ -59,8 +60,8 @@ class FormalCurriculumCapabilities:
             return self.recovery
         raise ValueError("未声明的任务族")
 
-    def missing(self, stage: int) -> tuple[str, ...]:
-        return tuple(_FAMILY_NAMES[family] for family, weight in enumerate(STAGE_WEIGHTS[stage])
+    def missing(self, stage: int, weights=STAGE_WEIGHTS) -> tuple[str, ...]:
+        return tuple(_FAMILY_NAMES[family] for family, weight in enumerate(weights[stage])
                      if weight > 0 and not self.supports(TaskFamily(family)))
 
     def to_dict(self):
@@ -88,7 +89,7 @@ class FormalTaskCurriculum:
     def __init__(self, num_envs: int, device="cpu", *, seed: int = 0,
                  promotion: str = "exposure",
                  capabilities: FormalCurriculumCapabilities | None = None,
-                 domain: TaskDomain | None = None):
+                 domain: TaskDomain | None = None, include_jump: bool = False):
         if type(num_envs) is not int or num_envs < 1:
             raise ValueError("num_envs 必须是正整数")
         if type(seed) is not int or not 0 <= seed < 2**63:
@@ -107,8 +108,14 @@ class FormalTaskCurriculum:
         self.device = torch.device(device)
         self.capabilities = capabilities
         self.domain = domain
-        self.sampler = ContinuousTaskSampler(seed, device=device, domain=domain)
-        self.budget = CurriculumBudget(promotion=promotion)
+        if type(include_jump) is not bool:
+            raise TypeError('include_jump must be bool')
+        self.include_jump = include_jump
+        self.stage_names = COMPLETE_STAGE_NAMES if include_jump else STAGE_NAMES
+        self.stage_budgets = COMPLETE_STAGE_BUDGETS if include_jump else STAGE_BUDGETS
+        self.stage_weights = COMPLETE_STAGE_WEIGHTS if include_jump else STAGE_WEIGHTS
+        self.sampler = ContinuousTaskSampler(seed, device=device, domain=domain, stage_weights=self.stage_weights)
+        self.budget = CurriculumBudget(promotion=promotion, stage_names=self.stage_names, stage_budgets=self.stage_budgets)
 
     @property
     def stage(self) -> int:
@@ -116,11 +123,11 @@ class FormalTaskCurriculum:
 
     @property
     def stage_name(self) -> str:
-        return STAGE_NAMES[self.stage]
+        return self.stage_names[self.stage]
 
     @property
     def weights(self) -> tuple[float, ...]:
-        return STAGE_WEIGHTS[self.stage]
+        return self.stage_weights[self.stage]
 
     @property
     def status(self) -> str:
@@ -128,16 +135,16 @@ class FormalTaskCurriculum:
 
     def missing_capabilities(self, stage: int | None = None) -> tuple[str, ...]:
         stage = self.stage if stage is None else stage
-        if type(stage) is not int or not 0 <= stage < len(STAGE_NAMES):
+        if type(stage) is not int or not 0 <= stage < len(self.stage_names):
             raise ValueError("stage 超出正式课程范围")
-        return self.capabilities.missing(stage)
+        return self.capabilities.missing(stage, self.stage_weights)
 
     def require_supported(self, stage: int | None = None) -> None:
         stage = self.stage if stage is None else stage
         missing = self.missing_capabilities(stage)
         if missing:
             raise UnsupportedCurriculumTask(
-                f"stage {stage} ({STAGE_NAMES[stage]}) 需要未接入能力: {', '.join(missing)}")
+                f"stage {stage} ({self.stage_names[stage]}) 需要未接入能力: {', '.join(missing)}")
 
     def sample(self, env_ids) -> TaskDraw:
         """为一个 reset 批次采样；不推进 budget，不改变 stage。"""
@@ -161,7 +168,7 @@ class FormalTaskCurriculum:
 
     def state_dict(self):
         return {
-            "format": self._FORMAT,
+            "format": 'lab_formal_curriculum_v2' if self.include_jump else self._FORMAT,
             "num_envs": self.num_envs,
             "promotion": self.budget.promotion,
             "capabilities": self.capabilities.to_dict(),
@@ -173,20 +180,21 @@ class FormalTaskCurriculum:
     def load_state_dict(self, state):
         if (not isinstance(state, dict) or set(state) != {
                 "format", "num_envs", "promotion", "capabilities", "domain", "sampler", "budget"}
-                or state["format"] != self._FORMAT or state["num_envs"] != self.num_envs
+                or state["format"] != ('lab_formal_curriculum_v2' if self.include_jump else self._FORMAT)
+                or state["num_envs"] != self.num_envs
                 or state["promotion"] != self.budget.promotion
                 or state["capabilities"] != self.capabilities.to_dict()
                 or state["domain"] != self.domain):
             raise ValueError("正式课程 checkpoint 的身份/能力/域不一致")
-        sampler = ContinuousTaskSampler(0, device=self.device, domain=self.domain)
-        budget = CurriculumBudget(promotion=self.budget.promotion)
+        sampler = ContinuousTaskSampler(0, device=self.device, domain=self.domain, stage_weights=self.stage_weights)
+        budget = CurriculumBudget(promotion=self.budget.promotion, stage_names=self.stage_names, stage_budgets=self.stage_budgets)
         sampler.load_state_dict(state["sampler"])
         budget.load_state_dict(state["budget"])
         self.sampler, self.budget = sampler, budget
 
     def snapshot(self) -> FormalCurriculumState:
         return FormalCurriculumState(
-            self.stage, self.stage_name, STAGE_BUDGETS[self.stage],
+            self.stage, self.stage_name, self.stage_budgets[self.stage],
             self.budget.consumed[self.stage], self.budget.total_updates,
             tuple(float(value) for value in self.weights), self.status,
         )
@@ -247,7 +255,9 @@ class LabTaskDrawSampler:
         mode = torch.where(recovery, int(CommandMode.RECOVERY),
                            torch.where(request, int(CommandMode.JUMP),
                                        torch.where(terrain, terrain_mode, int(CommandMode.NORMAL))))
-        phase = torch.where(recovery, int(RewardPhase.RECOVERY), int(RewardPhase.SUPPORT))
+        phase = torch.where(
+            recovery, int(RewardPhase.RECOVERY),
+            torch.where(request, int(RewardPhase.TAKEOFF), int(RewardPhase.SUPPORT)))
         request_height = torch.where(request, draw.jump_height_m,
                                      torch.zeros_like(draw.jump_height_m))
         return LabTaskSample(draw, command, request_height, draw.terrain_kind, mode, phase)
@@ -271,19 +281,20 @@ class LabTaskDrawSampler:
 
 @dataclass(frozen=True)
 class FormalPPOPlan:
-    """正式 reward/PPO 课程的超参绑定，不复制 PPO 数学。"""
+    """完整 35k 课程的预算/权重绑定，不复制 PPO 数学。"""
 
     promotion: str = "exposure"
-    stage_budgets: tuple[int, ...] = STAGE_BUDGETS
-    stage_weights: tuple[tuple[float, ...], ...] = STAGE_WEIGHTS
+    stage_budgets: tuple[int, ...] = COMPLETE_STAGE_BUDGETS
+    stage_weights: tuple[tuple[float, ...], ...] = COMPLETE_STAGE_WEIGHTS
 
     def __post_init__(self):
         if self.promotion not in ("exposure", "audited"):
             raise ValueError("promotion 必须是 exposure 或 audited")
-        if tuple(self.stage_budgets) != STAGE_BUDGETS or tuple(self.stage_weights) != STAGE_WEIGHTS:
-            raise ValueError("正式课程预算/权重必须与冻结定义一致")
-        if sum(self.stage_budgets) != TOTAL_BUDGET:
-            raise ValueError(f"正式课程总预算必须是 {TOTAL_BUDGET} updates")
+        if (tuple(self.stage_budgets) != COMPLETE_STAGE_BUDGETS
+                or tuple(self.stage_weights) != COMPLETE_STAGE_WEIGHTS):
+            raise ValueError("正式课程预算/权重必须与冻结的 35k 定义一致")
+        if sum(self.stage_budgets) != sum(COMPLETE_STAGE_BUDGETS):
+            raise ValueError(f"正式课程总预算必须是 {sum(COMPLETE_STAGE_BUDGETS)} updates")
         for index, weights in enumerate(self.stage_weights):
             if (len(weights) != len(TaskFamily) or abs(sum(weights) - 1) > 1e-9
                     or any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
@@ -291,16 +302,18 @@ class FormalPPOPlan:
                 raise ValueError(f"stage {index} 权重必须是有限非负且和为一")
 
     def stage(self, index: int) -> dict:
-        if type(index) is not int or not 0 <= index < len(STAGE_NAMES):
+        if type(index) is not int or not 0 <= index < len(COMPLETE_STAGE_NAMES):
             raise ValueError("stage 超出正式课程范围")
-        return {"index": index, "name": STAGE_NAMES[index],
+        return {"index": index, "name": COMPLETE_STAGE_NAMES[index],
                 "budget": self.stage_budgets[index],
                 "weights": self.stage_weights[index]}
 
     def jump(self) -> dict:
-        """独立的跳跃巩固段；不计入三段主课程预算。"""
-        return {"name": "jump", "budget": JUMP_BUDGET,
-                "weights": JUMP_WEIGHTS, "after_main_budget": TOTAL_BUDGET}
+        """跳跃巩固是第 4 段，继承同一模型和 Adam，不重置。"""
+        index = len(COMPLETE_STAGE_NAMES) - 1
+        return {"index": index, "name": COMPLETE_STAGE_NAMES[index],
+                "budget": COMPLETE_STAGE_BUDGETS[index],
+                "weights": COMPLETE_STAGE_WEIGHTS[index]}
 
 
 __all__ = [
