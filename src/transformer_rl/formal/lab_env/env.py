@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+import os
 import time
 
 import torch
@@ -28,6 +29,7 @@ from .contract import ACTION_DIM, CRITIC182_DIM, FlatTaskSpec, flat_reward, flat
 from .formal_curriculum import LabTaskSample
 from .formal_reward import FormalRewardConfig, LabFormalReward
 from .critic_features import TERRAIN_SCAN_DIM, environment_features_182
+from .warp_scan import miss_histograms
 from .forward_scan import ForwardStepDetector
 from .skill_fsm import JumpState, SkillFSM
 from ..tasks.reward import RewardPhase
@@ -45,6 +47,7 @@ class WheeledLabEnv(DirectRLEnv):
     cfg: WheeledLabEnvCfg
 
     def __init__(self, cfg: WheeledLabEnvCfg, render_mode: str | None = None, **kwargs):
+        self._scan_debug = os.environ.get("LAB_SCAN_DEBUG") == "1"
         super().__init__(cfg, render_mode, **kwargs)
         if self._collision_isolation is not None:
             self._collision_isolation.finish_warmup()
@@ -231,7 +234,6 @@ class WheeledLabEnv(DirectRLEnv):
     def contact_mapping_receipt(self):
         return dict(self._contact_mapping_receipt)
 
-
     def _contact_mapping(self):
         source, target, required = contact_body_mapping(
             self._binding.native_body_names, self.contact_sensor.body_names,
@@ -245,7 +247,6 @@ class WheeledLabEnv(DirectRLEnv):
         }
         return (torch.tensor(source, dtype=torch.long, device=self._device),
                 torch.tensor(target, dtype=torch.long, device=self._device))
-
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
@@ -266,6 +267,15 @@ class WheeledLabEnv(DirectRLEnv):
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
         self.terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+        if self._scan_debug:
+            print("TERRAIN cfg", self.cfg.terrain.terrain_type,
+                  getattr(self.cfg.terrain, "use_terrain_origins", None), flush=True)
+            to = getattr(self.terrain, "terrain_origins", None)
+            print("TERRAIN origins", None if to is None else tuple(to.shape),
+                  None if to is None else (to.reshape(-1, 3).min(0).values.tolist(),
+                                           to.reshape(-1, 3).max(0).values.tolist()), flush=True)
+            eo = self.terrain.env_origins
+            print("TERRAIN env origins", eo.min(0).values.tolist(), eo.max(0).values.tolist(), flush=True)
         self._collision_isolation = isolate_scene(self.scene)
         self.scene.clone_environments(copy_from_source=False)
         self._collision_group_receipt = author_shared_ground_groups(self.scene)
@@ -323,12 +333,19 @@ class WheeledLabEnv(DirectRLEnv):
                 or hits.shape[1] != TERRAIN_SCAN_DIM or hits.shape[-1] != 3):
             raise ValueError(f"terrain scanner 需要 [N,{TERRAIN_SCAN_DIM},3] hits")
         root_z = self._root_link_position()[:, 2]
+        if self._scan_debug:
+            print("SCAN before warp miss_count", flush=True)
+        per_env, per_point = miss_histograms(hits, root_z, self._task.nominal_height_m)
+        misses = int(per_env.sum().item())
+        if self._scan_debug:
+            bad = (per_env > 0).nonzero().flatten()
+            print("SCAN miss envs", bad.numel(), bad[:20].tolist(),
+                  "env_counts", per_env[bad[:20]].tolist(), flush=True)
+            print("SCAN miss points", per_point.tolist(), flush=True)
+        if misses:
+            raise ValueError(f"terrain scanner 有 {misses} 个未命中")
         center = hits[:, hits.shape[1] // 2, 2]
         height = root_z[:, None] - hits[..., 2] - self._task.nominal_height_m
-        finite = torch.isfinite(height)
-        if not finite.all():
-            count = int((~finite).sum())
-            raise ValueError(f"terrain scanner 有 {count} 个未命中")
         return (5 * height).clamp(-1, 1), center
 
     def _wheel_velocity_body(self):
@@ -698,7 +715,11 @@ class WheeledLabEnv(DirectRLEnv):
         ids = torch.as_tensor(env_ids, dtype=torch.long, device=self._device)
         if ids.numel() == 0:
             return
+        if self._scan_debug:
+            print("RESET enter", ids.numel(), flush=True)
         super()._reset_idx(ids)
+        if self._scan_debug:
+            print("RESET after super", flush=True)
         count = ids.numel()
         task_sample = None
         self._command_mode[ids] = int(CommandMode.NORMAL)
@@ -778,6 +799,8 @@ class WheeledLabEnv(DirectRLEnv):
         self.scene.write_data_to_sim()
         self.sim.forward()
         self.scene.update(dt=0.0)
+        if self._scan_debug:
+            print("RESET after scene.update", flush=True)
         if self._control.drive is not None:
             mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
             mask[ids] = True
@@ -819,13 +842,21 @@ class WheeledLabEnv(DirectRLEnv):
         )
 
     def _get_observations(self):
+        if self._scan_debug:
+            print("OBS enter", flush=True)
         sample = self._sample()
+        if self._scan_debug:
+            print("OBS after sample", flush=True)
         state = self._observations.assembler.measure(sample)
+        if self._scan_debug:
+            print("OBS after measure", flush=True)
         commands = self._commands()
         sensors = self._observations.assembler.clean_sensors(state)
         actor, _ = self._observations.append(
             sample, commands, sensors, self._reset_mask, measured=state,
         )
+        if self._scan_debug:
+            print("OBS after append", flush=True)
         reset = self._reset_mask
         acceleration = torch.where(reset[:, None], torch.zeros_like(self._last_joint_acceleration),
                                   self._last_joint_acceleration)

@@ -7,6 +7,7 @@ PPO/auxiliary 数学复用 StructuredPPOTrainer。这里的 lab_ppo_v1 端点不
 from __future__ import annotations
 
 import argparse
+import traceback
 from dataclasses import asdict
 import json
 import os
@@ -79,7 +80,7 @@ def _parse_args(argv=None):
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--num-envs", type=int, default=8192)
     parser.add_argument("--rollout-steps", type=int, default=48)
-    parser.add_argument("--env-spacing", type=float, default=4.0)
+    parser.add_argument("--env-spacing", type=float, default=None)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--stage", type=int, default=None, choices=range(4),
@@ -110,6 +111,10 @@ def _parse_args(argv=None):
     parser.add_argument('--terrain-atlas', type=Path, help='Prepared terrain atlas manifest; never a raw source USD')
     parser.add_argument('--profile-collection', action='store_true',
                         help='Diagnostic GPU fences and per-stage collection logs; disabled by default')
+    parser.add_argument('--diagnostic-stage', type=int, choices=range(4),
+                        help='Validation-only fresh stage override; requires --diagnostic-only')
+    parser.add_argument('--diagnostic-only', action='store_true',
+                        help='Allow a non-production curriculum stage smoke')
     return parser.parse_args(argv)
 
 
@@ -122,6 +127,8 @@ def main(argv=None):
         raise ValueError('--terrain-atlas requires --terrain-profile course')
     if args.updates < 1 or args.num_envs < 1 or args.rollout_steps < 1 or args.checkpoint_interval < 1:
         raise ValueError("updates/num_envs/rollout_steps/checkpoint_interval 必须为正")
+    if args.env_spacing is None:
+        args.env_spacing = 1.0 if args.terrain_profile in ("rough", "course") else 4.0
     if "cuda" in args.device and "/usr/lib/wsl/lib" not in os.environ.get("LD_LIBRARY_PATH", ""):
         print("WARN: LD_LIBRARY_PATH 不含 /usr/lib/wsl/lib，PhysX 可能回退 CPU", flush=True)
     if args.formal_curriculum:
@@ -137,6 +144,10 @@ def main(argv=None):
         raise ValueError("M1 command 课程只有 stage 0-3；完整课程请用 --formal-curriculum")
     if args.formal_curriculum and args.stage not in (None, 0) and args.resume is None:
         raise ValueError("正式课程 fresh run 必须从 stage 0 开始；跨 stage 恢复请用 --resume")
+    if args.diagnostic_stage is not None and not args.diagnostic_only:
+        raise ValueError('--diagnostic-stage requires --diagnostic-only')
+    if args.diagnostic_only and args.diagnostic_stage is None:
+        raise ValueError('--diagnostic-only requires an explicit --diagnostic-stage')
 
     from isaaclab.app import AppLauncher
     launcher = AppLauncher(headless=True, device=args.device, enable_cameras=False, livestream=0)
@@ -251,9 +262,17 @@ def main(argv=None):
             gpu_found_lost_pairs_capacity=2**22,
             gpu_found_lost_aggregate_pairs_capacity=2**25,
             gpu_total_aggregate_pairs_capacity=2**22,
+            # Shared articulated robots need substantially more narrowphase
+            # capacity than IsaacLab's single-environment default.
+            gpu_max_rigid_contact_count=2**24,
+            gpu_max_rigid_patch_count=2**22,
         )
+        if os.environ.get("LAB_SCAN_DEBUG") == "1":
+            print("TRAIN before env construct", flush=True)
         env = WheeledLabEnv(cfg)
         health.check()
+        if os.environ.get("LAB_SCAN_DEBUG") == "1":
+            print("TRAIN after env construct", flush=True)
         formal_task_sampler = None
         if args.recover:
             stage = 0
@@ -265,6 +284,15 @@ def main(argv=None):
                 promotion="exposure", capabilities=capabilities,
                 include_jump=args.include_jump,
             )
+            if args.diagnostic_stage is not None:
+                if args.resume is not None:
+                    raise ValueError('diagnostic stage cannot be combined with resume')
+                target = args.diagnostic_stage
+                formal_curriculum.budget.stage = target
+                formal_curriculum.budget.consumed = [
+                    formal_curriculum.stage_budgets[index] if index < target else 0
+                    for index in range(len(formal_curriculum.stage_names))]
+                formal_curriculum.budget.status = 'running'
             # Fail before spending warmup when a later stage is not wired.
             for index in range(1, len(formal_curriculum.stage_names)):
                 formal_curriculum.require_supported(index)
@@ -281,6 +309,8 @@ def main(argv=None):
                 args.num_envs, device=args.device, stage=stage, seed=args.seed)
             env.set_command_sampler(command_curriculum.sample)
         collector = LabCollector(LabLabeledEnv(env), model, profile=args.profile_collection)
+        if os.environ.get("LAB_SCAN_DEBUG") == "1":
+            print("TRAIN before collector reset", flush=True)
         if args.resume is not None and env._terrain_course is not None:
             if payload.get('terrain_course') is None or payload.get('global_rng') is None:
                 raise ValueError('course resume requires terrain/request state and global RNG; no implicit migration')
@@ -318,7 +348,6 @@ def main(argv=None):
                 "optimization_s": updated - collected,
                 "stage": stage,
                 "formal_reward": args.formal_reward,
-                "recover": args.recover,
                 "recover": args.recover,
                 "collector": collector.last_metrics,
                 "ppo": update_metrics,
@@ -367,6 +396,7 @@ def main(argv=None):
                         None if env._formal_reward is None else list(env._formal_reward.config.available_terms)),
                     'formal_reward_missing_terms': ({} if env._formal_reward is None
                                                     else env._formal_reward.missing_term_reasons),
+                    "contact_mapping": getattr(env, 'contact_mapping_receipt', None),
                     "asset_manifest_sha256": cfg.asset_manifest_sha256,
                     "response_source_sha256": runtime["response_source_pin"]["sha256"],
                 }, temporary)
@@ -374,6 +404,17 @@ def main(argv=None):
                 (args.output / "latest.txt").write_text(checkpoint.name)
         env.close()
         print("LAB PPO done", flush=True)
+    except BaseException as error:
+        failure = args.output / "failure.json"
+        failure.parent.mkdir(parents=True, exist_ok=True)
+        failure.write_text(json.dumps({
+            "format": "lab_ppo_failure_v1",
+            "type": type(error).__name__,
+            "message": str(error),
+            "traceback": traceback.format_exc(),
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print("LAB PPO failure", type(error).__name__, str(error), flush=True)
+        raise
     finally:
         try:
             if health is not None:
