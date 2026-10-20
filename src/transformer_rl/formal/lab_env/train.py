@@ -61,6 +61,9 @@ def _parse_args(argv=None):
                         help="使用华南虎式 recover task：随机翻倒 reset + action hold + 5s episode")
     parser.add_argument("--recover-hold-s", type=float, default=.5)
     parser.add_argument("--recover-height", type=float, default=.25)
+    parser.add_argument("--height-scanner", action="store_true",
+                        help="启用 base_link 地面 raycast；terrain/正式任务建议开启")
+    parser.add_argument("--terrain-profile", choices=("plane", "rough"), default="plane")
     return parser.parse_args(argv)
 
 
@@ -178,6 +181,8 @@ def main(argv=None):
         cfg = build_env_cfg(asset, num_envs=args.num_envs, env_spacing_m=args.env_spacing,
                             device=args.device, response=response, pair_domain=pair,
                             formal_reward=formal_reward, recover=recover_spec,
+                            height_scanner=args.height_scanner,
+                            terrain_profile=args.terrain_profile,
                             expected_manifest_sha256=expected_asset)
         cfg.sim.enable_scene_query_support = True
         cfg.sim.physics = PhysxCfg(

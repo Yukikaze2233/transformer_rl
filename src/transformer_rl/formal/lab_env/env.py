@@ -15,7 +15,7 @@ import torch
 
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
-from isaaclab.sensors import ContactSensor
+from isaaclab.sensors import ContactSensor, RayCaster
 import isaaclab.sim as sim_utils
 
 from ..control.joints import LegBoundaryGeometry
@@ -193,6 +193,10 @@ class WheeledLabEnv(DirectRLEnv):
         self.scene.articulations["robot"] = self.robot
         self.contact_sensor = ContactSensor(self.cfg.contact_sensor)
         self.scene.sensors["contact_sensor"] = self.contact_sensor
+        self.height_scanner = None
+        if self.cfg.height_scanner is not None:
+            self.height_scanner = RayCaster(self.cfg.height_scanner)
+            self.scene.sensors["height_scanner"] = self.height_scanner
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
         self.terrain = self.cfg.terrain.class_type(self.cfg.terrain)
@@ -242,7 +246,15 @@ class WheeledLabEnv(DirectRLEnv):
         if com_velocity.shape[-1] == 6:
             com_velocity = com_velocity[..., :3]
         angular_velocity = self._as_torch(getattr(data, "root_ang_vel_w", data.root_ang_vel_b))
-        ground = torch.zeros(self.num_envs, dtype=torch.float32, device=self._device)
+        if self.height_scanner is not None:
+            hits = self._as_torch(self.height_scanner.data.ray_hits_w)
+            if (hits.ndim != 3 or hits.shape[0] != self.num_envs
+                    or hits.shape[-1] != 3 or hits.shape[1] < 1
+                    or not torch.isfinite(hits[:, 0]).all()):
+                raise ValueError("height scanner 未返回有限 [N,Q,3] ray hits")
+            ground = hits[:, 0, 2]
+        else:
+            ground = torch.zeros(self.num_envs, dtype=torch.float32, device=self._device)
         return NativePhysicalSample(
             self._as_torch(data.joint_pos),
             self._as_torch(data.joint_vel),

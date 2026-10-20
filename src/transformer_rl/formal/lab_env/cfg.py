@@ -20,9 +20,13 @@ from isaaclab.actuators import IdealPDActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.sim import SimulationCfg
-from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.terrains import (
+    HfPyramidSlopedTerrainCfg, HfPyramidStairsTerrainCfg,
+    HfRandomUniformTerrainCfg, MeshPlaneTerrainCfg, TerrainGeneratorCfg,
+    TerrainImporterCfg,
+)
 from isaaclab.utils.configclass import configclass
 import isaaclab.sim as sim_utils
 
@@ -125,7 +129,47 @@ def build_contact_sensor_cfg() -> ContactSensorCfg:
     )
 
 
-def build_terrain_cfg() -> TerrainImporterCfg:
+def build_height_scanner_cfg() -> RayCasterCfg:
+    """机体 base_link 正上方的地面高度射线；平地/terrain 共用。"""
+    return RayCasterCfg(
+        prim_path="/World/envs/env_.*/Robot/base_link",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 5.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.05, 0.05)),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )
+
+
+def build_terrain_cfg(profile: str = "plane") -> TerrainImporterCfg:
+    if profile not in ("plane", "rough"):
+        raise ValueError("terrain profile 只支持 plane/rough")
+    if profile == "rough":
+        generator = TerrainGeneratorCfg(
+            size=(8.0, 8.0), border_width=20.0, num_rows=4, num_cols=4,
+            horizontal_scale=0.1, vertical_scale=0.005, slope_threshold=0.75,
+            difficulty_range=(0.0, 1.0), use_cache=False,
+            sub_terrains={
+                "flat": MeshPlaneTerrainCfg(proportion=0.25),
+                "rough": HfRandomUniformTerrainCfg(
+                    proportion=0.35, noise_range=(0.01, 0.04), noise_step=0.01,
+                    border_width=0.25),
+                "slope": HfPyramidSlopedTerrainCfg(
+                    proportion=0.2, slope_range=(0.0, 0.35), platform_width=1.0,
+                    border_width=0.25),
+                "stairs": HfPyramidStairsTerrainCfg(
+                    proportion=0.2, step_height_range=(0.05, 0.14),
+                    step_width=0.3, platform_width=1.0, border_width=0.25),
+            },
+        )
+        return TerrainImporterCfg(
+            prim_path="/World/ground", terrain_type="generator",
+            terrain_generator=generator, collision_group=-1,
+            physics_material=sim_utils.RigidBodyMaterialCfg(
+                friction_combine_mode="multiply", restitution_combine_mode="multiply",
+                static_friction=1.0, dynamic_friction=1.0, restitution=0.0),
+            debug_vis=False,
+        )
     return TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="plane",
@@ -172,6 +216,7 @@ class WheeledLabEnvCfg(DirectRLEnvCfg):
     terrain: TerrainImporterCfg = field(default_factory=build_terrain_cfg)
     robot_cfg: ArticulationCfg = MISSING
     contact_sensor: ContactSensorCfg = field(default_factory=build_contact_sensor_cfg)
+    height_scanner: RayCasterCfg | None = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -195,6 +240,8 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
                   task: FlatTaskSpec | None = None,
                   formal_reward: FormalRewardConfig | None = None,
                   recover: RecoverTaskSpec | None = None,
+                  height_scanner: bool = False,
+                  terrain_profile: str = "plane",
                   seed: int | None = 0,
                   expected_manifest_sha256: str | None = None) -> WheeledLabEnvCfg:
     """从资产目录构造可直接交给 WheeledLabEnv 的配置。"""
@@ -222,5 +269,6 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
         cfg.episode_length_s = recover.episode_length_s
     cfg.robot_cfg = build_robot_cfg(asset, response=response)
     cfg.contact_sensor = build_contact_sensor_cfg()
-    cfg.terrain = build_terrain_cfg()
+    cfg.height_scanner = build_height_scanner_cfg() if height_scanner else None
+    cfg.terrain = build_terrain_cfg(terrain_profile)
     return cfg
