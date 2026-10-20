@@ -39,9 +39,27 @@ def test_native_ids_cover_source_and_all_8191_replicas():
     native.attached(37)
     assert native.calls == [(37, '/World/envs/env_0/Robot', 8191,
                              {'useEnvIds': True, 'useFabricForReplication': False})]
-    assert native.removed == [37]
+    assert native.removed == []
     binding.require_applied()
     assert binding.receipt['replicated_environments'] == 8191
+    binding.finish_warmup()
+    assert native.removed == [37]
+    assert not binding.receipt['registration_active']
+
+
+def test_each_native_attach_is_isolated_until_warmup_finishes():
+    binding = HomogeneousCloneIsolation(8192)
+    native = Replicator()
+    binding._register(native, 37, '/World/envs/env_0', '/World/envs/env_{}', use_fabric=False)
+    native.attached(37)
+    native.attached(37)
+    assert len(native.calls) == 2
+    assert all(call[3]['useEnvIds'] for call in native.calls)
+    assert native.removed == []
+    assert binding.receipt['attach_calls'] == 2
+    binding.finish_warmup()
+    binding.finish_warmup()
+    assert native.removed == [37]
 
 
 def test_failed_native_replication_is_not_published_as_isolated():

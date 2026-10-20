@@ -16,10 +16,13 @@ class HomogeneousCloneIsolation:
         if type(num_envs) is not int or num_envs < 1:
             raise ValueError('collision isolation requires a positive environment count')
         self.num_envs = num_envs
+        self._replicator = None
+        self._stage_id = None
         self._receipt = {
             'method': 'physx_homogeneous_env_ids', 'environments': num_envs,
             'registered': False, 'applied': num_envs == 1,
             'replicated_environments': 0, 'use_env_ids': num_envs > 1,
+            'registration_active': False, 'attach_calls': 0,
         }
 
     def replicate(self, stage, sources, destinations, env_ids, mapping,
@@ -72,11 +75,16 @@ class HomogeneousCloneIsolation:
                 if result is False:
                     raise RuntimeError('native Env ID replication was rejected')
                 self._receipt.update(applied=True,
-                                     replicated_environments=self.num_envs - 1)
-            finally:
+                                     replicated_environments=self.num_envs - 1,
+                                     attach_calls=self._receipt['attach_calls'] + 1)
+            except BaseException:
                 replicator.unregister_replicator(stage_id)
+                self._receipt.update(registration_active=False, applied=False)
+                raise
 
-        self._receipt.update(registered=True, source=source, destination=destination)
+        self._replicator, self._stage_id = replicator, stage_id
+        self._receipt.update(registered=True, registration_active=True,
+                             source=source, destination=destination)
         replicator.register_replicator(
             stage_id, exclude_environments, replicate_after_attach, renamed_path)
 
@@ -87,6 +95,18 @@ class HomogeneousCloneIsolation:
     def require_applied(self):
         if not self._receipt['applied']:
             raise RuntimeError('native Env ID isolation has not been applied')
+
+    def finish_warmup(self):
+        """Keep the callback across attach and force-load, then release it.
+
+        The native GPU initialization attaches the stage before force-loading
+        physics. Removing the callback inside its first attach notification can
+        leave a later load without the environment-ID replication contract.
+        """
+        self.require_applied()
+        if self._receipt['registration_active']:
+            self._replicator.unregister_replicator(self._stage_id)
+            self._receipt['registration_active'] = False
 
 
 def isolate_scene(scene):

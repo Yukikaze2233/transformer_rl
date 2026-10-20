@@ -46,7 +46,7 @@ class WheeledLabEnv(DirectRLEnv):
     def __init__(self, cfg: WheeledLabEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
         if self._collision_isolation is not None:
-            self._collision_isolation.require_applied()
+            self._collision_isolation.finish_warmup()
         self._task = getattr(cfg, "task_spec", FlatTaskSpec())
         if not isinstance(self._task, FlatTaskSpec):
             raise TypeError("cfg.task_spec 必须是 FlatTaskSpec")

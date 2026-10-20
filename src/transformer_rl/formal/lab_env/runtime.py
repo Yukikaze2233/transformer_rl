@@ -129,6 +129,7 @@ def runtime(recipe, components, configuration, *, control):
         cfg.sim.physics = PhysxCfg(enable_external_forces_every_iteration=True,
                                   enable_scene_query_support=True, **configuration['physics'])
         env = WheeledLabEnv(cfg)
+        health.check()
         value = ManagedLabRuntime(env, recipe, components, identity,
                                   profile=configuration['profile_collection'], physics_health=health)
         health.check()

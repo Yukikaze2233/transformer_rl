@@ -253,6 +253,7 @@ def main(argv=None):
             gpu_total_aggregate_pairs_capacity=2**22,
         )
         env = WheeledLabEnv(cfg)
+        health.check()
         formal_task_sampler = None
         if args.recover:
             stage = 0
