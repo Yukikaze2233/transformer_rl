@@ -139,17 +139,21 @@ class SensorModel:
             raise ValueError('sensor read requires the latest actual post-reset physical sample')
         if self._sample_tick == self.physical_tick:
             return self._owned(self._sample)
-        # 只选本回合已写入的槽，不复制reset投影来伪造更老的传感器样本。
-        lags = torch.minimum(self.lags, (self.count - 1)[:, None])
-        slots = (self.physical_tick - lags) % self.capacity
-        values = self.values[slots[:, self._groups], self._rows[:, None], self._columns[None]]
-        stamps = self.times[slots, self._rows[:, None]]
-        noise = torch.rand(values.shape, generator=self.generator, device=self.device).mul_(2).sub_(1)
-        values = values + noise * self._halfwidth * ~self.nominal[:, None]
+        self._sample = self._read_rows(self._rows, self.generator)
         self.noise_rows_consumed += self.num_envs
-        self._sample = SensorSample(values[:, :6], values[:, 6:12], values[:, 12:15], values[:, 15:18], stamps)
         self._sample_tick = self.physical_tick
         return self._owned(self._sample)
+
+    def _read_rows(self, rows, generator):
+        """Read initialized ring rows; the caller owns the RNG and cache lifetime."""
+        # 只选本回合已写入的槽，不复制reset投影来伪造更老的传感器样本。
+        lags = torch.minimum(self.lags[rows], (self.count[rows] - 1)[:, None])
+        slots = (self.physical_tick - lags) % self.capacity
+        values = self.values[slots[:, self._groups], rows[:, None], self._columns[None]]
+        stamps = self.times[slots, rows[:, None]]
+        noise = torch.rand(values.shape, generator=generator, device=self.device).mul_(2).sub_(1)
+        values = values + noise * self._halfwidth * ~self.nominal[rows, None]
+        return SensorSample(values[:, :6], values[:, 6:12], values[:, 12:15], values[:, 15:18], stamps)
 
     def checkpoint_state_dict(self):
         return {'config': asdict(self.config), 'seed': self.seed, 'num_envs': self.num_envs,
@@ -159,7 +163,7 @@ class SensorModel:
                 'cold_disposition': 'flush physical sensor cache; retain RNG; redraw new physical episodes'}
 
     def load_after_explicit_cold_setup(self, state):
-        expected = self.checkpoint_state_dict()
+        expected = SensorModel.checkpoint_state_dict(self)
         if (not isinstance(state, dict) or state.keys() != expected.keys()
                 or any(state[key] != expected[key] for key in ('seed', 'num_envs', 'cold_disposition'))
                 or not isinstance(state['config'], dict) or state['config'].keys() != expected['config'].keys()
