@@ -16,6 +16,8 @@ from .formal_reward import FormalRewardConfig
 from .recover import RecoverTaskSpec
 from .settings import AssetDescription, load_asset_description
 
+STEP_PLATFORM_DEPTH_M = 0.80
+
 from isaaclab.actuators import IdealPDActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
@@ -159,7 +161,7 @@ def build_terrain_cfg(profile: str = "plane") -> TerrainImporterCfg:
                     border_width=0.25),
                 "stairs": HfPyramidStairsTerrainCfg(
                     proportion=0.2, step_height_range=(0.05, 0.14),
-                    step_width=0.3, platform_width=1.0, border_width=0.25),
+                    step_width=STEP_PLATFORM_DEPTH_M, platform_width=1.0, border_width=0.25),
             },
         )
         return TerrainImporterCfg(
