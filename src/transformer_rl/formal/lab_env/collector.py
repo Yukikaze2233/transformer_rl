@@ -76,12 +76,13 @@ class LabCollector:
 
         for step in range(steps):
             current = self._current
-            mean, _, _ = self.model.actor.policy.outputs(self._history)
+            mean, raw_state, _ = self.model.actor.policy.outputs(self._history)
             log_std = self.model.actor.log_std.clamp(-4.0, 1.0).expand_as(mean)
             raw_action = Normal(mean, log_std.exp(), validate_args=False).sample()
             evaluation = self.model.actor._evaluation(mean, self.model.actor.log_std, raw_action)
             issued = raw_action.clamp(-self.bounds, self.bounds)
-            old_value = self.model.critic(current.critic)
+            old_critic = self.model.critic_features(current.critic, raw_state)
+            old_value = self.model.critic(old_critic)
             self.attempted_vector_steps += 1
             returned = self.env.step(issued, None)
             self.returned_vector_steps += 1
@@ -90,6 +91,14 @@ class LabCollector:
 
             next_observation = returned.observation
             final = returned.final_labels
+            history_before = self._history
+            reset_before = ((next_observation.episode_id != current.episode_id)
+                            | (next_observation.control_epoch != current.control_epoch))
+            next_history = torch.cat((history_before[:, 1:],
+                                      next_observation.frame[:, None]), 1)
+            next_history[reset_before] = next_observation.frame[reset_before, None].expand(
+                -1, self.history_length, -1)
+            _, next_raw_state, _ = self.model.actor.policy.outputs(next_history)
             same_final_epoch = ((final.episode_id == current.episode_id)
                                 & (final.control_epoch == current.control_epoch))
             rollout_end = torch.full_like(returned.terminated, step == steps - 1)
@@ -107,14 +116,24 @@ class LabCollector:
             next_value = torch.zeros_like(old_value)
             ordinary = (masks.bootstrap & ~returned.truncated).nonzero().flatten()
             if ordinary.numel():
-                next_value[ordinary] = self.model.critic(next_observation.critic[ordinary])
+                next_value[ordinary] = self.model.critic(self.model.critic_features(
+                    next_observation.critic[ordinary], next_raw_state[ordinary]))
             timeout = (masks.bootstrap & returned.truncated).nonzero().flatten()
             if timeout.numel():
-                next_value[timeout] = self.model.critic(returned.final_critic[timeout])
+                terminal_frame = (returned.terminal_frame
+                                  if returned.terminal_frame is not None
+                                  else next_observation.frame)
+                terminal_history = torch.cat((history_before[:, 1:],
+                                              terminal_frame[:, None]), 1)
+                _, terminal_raw_state, _ = self.model.actor.policy.outputs(
+                    terminal_history.index_select(0, timeout))
+                final_critic = self.model.critic_features(
+                    returned.final_critic.index_select(0, timeout), terminal_raw_state)
+                next_value[timeout] = self.model.critic(final_critic)
 
             values = {
                 "frame": current.frame,
-                "critic": current.critic,
+                "critic": old_critic,
                 "raw": raw_action,
                 "issued": issued,
                 "mean": mean,
@@ -138,11 +157,7 @@ class LabCollector:
             outcomes += torch.stack((returned.terminated.sum(),
                                      (returned.truncated & ~returned.terminated).sum()))
 
-            reset_before = ((next_observation.episode_id != current.episode_id)
-                            | (next_observation.control_epoch != current.control_epoch))
-            self._history[:, :-1] = self._history[:, 1:].clone()
-            self._history[:, -1] = next_observation.frame
-            self._history[reset_before] = next_observation.frame[reset_before, None]
+            self._history = next_history
             self._current = next_observation
 
         masks = BoundaryMasks(*(mask_records[field.name] for field in fields(BoundaryMasks)))

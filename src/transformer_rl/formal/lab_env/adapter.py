@@ -44,7 +44,7 @@ class LabLabeledEnv:
         sample = self.env._sample()
         return self.env._observations.assembler.measure(sample), sample
 
-    def _labels(self, state, timestamp):
+    def _labels(self, state, timestamp, *, episode_id=None, control_epoch=None):
         force = state.wheel_ground_force_n
         contact = (force > self.contact_threshold_n).to(torch.float32)
         valid = (torch.isfinite(state.velocity_origin_body_m_s).all(-1)
@@ -55,8 +55,8 @@ class LabLabeledEnv:
             joint_velocity_rad_s=state.policy_velocity_rad_s.clone(),
             valid=valid,
             timestamp_s=timestamp.clone(),
-            episode_id=self._episode_id.clone(),
-            control_epoch=self._control_epoch.clone(),
+            episode_id=(self._episode_id.clone() if episode_id is None else episode_id.clone()),
+            control_epoch=(self._control_epoch.clone() if control_epoch is None else control_epoch.clone()),
         )
 
     def _observation(self, state, timestamp):
@@ -65,6 +65,8 @@ class LabLabeledEnv:
             raise RuntimeError("WheeledLabEnv 尚未产生 obs_buf")
         frame = obs["policy"].reshape(self.num_envs, 5, 35)[:, -1].clone()
         critic = obs["critic"].clone()
+        if critic.shape != (self.num_envs, 182):
+            raise ValueError("WheeledLabEnv critic 必须是 182D 环境块")
         return LabeledObservation(
             frame=frame,
             critic=critic,
@@ -90,22 +92,30 @@ class LabLabeledEnv:
         obs, reward, terminated, truncated, extras = self.env.step(issued_action)
         self.last_timing = dict(extras.get("timing", {}))
         self.last_counts = {}
-        final_state, _ = self._sample_state()
-        final_time = self.env._clock()
-        final_labels = self._labels(final_state, final_time)
+        final_state = self.env._terminal_state
+        final_sample = self.env._terminal_sample
+        if final_state is None or final_sample is None or self.env._terminal_critic_182 is None:
+            raise RuntimeError("WheeledLabEnv 未保存 PRE-reset 终态")
+        final_time = final_state.timestamp_s
+        final_episode = self._episode_id.clone()
+        final_control = self._control_epoch.clone()
+        final_labels = self._labels(final_state, final_time,
+                                    episode_id=final_episode, control_epoch=final_control)
         done = terminated | truncated
         self._episode_id.add_(done.long())
         self._control_epoch.add_(done.long())
         next_state, _ = self._sample_state()
-        next_observation = self._observation(next_state, final_time)
+        next_observation = self._observation(next_state, self.env._clock())
+        final_critic = self.env._terminal_critic_182.clone()
         return LabeledStep(
             observation=next_observation,
             reward=reward,
             terminated=terminated,
             truncated=truncated,
-            final_critic=next_observation.critic.clone(),
-            final_critic_valid=torch.isfinite(next_observation.critic).all(-1),
+            final_critic=final_critic,
+            final_critic_valid=torch.isfinite(final_critic).all(-1),
             final_labels=final_labels,
             fully_policy_owned=torch.ones(self.num_envs, dtype=torch.bool, device=self.device),
             handoff_after=torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+            terminal_frame=self.env._terminal_frame.clone(),
         )

@@ -23,9 +23,10 @@ from ..control.observation import CommandFeatures, CommandMode, MechanicalBindin
 from ..control.pressure import NativeSliderPressure, PressureParameters
 from .actuator import WheeledControlCore
 from .cfg import WheeledLabEnvCfg
-from .contract import ACTION_DIM, FlatTaskSpec, flat_reward, flat_termination
+from .contract import ACTION_DIM, CRITIC182_DIM, FlatTaskSpec, flat_reward, flat_termination
 from .formal_curriculum import LabTaskSample
 from .formal_reward import FormalRewardConfig, LabFormalReward
+from .critic_features import TERRAIN_SCAN_DIM, environment_features_182
 from .forward_scan import ForwardStepDetector
 from .skill_fsm import SkillFSM
 from ..tasks.reward import RewardPhase
@@ -81,6 +82,18 @@ class WheeledLabEnv(DirectRLEnv):
             self._binding.nominal_policy_position_rad, self.num_envs,
             response=response, pair_domain=pair_domain, device=str(self._device),
         )
+        self._stiffness = self._control.controller.stiffness
+        self._damping = self._control.controller.damping
+        self._last_wheel_velocity_body = torch.zeros(self.num_envs, 6,
+                                                     dtype=torch.float32, device=self._device)
+        self._last_joint_acceleration = torch.zeros(self.num_envs, 6,
+                                                    dtype=torch.float32, device=self._device)
+        self._last_policy_velocity = torch.zeros(self.num_envs, 6,
+                                                 dtype=torch.float32, device=self._device)
+        self._terminal_state = None
+        self._terminal_sample = None
+        self._terminal_frame = None
+        self._terminal_critic_182 = None
         self._pressure = self._build_pressure()
         self._observations = LabObservationBuilder(self._binding, self.num_envs,
                                                    device=self._device,
@@ -208,6 +221,10 @@ class WheeledLabEnv(DirectRLEnv):
         if self.cfg.height_scanner is not None:
             self.height_scanner = RayCaster(self.cfg.height_scanner)
             self.scene.sensors["height_scanner"] = self.height_scanner
+        self.terrain_scanner = None
+        if self.cfg.terrain_scanner is not None:
+            self.terrain_scanner = RayCaster(self.cfg.terrain_scanner)
+            self.scene.sensors["terrain_scanner"] = self.terrain_scanner
         self._forward_scanners = tuple(RayCaster(cfg) for cfg in self.cfg.forward_scanners)
         for index, scanner in enumerate(self._forward_scanners):
             self.scene.sensors[f"forward_scanner_{index}"] = scanner
@@ -253,6 +270,78 @@ class WheeledLabEnv(DirectRLEnv):
         current = (left_now + right_now) * .5
         ahead = (left_ahead + right_ahead) * .5
         return current, ahead, valid
+
+    def _terrain_scan_77(self):
+        if self.terrain_scanner is None:
+            raise RuntimeError("182D critic 需要 terrain scanner；请启用 --terrain-scan")
+        hits = self._as_torch(self.terrain_scanner.data.ray_hits_w)
+        if (hits.ndim != 3 or hits.shape[0] != self.num_envs
+                or hits.shape[1] != TERRAIN_SCAN_DIM or hits.shape[-1] != 3):
+            raise ValueError(f"terrain scanner 需要 [N,{TERRAIN_SCAN_DIM},3] hits")
+        if not torch.isfinite(hits).all():
+            raise ValueError("terrain scanner 返回非有限 ray hit")
+        root_z = self._root_link_position()[:, 2]
+        return (5 * (root_z[:, None] - hits[..., 2] - self._task.nominal_height_m)).clamp(-1, 1)
+
+    def _wheel_velocity_body(self):
+        body_velocity = getattr(self.robot.data, "body_lin_vel_w", None)
+        if body_velocity is None:
+            raise RuntimeError("182D critic 需要 body_lin_vel_w 产生轮体速度")
+        velocity = self._as_torch(body_velocity)
+        if velocity.ndim != 3 or velocity.shape[:2] != (self.num_envs, len(self._binding.native_body_names)) or velocity.shape[-1] != 3:
+            raise ValueError("body_lin_vel_w 布局不一致")
+        wheels = velocity.index_select(1, self._wheel_body_indices).reshape(-1, 3)
+        quaternion = self._root_link_quat()
+        rotated = self._observations.assembler._inverse_rotate(
+            quaternion[:, None, :].expand(-1, 2, -1).reshape(-1, 4), wheels).reshape(self.num_envs, 6)
+        return rotated
+
+    def _critic_182(self, state, sample, *, joint_acceleration=None):
+        commands = self._commands()
+        actor_frame = self._observations.assembler.actor(
+            self._observations.assembler.clean_sensors(state), commands, now_s=state.timestamp_s)
+        if joint_acceleration is None:
+            joint_acceleration = self._last_joint_acceleration
+        friction = state.wheel_friction
+        wheel_material = torch.stack((friction, friction, torch.zeros_like(friction)), -1).flatten(1)
+        com_offset = self._observations.assembler._inverse_rotate(
+            sample.root_link_orientation_xyzw,
+            sample.root_com_position_world_m - sample.root_link_position_world_m)
+        zeros4 = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self._device)
+        zeros2 = torch.zeros(self.num_envs, 2, dtype=torch.float32, device=self._device)
+        return environment_features_182(
+            actor_frame=actor_frame,
+            root_velocity_body_m_s=state.velocity_origin_body_m_s,
+            height_above_ground_m=state.height_above_ground_m[:, None],
+            stiffness=self._stiffness[None].expand(self.num_envs, -1),
+            damping=self._damping[None].expand(self.num_envs, -1),
+            active_torque=self._last_effort,
+            observation_delay_steps=zeros4,
+            action_delay_steps=zeros2,
+            wheel_velocity_body_m_s=self._last_wheel_velocity_body,
+            wheel_contact=(state.wheel_ground_force_n > 2.0).to(torch.float32),
+            mass_scale=torch.ones(self.num_envs, 1, dtype=torch.float32, device=self._device),
+            wheel_material=wheel_material,
+            terrain_scan=self._terrain_scan_77(),
+            previous_actions=torch.cat((self._before_action, self._previous_action), -1),
+            joint_acceleration_rad_s2=joint_acceleration,
+            com_offset_body_m=com_offset,
+            nominal_pose_delta_rad=state.policy_position_rad - self._observations.assembler._nominal,
+        )
+
+    def _capture_terminal(self):
+        if self._last_state is None or self._last_sample is None:
+            return
+        state, sample = self._last_state, self._last_sample
+        self._terminal_state, self._terminal_sample = state, sample
+        self._terminal_frame = self._observations.assembler.actor(
+            self._observations.assembler.clean_sensors(state), self._commands(),
+            now_s=state.timestamp_s).detach().clone()
+        terminal_acceleration = (state.policy_velocity_rad_s - self._last_policy_velocity) / self.step_dt
+        self._last_policy_velocity.copy_(state.policy_velocity_rad_s)
+        self._last_joint_acceleration.copy_(terminal_acceleration)
+        self._terminal_critic_182 = self._critic_182(
+            state, sample, joint_acceleration=terminal_acceleration).detach().clone()
 
     def _update_skill(self):
         if self._skill_fsm is None or self._last_state is None or self._last_sample is None:
@@ -415,6 +504,7 @@ class WheeledLabEnv(DirectRLEnv):
         self._terminated |= terminated
         self._last_sample = sample
         self._last_state = state
+        self._last_wheel_velocity_body.copy_(self._wheel_velocity_body())
         self._last_tilt = tilt
         self._last_base_contact = base_contact
         if self._formal_reward is not None:
@@ -497,6 +587,7 @@ class WheeledLabEnv(DirectRLEnv):
         self.reset_buf = self.reset_terminated | self.reset_time_outs
         self._previous_action.copy_(self._issued_action)
         reset_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1).int()
+        self._capture_terminal()
         self._update_skill()
         if reset_ids.numel() > 0:
             self._reset_idx(reset_ids)
@@ -593,8 +684,12 @@ class WheeledLabEnv(DirectRLEnv):
         self._terminated[ids] = False
         self._last_terminated[ids] = False
         self._last_truncated[ids] = False
-        self._last_reward[ids] = 0.0
+        # Keep the terminal reward in _last_reward until the next policy step;
+        # the collector must return the PRE-reset reward for done rows.
         self._last_effort[ids] = 0.0
+        self._last_wheel_velocity_body[ids] = 0.0
+        self._last_joint_acceleration[ids] = 0.0
+        self._last_policy_velocity[ids] = 0.0
         self._issued_action[ids] = 0.0
         self._previous_action[ids] = 0.0
         self._before_action[ids] = 0.0
@@ -625,9 +720,17 @@ class WheeledLabEnv(DirectRLEnv):
         state = self._observations.assembler.measure(sample)
         commands = self._commands()
         sensors = self._observations.assembler.clean_sensors(state)
-        actor, critic = self._observations.append(
+        actor, _ = self._observations.append(
             sample, commands, sensors, self._reset_mask, measured=state,
         )
+        reset = self._reset_mask
+        acceleration = torch.where(reset[:, None], torch.zeros_like(self._last_joint_acceleration),
+                                  self._last_joint_acceleration)
+        self._last_joint_acceleration.copy_(acceleration)
+        self._last_policy_velocity.copy_(state.policy_velocity_rad_s)
+        if reset.any():
+            self._last_wheel_velocity_body[reset] = 0.0
+        critic = self._critic_182(state, sample, joint_acceleration=acceleration)
         self._reset_mask.zero_()
         self.obs_buf = {"policy": actor.flatten(1).contiguous(),
                         "critic": critic.contiguous()}

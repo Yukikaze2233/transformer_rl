@@ -10,7 +10,7 @@ import math
 
 from ..contracts import ACTION_ORDER
 from ..control.actuation import PairTargetDomain, ResponseParameters
-from .contract import ACTION_DIM, ACTOR_DIM, CRITIC_DIM, HISTORY_LENGTH, POLICY_DT_S, PHYSICS_DT_S
+from .contract import ACTION_DIM, ACTOR_DIM, CRITIC182_DIM, HISTORY_LENGTH, POLICY_DT_S, PHYSICS_DT_S
 from .contract import FlatTaskSpec
 from .formal_reward import FormalRewardConfig
 from .recover import RecoverTaskSpec
@@ -143,6 +143,19 @@ def build_height_scanner_cfg() -> RayCasterCfg:
     )
 
 
+def build_terrain_scan_cfg() -> RayCasterCfg:
+    """11x7 body-frame ground grid for the 77D privileged critic block."""
+    return RayCasterCfg(
+        prim_path="/World/envs/env_.*/Robot/base_link",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 5.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=(1.0, 0.6)),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+        update_period=POLICY_DT_S,
+    )
+
+
 def build_forward_scanners_cfg() -> tuple[RayCasterCfg, RayCasterCfg, RayCasterCfg, RayCasterCfg]:
     """Wheel-current and wheel-forward ground rays for the stair/jump FSM."""
     def one(prim: str, x_m: float) -> RayCasterCfg:
@@ -210,7 +223,7 @@ class WheeledLabEnvCfg(DirectRLEnvCfg):
     episode_length_s = 30.0
     action_space = ACTION_DIM
     observation_space = ACTOR_DIM * HISTORY_LENGTH
-    state_space = CRITIC_DIM
+    state_space = CRITIC182_DIM
     history_length = HISTORY_LENGTH
     asset_directory: str = ""
 
@@ -234,6 +247,7 @@ class WheeledLabEnvCfg(DirectRLEnvCfg):
     robot_cfg: ArticulationCfg = MISSING
     contact_sensor: ContactSensorCfg = field(default_factory=build_contact_sensor_cfg)
     height_scanner: RayCasterCfg | None = None
+    terrain_scanner: RayCasterCfg | None = None
     forward_scanners: tuple[RayCasterCfg, ...] = field(default_factory=tuple)
 
     def __post_init__(self):
@@ -243,8 +257,8 @@ class WheeledLabEnvCfg(DirectRLEnvCfg):
             raise ValueError("M1 固定 decimation=2、sim.dt=0.005")
         if abs(self.decimation * self.sim.dt - POLICY_DT_S) > 1e-12:
             raise ValueError("decimation*sim.dt 必须等于 0.01s")
-        if self.observation_space != ACTOR_DIM * HISTORY_LENGTH or self.state_space != CRITIC_DIM:
-            raise ValueError("M1 观测空间固定 5x35 / 81")
+        if self.observation_space != ACTOR_DIM * HISTORY_LENGTH or self.state_space != CRITIC182_DIM:
+            raise ValueError("LabEnv 观测空间固定 5x35 actor / 182 critic")
         if self.action_space != ACTION_DIM:
             raise ValueError("M1 动作空间固定 6")
         if self.history_length != HISTORY_LENGTH:
@@ -259,6 +273,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
                   formal_reward: FormalRewardConfig | None = None,
                   recover: RecoverTaskSpec | None = None,
                   height_scanner: bool = False,
+                  terrain_scan: bool = False,
                   forward_scan: bool = False,
                   terrain_profile: str = "plane",
                   seed: int | None = 0,
@@ -289,6 +304,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     cfg.robot_cfg = build_robot_cfg(asset, response=response)
     cfg.contact_sensor = build_contact_sensor_cfg()
     cfg.height_scanner = build_height_scanner_cfg() if height_scanner else None
+    cfg.terrain_scanner = build_terrain_scan_cfg() if terrain_scan else None
     cfg.forward_scanners = build_forward_scanners_cfg() if forward_scan else ()
     cfg.terrain = build_terrain_cfg(terrain_profile)
     return cfg

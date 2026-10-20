@@ -54,6 +54,9 @@ class LabeledStep:
     final_labels: PhysicalLabels
     fully_policy_owned: torch.Tensor
     handoff_after: torch.Tensor
+    # PRE-reset actor frame at the interval endpoint. Optional only for older
+    # adapters; LabEnv sets it so timeout critics can use the terminal window.
+    terminal_frame: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)

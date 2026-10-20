@@ -129,9 +129,18 @@ class StructuredCollector:
         invalid |= ordinary & (next_observation.frame[:, 22:28] - issued).abs().gt(1e-6).any(-1)
         if invalid.any():
             raise ValueError('step clock/ownership/reset/issued-action or terminal-label contract differs')
-        return LabeledStep(next_observation, *(getattr(value, field.name).detach().clone()
-                                               if field.name != 'final_labels' else value.final_labels.owned()
-                                               for field in fields(LabeledStep) if field.name != 'observation'))
+        fields_out = []
+        for field in fields(LabeledStep):
+            if field.name == 'observation':
+                continue
+            item = getattr(value, field.name)
+            if field.name == 'final_labels':
+                fields_out.append(value.final_labels.owned())
+            elif field.name == 'terminal_frame' and item is None:
+                fields_out.append(None)
+            else:
+                fields_out.append(item.detach().clone())
+        return LabeledStep(next_observation, *fields_out)
 
     def _version(self):
         return tuple((name, id(value), value._version) for name, value in (
@@ -278,6 +287,10 @@ class StructuredCollector:
                 self.last_metrics['environment_host_wall_s'] = environment_timing
             if environment_counts:
                 self.last_metrics['environment_counts'] = environment_counts
+            for name in ('contact_peak_patch_count', 'contact_peak_patch_total'):
+                value = getattr(self.env, name, None)
+                if value is not None:
+                    self.last_metrics[name] = int(value)
             self.last_metrics.update(terminated_rows=int(outcomes[0]), truncated_rows=int(outcomes[1]),
                                      policy_owned_fraction=self.last_metrics['policy_owned_transitions'] / (steps*self.num_envs))
             stream = getattr(self.env, 'terrain_stream', None)

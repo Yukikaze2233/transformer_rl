@@ -134,6 +134,13 @@ class OutputFeedbackController:
         self.nominal = torch.tensor(nominal_position_rad, dtype=torch.float32, device=self.device)
         self.action_bounds = torch.tensor((3., 3., 3., 3., 9., 9.), device=self.device)
         self.effort_bounds = torch.tensor((40., 40., 40., 40., 4.5, 4.5), device=self.device)
+        # Active output-axis gains used by effort(); wheel speed feedback is
+        # damping, not a position stiffness. These are the actual controller
+        # constants, not randomized or inferred values.
+        self.stiffness = torch.tensor((160., 160., 160., 160., 0., 0.),
+                                      dtype=torch.float32, device=self.device)
+        self.damping = torch.tensor((2.5, 2.5, 2.5, 2.5, .6, .6),
+                                    dtype=torch.float32, device=self.device)
         self.pair_domain = pair_domain
         if pair_domain is not None:
             self._difference = torch.tensor(pair_domain.signed_difference_rad, dtype=torch.float64, device=self.device)
