@@ -1,0 +1,22 @@
+{
+  "package_sha256": "2dd7ef495ed0933019c29481c79e3aaa889ecdc4f50a76e175465cad3b62a2ab",
+  "archive_root": "RMUC2027_RL_Terrains",
+  "assets": {
+    "road_step": {
+      "directory": "single_step_buff",
+      "approach_axis": "+Y",
+      "rise_m": 0.20,
+      "front_panel_m": 0.15,
+      "underpanel_gap_m": 0.05,
+      "width_m": 1.12
+    },
+    "central_steps": {
+      "directory": "two_level_steps",
+      "approach_axis": "+X",
+      "profile_m": [0.0, 0.20, 0.35, 0.30],
+      "tread_depth_m": 0.80,
+      "rim_depth_m": 0.15,
+      "width_m": 3.0
+    }
+  }
+}
