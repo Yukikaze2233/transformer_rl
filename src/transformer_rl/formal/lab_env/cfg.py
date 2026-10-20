@@ -16,6 +16,8 @@ from .formal_reward import FormalRewardConfig
 from .recover import RecoverTaskSpec
 from .settings import AssetDescription, load_asset_description
 from ..tasks.termination import NativeTaskLimits
+from ..control.sensors import SensorModelConfig
+from ..simulation.dynamics import StartupDynamicsConfig
 
 STEP_PLATFORM_DEPTH_M = 0.80
 
@@ -280,6 +282,8 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
                   task: FlatTaskSpec | None = None,
                   formal_reward: FormalRewardConfig | None = None,
                   termination_limits: NativeTaskLimits | None = None,
+                  sensors: SensorModelConfig | None = None,
+                  dynamics: StartupDynamicsConfig | None = None,
                   recover: RecoverTaskSpec | None = None,
                   height_scanner: bool = False,
                   terrain_scan: bool = False,
@@ -296,6 +300,9 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
         raise ValueError("env_spacing_m 必须是有限正数")
     if formal_reward is not None and not isinstance(termination_limits, NativeTaskLimits):
         raise ValueError('formal Lab tasks require explicit original physical termination limits')
+    if (sensors is not None and not isinstance(sensors, SensorModelConfig)
+            or dynamics is not None and not isinstance(dynamics, StartupDynamicsConfig)):
+        raise ValueError('Lab randomization requires its explicit sensor and mechanical configurations')
     asset = load_asset_description(asset_directory,
                                    expected_manifest_sha256=expected_manifest_sha256)
     cfg = WheeledLabEnvCfg()
@@ -311,6 +318,8 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     object.__setattr__(cfg, "pair_domain_spec", pair_domain)
     object.__setattr__(cfg, "formal_reward_spec", formal_reward)
     object.__setattr__(cfg, 'termination_limits', termination_limits)
+    object.__setattr__(cfg, 'sensor_model_spec', sensors)
+    object.__setattr__(cfg, 'startup_dynamics_spec', dynamics)
     object.__setattr__(cfg, "recover_spec", recover)
     object.__setattr__(cfg, "course_manifest", terrain_atlas_manifest)
     object.__setattr__(cfg, 'static_plane_height_m', 0. if terrain_profile == 'plane' else None)

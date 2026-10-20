@@ -33,6 +33,45 @@ class StartupDynamicsConfig:
 
 
 @torch.no_grad()
+def sample_startup_parameters(masses, coms, inertias, names, config, seed):
+    """Return mass, COM, inertia and nominal mask using the original private CPU RNG."""
+    if (not isinstance(config, StartupDynamicsConfig) or type(seed) is not int or not 0 <= seed < 2**63
+            or not isinstance(masses, torch.Tensor) or masses.ndim != 2
+            or masses.shape[1] != 19 or len(names) != 19 or names[0] != 'base_link'
+            or len(set(names)) != len(names)):
+        raise ValueError('startup parameters require the selected nineteen named bodies and independent seed')
+    count = masses.shape[0]
+    if count < 1:
+        raise ValueError('startup mechanical rows must be nonempty')
+    for name, value, shape in [('mass',masses,(count,19)), ('COM',coms,(count,19,7)),
+                               ('inertia',inertias,(count,19,9))]:
+        if (not isinstance(value, torch.Tensor) or value.shape != shape or value.dtype != torch.float32
+                or value.device.type != 'cpu' or not torch.isfinite(value).all()):
+            raise ValueError('startup draw requires finite CPU float32 source '+name)
+    matrices = inertias.reshape(count, 19, 3, 3)
+    if ((masses <= 0).any() or not torch.allclose(matrices, matrices.transpose(-1, -2), atol=1e-7, rtol=1e-5)
+            or (torch.linalg.eigvalsh(matrices) <= 0).any()
+            or not torch.allclose(coms[..., 3:].norm(dim=-1), torch.ones(count, 19), atol=1e-4, rtol=0)):
+        raise ValueError('native mass,inertia or COM orientation is not physically valid')
+    rng = torch.Generator(device='cpu').manual_seed(seed)
+    nominal = torch.rand(count, generator=rng) < config.nominal_fraction
+    low, high = config.link_mass_scale
+    # 按具名body采样，SDK枚举顺序变化不应把一根连杆的扰动移到另一根。
+    canonical = tuple(sorted(names))
+    order = [canonical.index(name) for name in names]
+    scales = (low + (high - low) * torch.rand(count, 19, generator=rng))[:, order]
+    low, high = config.base_mass_scale
+    scales[:, 0] = low + (high - low) * torch.rand(count, generator=rng)
+    scales[nominal] = 1.
+    offset = (torch.rand(count, 3, generator=rng) * 2 - 1) * torch.tensor(config.base_com_offset_m)
+    offset[nominal] = 0.
+    target_mass, target_inertia = masses * scales, inertias * scales[..., None]
+    target_com = coms.clone()
+    target_com[:, 0, :3] += offset
+    return target_mass, target_com, target_inertia, nominal
+
+
+@torch.no_grad()
 def apply_startup_dynamics(scene, config, seed, *, native_to_tensor, tensor_to_native):
     """一次性写入并回读，必须早于首个真实物理步和reward/reset对象创建。
 
@@ -63,29 +102,11 @@ def apply_startup_dynamics(scene, config, seed, *, native_to_tensor, tensor_to_n
     masses = read('get_masses', (count, 19))
     coms = read('get_coms', (count, 19, 7))
     inertias = read('get_inertias', (count, 19, 9))
-    matrices = inertias.reshape(count, 19, 3, 3)
-    if ((masses <= 0).any() or not torch.allclose(matrices, matrices.transpose(-1, -2), atol=1e-7, rtol=1e-5)
-            or (torch.linalg.eigvalsh(matrices) <= 0).any()
-            or not torch.allclose(coms[..., 3:].norm(dim=-1), torch.ones(count, 19), atol=1e-4, rtol=0)):
-        raise ValueError('native mass,inertia or COM orientation is not physically valid')
     expected_mass = scene.readback['nominal_source_mass_kg']
     if not torch.allclose(masses.sum(-1), torch.full((count,), expected_mass), atol=1e-5, rtol=0):
         raise ValueError('startup mechanical sources differ from the selected nominal asset')
-    rng = torch.Generator(device='cpu').manual_seed(seed)
-    nominal = torch.rand(count, generator=rng) < config.nominal_fraction
-    low, high = config.link_mass_scale
-    # 按具名body采样，SDK枚举顺序变化不应把一根连杆的扰动移到另一根。
-    canonical = tuple(sorted(names))
-    order = [canonical.index(name) for name in names]
-    scales = (low + (high - low) * torch.rand(count, 19, generator=rng))[:, order]
-    low, high = config.base_mass_scale
-    scales[:, 0] = low + (high - low) * torch.rand(count, generator=rng)
-    scales[nominal] = 1.
-    offset = (torch.rand(count, 3, generator=rng) * 2 - 1) * torch.tensor(config.base_com_offset_m)
-    offset[nominal] = 0.
-    target_mass, target_inertia = masses * scales, inertias * scales[..., None]
-    target_com = coms.clone()
-    target_com[:, 0, :3] += offset
+    target_mass, target_com, target_inertia, nominal = sample_startup_parameters(
+        masses, coms, inertias, names, config, seed)
     indices = tensor_to_native(torch.arange(count, dtype=torch.int32))
     # setter或最终回读失败时保持bridge无效，不能带着半份参数继续物理步。
     scene.readback['startup_dynamics'] = {'status': 'writing'}

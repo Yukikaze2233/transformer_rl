@@ -1,5 +1,6 @@
 """Managed task-state roundtrips with real course RNG, without a simulator."""
 from copy import deepcopy
+from dataclasses import replace
 import json
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ from transformer_rl.formal.lab_env.course_tasks import LabCourseTasks, StairRequ
 from transformer_rl.formal.lab_env.formal_curriculum import FormalCurriculumCapabilities, UnsupportedCurriculumTask
 from transformer_rl.formal.lab_env.formal_reward import FormalRewardConfig
 from transformer_rl.formal.lab_env.managed import ManagedCurriculum, ManagedLabRuntime
+from transformer_rl.formal.lab_env.sensors import LabSensorModel
 from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
 from transformer_rl.formal.tasks.terrain_courses import TerrainCourseRouter
 from transformer_rl.formal.tasks.trajectory import DriveEnvelope
@@ -37,6 +39,8 @@ def scene(tmp_path, components, *, seed=13):
                                                    'joint_boundary': 'No selected-asset geometric boundary producer'})
     env = SimpleNamespace(num_envs=4, device='cpu', _device=torch.device('cpu'), step_dt=.01, _physical_tick=0,
                           _terrain_course=course, _formal_reward=reward,
+                          _sensor_model=LabSensorModel(4, 1299709 + seed),
+                          _startup_dynamics=SimpleNamespace(receipt={'native_parameters_sha256': 'b' * 64}),
                           _clock=lambda: torch.zeros(4, dtype=torch.float64))
     course.env = env
     env.set_task_sampler = lambda sampler: setattr(env, '_task_sampler', sampler)
@@ -69,6 +73,17 @@ def test_managed_source_roundtrip_keeps_real_task_rng_ids_and_learning_budget(tm
         env = scene(tmp_path, components)
         managed = ManagedLabRuntime(env, recipe, components, identity(env))
         assert env._terrain_course.tasks.protocol is components.protocol
+        from test_physical_observation import fixture as physical_fixture
+        _, _, assembler, raw, _ = physical_fixture(4)
+        state = replace(assembler.measure(raw), timestamp_s=torch.zeros(4, dtype=torch.float64))
+        all_rows = torch.ones(4, dtype=torch.bool)
+        env._sensor_model.reset(all_rows, state.timestamp_s)
+        env._sensor_model.seed_after_reset(all_rows, state)
+        for tick in (1, 2):
+            state = replace(state, timestamp_s=torch.full((4,), tick * .005, dtype=torch.float64))
+            env._sensor_model.push(state, tick)
+        env._sensor_model(state)
+        env._physical_tick = 2
         sample = env._task_sampler(torch.arange(4))
         course = env._terrain_course
         course.router.reset(torch.arange(4), sample.terrain_kind, stage=1, command_forward=sample.command[:, 0])
@@ -88,6 +103,7 @@ def test_managed_source_roundtrip_keeps_real_task_rng_ids_and_learning_budget(tm
         restored = store.load('course.pt')
         assert restored.aborted_request_ids.tolist() == [7, -1, -1, -1]
         cold_env = scene(tmp_path, restored.components, seed=29)
+        cold_env._sensor_model = LabSensorModel(4, env._sensor_model.seed)
         cold = ManagedLabRuntime(cold_env, recipe, restored.components, identity(cold_env))
         assert restored.components.task_source is cold
         assert restored.components.deferred_task_source_state is None
@@ -99,6 +115,8 @@ def test_managed_source_roundtrip_keeps_real_task_rng_ids_and_learning_budget(tm
         assert_identical(restored.components.trainer.critic_optimizer.state_dict(),
                          components.trainer.critic_optimizer.state_dict())
         assert_identical(cold.checkpoint_state_dict(), saved)
+        assert not cold.sensor_model.initialized.any() and cold.sensor_model.count.eq(0).all()
+        assert cold.sensor_model.noise_rows_consumed == env._sensor_model.noise_rows_consumed == 4
         assert cold_env._terrain_course.tasks.protocol is restored.components.protocol
         assert restored.components.protocol.active_id.eq(-1).all()
         assert restored.components.protocol.max_seen_id.eq(7).all()
@@ -110,7 +128,7 @@ def test_managed_source_roundtrip_keeps_real_task_rng_ids_and_learning_budget(tm
         restored.restore_global_rng_after_cold_setup()
 
 
-@pytest.mark.parametrize('change', ('identity', 'reward', 'watermark', 'live_physics', 'legacy_format'))
+@pytest.mark.parametrize('change', ('identity', 'reward', 'watermark', 'live_physics', 'legacy_format', 'mechanical_identity'))
 def test_managed_restore_refuses_incompatible_or_live_task_state(tmp_path, change):
     recipe, components, journal, store = fixture(tmp_path, full=True, target_rollouts=35000)
     with journal:
@@ -127,7 +145,9 @@ def test_managed_restore_refuses_incompatible_or_live_task_state(tmp_path, chang
         elif change == 'watermark':
             saved['course']['tasks']['next_id'][:] = -1
         elif change == 'legacy_format':
-            saved['format'] = 'managed_lab_task_source_v1'
+            saved['format'] = 'managed_lab_task_source_v2'
+        elif change == 'mechanical_identity':
+            saved['startup_parameters_sha256'] = 'c' * 64
         else:
             cold_env._physical_tick = 1
         with pytest.raises(ValueError, match='original sources|watermarks'):

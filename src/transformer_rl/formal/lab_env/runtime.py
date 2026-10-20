@@ -18,6 +18,8 @@ from ...common.training_control import boot_id, verify_pin, write_json
 from ..control.actuation import PairTargetDomain, ResponseParameters
 from ..simulation.health import NativePhysicsHealth
 from ..tasks.termination import NativeTaskLimits
+from ..control.sensors import SensorModelConfig
+from ..simulation.dynamics import StartupDynamicsConfig
 from .contract import FlatTaskSpec
 from .formal_curriculum import FormalCurriculumCapabilities
 from .managed import ManagedCurriculum, ManagedLabRuntime
@@ -33,9 +35,9 @@ def parse_configuration(recipe, configuration, authorized_boot):
     """Validate the frozen private runtime before opening a simulator."""
     expected = {'format', 'authorized_boot', 'asset_directory', 'response_source_pin',
                 'terrain_atlas_pin', 'environment_spacing_m', 'task', 'pair_domain',
-                'physics', 'profile_collection', 'termination_limits'}
+                'physics', 'profile_collection', 'termination_limits', 'sensors', 'dynamics'}
     if (not isinstance(configuration, dict) or set(configuration) != expected
-            or configuration['format'] != 'managed_lab_runtime_v3'
+            or configuration['format'] != 'managed_lab_runtime_v4'
             or configuration['authorized_boot'] != authorized_boot or authorized_boot != boot_id()
             or recipe.device != 'cuda:0' or recipe.policy.critic_input_dim != 185
             or recipe.policy.history_length != 5 or recipe.collection.policy_dt_s != .01
@@ -47,6 +49,10 @@ def parse_configuration(recipe, configuration, authorized_boot):
             or set(configuration['task']) != {field.name for field in fields(FlatTaskSpec)}
             or not isinstance(configuration['termination_limits'], dict)
             or set(configuration['termination_limits']) != {field.name for field in fields(NativeTaskLimits)}
+            or not isinstance(configuration['sensors'], dict)
+            or set(configuration['sensors']) != {field.name for field in fields(SensorModelConfig)}
+            or not isinstance(configuration['dynamics'], dict)
+            or set(configuration['dynamics']) != {field.name for field in fields(StartupDynamicsConfig)}
             or not isinstance(configuration['physics'], dict)
             or set(configuration['physics']) != _PHYSICS_FIELDS
             or any(type(value) is not int or value < 1 for value in configuration['physics'].values())):
@@ -55,6 +61,10 @@ def parse_configuration(recipe, configuration, authorized_boot):
     limits = dict(configuration['termination_limits'])
     limits['forbidden_body_names'] = tuple(limits['forbidden_body_names'])
     limits = NativeTaskLimits(**limits)
+    sensors = SensorModelConfig(**configuration['sensors'])
+    dynamics = StartupDynamicsConfig(**configuration['dynamics'])
+    if sensors.physics_dt_s != .005 or sensors.policy_dt_s != recipe.collection.policy_dt_s:
+        raise ValueError('managed Lab sensor delay must share the actual physical/policy clock')
     if (tuple(task.action_bounds) != tuple(recipe.collection.action_bounds)
             or task.nominal_height_m != recipe.domain.nominal_height_m):
         raise ValueError('managed Lab task differs from the collector action bounds or nominal height')
@@ -84,14 +94,14 @@ def parse_configuration(recipe, configuration, authorized_boot):
                 'asset_manifest_sha256': asset.manifest_sha256,
                 'atlas_sha256': configuration['terrain_atlas_pin']['sha256'],
                 'response_sha256': configuration['response_source_pin']['sha256']}
-    return asset, response, pair, task, atlas, identity, limits
+    return asset, response, pair, task, atlas, identity, limits, sensors, dynamics
 
 
 @contextmanager
 def runtime(recipe, components, configuration, *, control):
     """Expose the actual Lab task to the complete managed learning loop."""
     parsed = parse_configuration(recipe, configuration, control.binding['boot_id'])
-    asset, response, pair, task, atlas, identity, limits = parsed
+    asset, response, pair, task, atlas, identity, limits, sensors, dynamics = parsed
     # Check every stage before scene setup or any reserved production rollout.
     ManagedCurriculum(recipe, components, FormalCurriculumCapabilities(True, True, True))
     launcher = env = health = None
@@ -130,6 +140,7 @@ def runtime(recipe, components, configuration, *, control):
             formal_reward=FormalRewardConfig.from_manifest(
                 asset.manifest, normal_load_source='native_contact_patch_normal_forces'),
             termination_limits=limits,
+            sensors=sensors, dynamics=dynamics,
             terrain_scan=True, forward_scan=True, terrain_profile='course',
             terrain_atlas_manifest=str(atlas), expected_manifest_sha256=asset.manifest_sha256)
         cfg.seed = recipe.training_seed
@@ -155,6 +166,11 @@ def runtime(recipe, components, configuration, *, control):
             'contact_mapping': getattr(env, 'contact_mapping_receipt', None),
             'contact_measurement': env._contact_loads.receipt,
             'terrain_collision': env.terrain_collision_receipt,
+            'startup_dynamics': env._startup_dynamics.receipt,
+            'sensors': {'configuration': configuration['sensors'],
+                        'scope': 'actor encoder and IMU only; critic and supervision remain clean',
+                        'timebase': 'past-only physical-clock samples; fresh reset projection',
+                        'extra_USB_delay': False},
             'wheel_material': env.wheel_material_receipt,
             'collision_isolation': env.collision_isolation_receipt,
             'cold_physical_state_restored': False, 'automatic_evaluation': False,

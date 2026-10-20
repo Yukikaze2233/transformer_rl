@@ -42,6 +42,8 @@ from .isolation import author_shared_ground_groups, isolate_scene
 from .observations import LabObservationBuilder
 from .settings import LabEnvSettings, load_asset_description
 from .terrain_collision import partition_static_collision
+from .dynamics import LabStartupDynamics
+from .sensors import LabSensorModel
 
 
 class WheeledLabEnv(DirectRLEnv):
@@ -87,6 +89,10 @@ class WheeledLabEnv(DirectRLEnv):
         self._wheel_materials = WheelMaterialReader(
             self.robot, self._binding.wheel_body_indices,
             num_envs=self.num_envs, device=self._device)
+        self._startup_dynamics = LabStartupDynamics(
+            self.robot, self._binding, self.num_envs, self._asset.manifest['total_mass_kg'],
+            int(getattr(cfg, 'seed', 0) or 0) + 15485863,
+            getattr(cfg, 'startup_dynamics_spec', None), device=self._device)
         self._action_bounds = torch.tensor(self._task.action_bounds, dtype=torch.float32,
                                            device=self._device)
         self._physics_dt_tensor = torch.full((self.num_envs,), float(self.physics_dt),
@@ -115,6 +121,10 @@ class WheeledLabEnv(DirectRLEnv):
         self._observations = LabObservationBuilder(self._binding, self.num_envs,
                                                    device=self._device,
                                                    history_length=self.cfg.history_length)
+        sensor_configuration = getattr(cfg, 'sensor_model_spec', None)
+        self._sensor_model = (None if sensor_configuration is None else LabSensorModel(
+            self.num_envs, int(getattr(cfg, 'seed', 0) or 0) + 1299709,
+            sensor_configuration, device=self._device))
         formal_config = getattr(cfg, "formal_reward_spec", None)
         self._formal_reward = None
         self._boundary_geometry = None
@@ -134,6 +144,7 @@ class WheeledLabEnv(DirectRLEnv):
                 self._binding, self.num_envs, formal_config, device=str(self._device),
                 boundary_geometry=self._boundary_geometry,
             )
+            self._formal_reward.composer.update_native_mass(self._startup_dynamics.mass_kg_by_environment)
             limits = getattr(cfg, 'termination_limits', None)
             if not isinstance(limits, NativeTaskLimits):
                 raise ValueError('formal reward cannot use the simplified M1 termination contract')
@@ -396,7 +407,8 @@ class WheeledLabEnv(DirectRLEnv):
         com_offset = self._observations.assembler._inverse_rotate(
             sample.root_link_orientation_xyzw,
             sample.root_com_position_world_m - sample.root_link_position_world_m)
-        zeros4 = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self._device)
+        sensor_packet = self._sensor_packet(state)
+        observation_delay = ((state.timestamp_s[:, None] - sensor_packet.sampled_at_s) / self.step_dt).float()
         zeros2 = torch.zeros(self.num_envs, 2, dtype=torch.float32, device=self._device)
         terrain, ground = self._terrain_scan_77()
         self._ground_at_root.copy_(ground)
@@ -408,11 +420,11 @@ class WheeledLabEnv(DirectRLEnv):
             stiffness=self._stiffness[None].expand(self.num_envs, -1),
             damping=self._damping[None].expand(self.num_envs, -1),
             active_torque=self._last_effort,
-            observation_delay_steps=zeros4,
+            observation_delay_steps=observation_delay,
             action_delay_steps=zeros2,
             wheel_velocity_body_m_s=self._last_wheel_velocity_body,
             wheel_contact=(state.wheel_ground_force_n > 2.0).to(torch.float32),
-            mass_scale=torch.ones(self.num_envs, 1, dtype=torch.float32, device=self._device),
+            mass_scale=self._startup_dynamics.mass_scale,
             wheel_material=wheel_material,
             terrain_scan=terrain,
             previous_actions=torch.cat((self._before_action, self._previous_action), -1),
@@ -427,7 +439,7 @@ class WheeledLabEnv(DirectRLEnv):
         state, sample = self._last_state, self._last_sample
         self._terminal_state, self._terminal_sample = state, sample
         self._terminal_frame = self._observations.assembler.actor(
-            self._observations.assembler.clean_sensors(state), self._commands(),
+            self._sensor_packet(state), self._commands(),
             now_s=state.timestamp_s).detach().clone()
         terminal_acceleration = (state.policy_velocity_rad_s - self._last_policy_velocity) / self.step_dt
         self._last_policy_velocity.copy_(state.policy_velocity_rad_s)
@@ -508,7 +520,7 @@ class WheeledLabEnv(DirectRLEnv):
             )
         position = self._root_link_position()
         quaternion_xyzw = self._root_link_quat()
-        com_position = self._as_torch(getattr(data, "root_com_pos_w", position))
+        com_position = self._startup_dynamics.base_com_position(position, quaternion_xyzw)
         com_velocity = self._as_torch(getattr(data, "root_com_vel_w", data.root_lin_vel_w))
         if com_velocity.shape[-1] == 6:
             com_velocity = com_velocity[..., :3]
@@ -614,6 +626,8 @@ class WheeledLabEnv(DirectRLEnv):
     def _observe_substep(self) -> None:
         sample = self._sample()
         state = self._observations.assembler.measure(sample)
+        if self._sensor_model is not None:
+            self._sensor_model.push(state, self._physical_tick)
         boundary = None
         if self._failure_latch is not None:
             boundary = self._boundary_geometry.evaluate(
@@ -890,6 +904,16 @@ class WheeledLabEnv(DirectRLEnv):
             torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32, device=self._device),
             q, self._clock(),
         )
+        if self._sensor_model is not None:
+            mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
+            mask[ids] = True
+            self._sensor_model.reset(mask, self._clock())
+            current = self._observations.assembler.measure(self._sample())
+            self._sensor_model.seed_after_reset(mask, current)
+
+    def _sensor_packet(self, state):
+        return (self._observations.assembler.clean_sensors(state) if self._sensor_model is None
+                else self._sensor_model(state))
 
     def _get_observations(self):
         if self._scan_debug:
@@ -901,7 +925,7 @@ class WheeledLabEnv(DirectRLEnv):
         if self._scan_debug:
             print("OBS after measure", flush=True)
         commands = self._commands()
-        sensors = self._observations.assembler.clean_sensors(state)
+        sensors = self._sensor_packet(state)
         actor, _ = self._observations.append(
             sample, commands, sensors, self._reset_mask, measured=state,
         )

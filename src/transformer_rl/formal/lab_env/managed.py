@@ -52,7 +52,7 @@ class ManagedLabRuntime:
     task quota and independent RNG streams survive the new physical reset.
     """
 
-    _FORMAT = 'managed_lab_task_source_v2'
+    _FORMAT = 'managed_lab_task_source_v3'
 
     def __init__(self, env, recipe, components, identity, *, profile=False, physics_health=None):
         if type(profile) is not bool or not isinstance(identity, dict):
@@ -62,6 +62,14 @@ class ManagedLabRuntime:
                 or recipe.policy.critic_input_dim != 185 or recipe.policy.history_length != 5):
             raise ValueError('managed Lab requires its sole 35D/H5/185D learner source')
         self.env, self.recipe, self.components = env, recipe, components
+        from .sensors import LabSensorModel
+
+        self.sensor_model = env._sensor_model
+        if (not isinstance(self.sensor_model, LabSensorModel)
+                or self.sensor_model.num_envs != recipe.num_envs
+                or self.sensor_model.device != torch.device(recipe.device)):
+            raise ValueError('managed Lab requires the actual explicit actor sensor model')
+        self.mechanical_identity = env._startup_dynamics.receipt['native_parameters_sha256']
         self.identity = json.loads(json.dumps(identity, sort_keys=True, allow_nan=False))
         self.profile = profile
         self.physics_health = physics_health
@@ -91,6 +99,7 @@ class ManagedLabRuntime:
 
     def _require_binding(self):
         if (self.course is not self.env._terrain_course
+                or self.sensor_model is not self.env._sensor_model
                 or self.course.tasks.protocol is not self.components.protocol
                 or self.env._task_sampler.curriculum.budget is not self.components.curriculum
                 or self.env._task_sampler.curriculum.sampler is not self.components.sampler):
@@ -104,15 +113,19 @@ class ManagedLabRuntime:
         course['tasks'] = {key: value for key, value in course['tasks'].items() if key != 'protocol'}
         return {'format': self._FORMAT, 'identity': deepcopy(self.identity),
                 'reward_contract': self._reward_contract(), 'course': course,
+                'sensor_model': self.sensor_model.checkpoint_state_dict(),
+                'startup_parameters_sha256': self.mechanical_identity,
                 'cold_physical_state_restored': False}
 
     def load_after_explicit_cold_setup(self, state):
         self._require_binding()
-        expected = {'format', 'identity', 'reward_contract', 'course', 'cold_physical_state_restored'}
+        expected = {'format', 'identity', 'reward_contract', 'course', 'cold_physical_state_restored',
+                    'sensor_model', 'startup_parameters_sha256'}
         if (self._restored or self.env._physical_tick != 0
                 or not isinstance(state, dict) or set(state) != expected
                 or state['format'] != self._FORMAT or state['identity'] != self.identity
                 or state['reward_contract'] != self._reward_contract()
+                or state['startup_parameters_sha256'] != self.mechanical_identity
                 or state['cold_physical_state_restored'] is not False):
             raise ValueError('managed Lab restore requires the original sources before fresh physical sampling')
         course = deepcopy(state['course'])
@@ -134,6 +147,7 @@ class ManagedLabRuntime:
                 or (protocol.active_id >= 0).any()):
             raise ValueError('managed Lab request watermarks differ from the cold learning protocol')
         task['protocol'] = protocol.state_dict()
+        self.sensor_model.load_after_explicit_cold_setup(state['sensor_model'])
         self.course.restore_after_physical_reset(course)
         self._restored = True
 
