@@ -94,6 +94,7 @@ class WheeledLabEnv(DirectRLEnv):
         self._terminal_sample = None
         self._terminal_frame = None
         self._terminal_critic_182 = None
+        self._ground_at_root = torch.zeros(self.num_envs, dtype=torch.float32, device=self._device)
         self._pressure = self._build_pressure()
         self._observations = LabObservationBuilder(self._binding, self.num_envs,
                                                    device=self._device,
@@ -255,7 +256,7 @@ class WheeledLabEnv(DirectRLEnv):
         if (hits.ndim != 3 or hits.shape[0] != self.num_envs or hits.shape[1] < 1
                 or hits.shape[-1] != 3):
             raise ValueError("forward scanner 未返回 [N,Q,3] hits")
-        height = hits[:, 0, 2]
+        height = hits[:, 0, 2] + 0.0
         return height, torch.isfinite(height)
 
     def _scan_ground(self):
@@ -278,10 +279,12 @@ class WheeledLabEnv(DirectRLEnv):
         if (hits.ndim != 3 or hits.shape[0] != self.num_envs
                 or hits.shape[1] != TERRAIN_SCAN_DIM or hits.shape[-1] != 3):
             raise ValueError(f"terrain scanner 需要 [N,{TERRAIN_SCAN_DIM},3] hits")
-        if not torch.isfinite(hits).all():
-            raise ValueError("terrain scanner 返回非有限 ray hit")
         root_z = self._root_link_position()[:, 2]
-        return (5 * (root_z[:, None] - hits[..., 2] - self._task.nominal_height_m)).clamp(-1, 1)
+        center = hits[:, hits.shape[1] // 2, 2]
+        terrain = (5 * (root_z[:, None] - hits[..., 2] - self._task.nominal_height_m)).clamp(-1, 1)
+        if not torch.isfinite(terrain).all():
+            raise ValueError("terrain scanner 返回非有限 ray hit")
+        return terrain, center
 
     def _wheel_velocity_body(self):
         body_velocity = getattr(self.robot.data, "body_lin_vel_w", None)
@@ -309,10 +312,13 @@ class WheeledLabEnv(DirectRLEnv):
             sample.root_com_position_world_m - sample.root_link_position_world_m)
         zeros4 = torch.zeros(self.num_envs, 4, dtype=torch.float32, device=self._device)
         zeros2 = torch.zeros(self.num_envs, 2, dtype=torch.float32, device=self._device)
+        terrain, ground = self._terrain_scan_77()
+        self._ground_at_root.copy_(ground)
+        height = (self._root_link_position()[:, 2] - ground).clamp_min(0.0)
         return environment_features_182(
             actor_frame=actor_frame,
             root_velocity_body_m_s=state.velocity_origin_body_m_s,
-            height_above_ground_m=state.height_above_ground_m[:, None],
+            height_above_ground_m=height[:, None],
             stiffness=self._stiffness[None].expand(self.num_envs, -1),
             damping=self._damping[None].expand(self.num_envs, -1),
             active_torque=self._last_effort,
@@ -322,7 +328,7 @@ class WheeledLabEnv(DirectRLEnv):
             wheel_contact=(state.wheel_ground_force_n > 2.0).to(torch.float32),
             mass_scale=torch.ones(self.num_envs, 1, dtype=torch.float32, device=self._device),
             wheel_material=wheel_material,
-            terrain_scan=self._terrain_scan_77(),
+            terrain_scan=terrain,
             previous_actions=torch.cat((self._before_action, self._previous_action), -1),
             joint_acceleration_rad_s2=joint_acceleration,
             com_offset_body_m=com_offset,
@@ -395,15 +401,10 @@ class WheeledLabEnv(DirectRLEnv):
         if com_velocity.shape[-1] == 6:
             com_velocity = com_velocity[..., :3]
         angular_velocity = self._as_torch(getattr(data, "root_ang_vel_w", data.root_ang_vel_b))
-        if self.height_scanner is not None:
-            hits = self._as_torch(self.height_scanner.data.ray_hits_w)
-            if (hits.ndim != 3 or hits.shape[0] != self.num_envs
-                    or hits.shape[-1] != 3 or hits.shape[1] < 1
-                    or not torch.isfinite(hits[:, 0]).all()):
-                raise ValueError("height scanner 未返回有限 [N,Q,3] ray hits")
-            ground = hits[:, 0, 2]
-        else:
-            ground = torch.zeros(self.num_envs, dtype=torch.float32, device=self._device)
+        # The 11x7 terrain scanner supplies the base ground reference once per
+        # observation. _sample stays free of GPU ray-hit reductions, which can
+        # stall on large rough-terrain batches.
+        ground = self._ground_at_root
         return NativePhysicalSample(
             self._as_torch(data.joint_pos),
             self._as_torch(data.joint_vel),

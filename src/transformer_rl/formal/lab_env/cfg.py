@@ -303,7 +303,10 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
         cfg.episode_length_s = recover.episode_length_s
     cfg.robot_cfg = build_robot_cfg(asset, response=response)
     cfg.contact_sensor = build_contact_sensor_cfg()
-    cfg.height_scanner = build_height_scanner_cfg() if height_scanner else None
+    # The 11x7 scanner already contains the center ground ray; do not build a
+    # second single-ray sensor in large rough-terrain batches.
+    cfg.height_scanner = (build_height_scanner_cfg()
+                          if height_scanner and not terrain_scan else None)
     cfg.terrain_scanner = build_terrain_scan_cfg() if terrain_scan else None
     cfg.forward_scanners = build_forward_scanners_cfg() if forward_scan else ()
     cfg.terrain = build_terrain_cfg(terrain_profile)
