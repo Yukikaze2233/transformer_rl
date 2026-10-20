@@ -117,3 +117,34 @@ def test_jump_request_zero_is_ignored_when_idle_and_failure_aborts():
     fsm.step(**jump_inputs())
     out = fsm.step(**jump_inputs(tilt=math.radians(50)))
     assert out.failure.item() and out.exited.item()
+
+
+def test_skill_arbiter_prefers_jump_and_ignores_request_during_stair():
+    from transformer_rl.formal.lab_env.skill_fsm import SkillFSM
+
+    fsm = SkillFSM(1, stair_config=StairFSMConfig(success_duration_s=1.0),
+                   jump_config=JumpFSMConfig())
+    out = fsm.step(
+        step_height_m=torch.zeros(1), wheel_force_n=torch.full((1, 2), 30.),
+        body_height_m=torch.full((1,), .32), tilt_rad=torch.zeros(1),
+        base_contact_force_n=torch.zeros(1), command_height_m=torch.full((1,), .32),
+        jump_request=torch.ones(1, dtype=torch.bool), jump_request_height_m=torch.full((1,), .10),
+    )
+    assert out.mode.item() == int(CommandMode.JUMP)
+    assert out.jump_state.item() == int(JumpState.PRELOAD)
+
+    fsm.reset()
+    out = fsm.step(
+        step_height_m=torch.full((1,), .12), wheel_force_n=torch.full((1, 2), 30.),
+        body_height_m=torch.full((1,), .32), tilt_rad=torch.zeros(1),
+        base_contact_force_n=torch.zeros(1), command_height_m=torch.full((1,), .32),
+    )
+    assert out.mode.item() == int(CommandMode.STAIR)
+    ignored = fsm.step(
+        step_height_m=torch.full((1,), .12), wheel_force_n=torch.full((1, 2), 30.),
+        body_height_m=torch.full((1,), .34), tilt_rad=torch.zeros(1),
+        base_contact_force_n=torch.zeros(1), command_height_m=torch.full((1,), .32),
+        jump_request=torch.ones(1, dtype=torch.bool), jump_request_height_m=torch.full((1,), .10),
+    )
+    assert ignored.mode.item() == int(CommandMode.STAIR) and ignored.jump_ignored.item()
+    assert ignored.jump_state.item() == int(JumpState.NORMAL)

@@ -417,7 +417,86 @@ class JumpFSM:
         self.reset(ids)
 
 
+@dataclass(frozen=True)
+class SkillOutput:
+    mode: torch.Tensor
+    height_command_m: torch.Tensor
+    request_height_m: torch.Tensor
+    speed_scale: torch.Tensor
+    stair_state: torch.Tensor
+    jump_state: torch.Tensor
+    entered: torch.Tensor
+    exited: torch.Tensor
+    success: torch.Tensor
+    failure: torch.Tensor
+    jump_ignored: torch.Tensor
+
+
+class SkillFSM:
+    """台阶与跳跃的统一仲裁器；两套状态机互斥。"""
+
+    def __init__(self, num_envs: int, *, stair_config: StairFSMConfig = StairFSMConfig(),
+                 jump_config: JumpFSMConfig = JumpFSMConfig(), device="cpu"):
+        self.num_envs, self.device = num_envs, torch.device(device)
+        self.stair = StairFSM(num_envs, stair_config, device=device)
+        self.jump = JumpFSM(num_envs, jump_config, device=device)
+
+    @property
+    def active(self):
+        return self.stair.active | self.jump.active
+
+    def reset(self, ids=None):
+        self.stair.reset(ids)
+        self.jump.reset(ids)
+
+    def step(self, *, step_height_m, wheel_force_n, body_height_m, tilt_rad,
+             base_contact_force_n, command_height_m, auto_enabled=True,
+             manual_stair_request=None, manual_height_m=None, jump_request=None,
+             jump_request_height_m=None, vertical_velocity_m_s=None):
+        n = self.num_envs
+        manual = (torch.zeros(n, dtype=torch.bool, device=self.device)
+                  if manual_stair_request is None else torch.as_tensor(manual_stair_request, dtype=torch.bool, device=self.device))
+        request = (torch.zeros(n, dtype=torch.bool, device=self.device)
+                   if jump_request is None else torch.as_tensor(jump_request, dtype=torch.bool, device=self.device))
+        if manual.shape != (n,) or request.shape != (n,):
+            raise ValueError("manual/jump request 需要 [N] bool")
+        stair_active = self.stair.active
+        jump_active = self.jump.active
+        jump_start = request & ~stair_active & ~jump_active
+        stair_inputs = dict(
+            step_height_m=step_height_m, wheel_force_n=wheel_force_n,
+            body_height_m=body_height_m, tilt_rad=tilt_rad,
+            base_contact_force_n=base_contact_force_n,
+            command_height_m=command_height_m,
+            auto_enabled=auto_enabled & ~jump_start & ~jump_active,
+            manual_request=manual & ~jump_start & ~jump_active,
+            manual_height_m=manual_height_m,
+        )
+        stair_out = self.stair.step(**stair_inputs)
+        rise = (torch.zeros(n, device=self.device) if jump_request_height_m is None
+                else torch.as_tensor(jump_request_height_m, dtype=torch.float32, device=self.device))
+        jump_out = self.jump.step(
+            request=jump_start, request_height_m=rise, command_height_m=command_height_m,
+            body_height_m=body_height_m, wheel_force_n=wheel_force_n, tilt_rad=tilt_rad,
+            base_contact_force_n=base_contact_force_n, vertical_velocity_m_s=vertical_velocity_m_s,
+        )
+        jump_live = self.jump.active
+        mode = torch.where(jump_live, jump_out.mode, stair_out.mode)
+        height = torch.where(jump_live, jump_out.height_command_m, stair_out.height_command_m)
+        request_height = torch.where(jump_live, jump_out.request_height_m, torch.zeros_like(jump_out.request_height_m))
+        speed = torch.where(jump_live, jump_out.speed_scale, stair_out.speed_scale)
+        return SkillOutput(
+            mode=mode, height_command_m=height, request_height_m=request_height,
+            speed_scale=speed, stair_state=stair_out.state, jump_state=jump_out.state,
+            entered=stair_out.entered | jump_out.entered,
+            exited=stair_out.exited | jump_out.exited,
+            success=stair_out.success | jump_out.success,
+            failure=stair_out.failure | jump_out.failure,
+            jump_ignored=request & (stair_active | jump_active),
+        )
+
+
 __all__ = [
     "JumpFSM", "JumpFSMConfig", "JumpOutput", "JumpState",
-    "StairFSM", "StairFSMConfig", "StairOutput", "StairState",
+    "SkillFSM", "SkillOutput", "StairFSM", "StairFSMConfig", "StairOutput", "StairState",
 ]
