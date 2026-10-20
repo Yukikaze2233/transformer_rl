@@ -281,6 +281,8 @@ class WheeledLabEnv(DirectRLEnv):
         return current, ahead, valid
 
     def _terrain_scan_77(self):
+        if self._terrain_course is not None:
+            return self._terrain_course.scan_77()
         if self.terrain_scanner is None:
             raise RuntimeError("182D critic 需要 terrain scanner；请启用 --terrain-scan")
         hits = self._as_torch(self.terrain_scanner.data.ray_hits_w)

@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 import torch
@@ -165,6 +165,12 @@ class LabFormalReward:
         return tuple(name for name in REWARD_POSITIVE_TERMS + REWARD_COST_TERMS
                      if name not in self.config.available_terms)
 
+    @property
+    def missing_term_reasons(self):
+        reasons = {'contact_slip': 'No verified contact-point relative tangent velocity producer',
+                   'joint_boundary': 'No selected-asset geometric boundary producer'}
+        return {name: reasons.get(name, 'Physical producer unavailable') for name in self.missing_terms}
+
     def reset(self, mask, now_s, episode_id, control_epoch):
         self.composer.reset(mask, now_s, episode_id, control_epoch)
 
@@ -182,7 +188,8 @@ class LabFormalReward:
     def observe(self, sample, state, *, effort_nm, episode_id, control_epoch,
                 command, mode, policy_owned=None, phase=None, jump_height_world_z_m=None,
                 jump_velocity_world_z_m_s=None, target_roll_pitch_rad=None,
-                joint_boundary_shortfall_rad=None, wheel_contact_tangent_speed_m_s=None):
+                joint_boundary_shortfall_rad=None, wheel_contact_tangent_speed_m_s=None,
+                body_contact_allowed=None):
         owned = (torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
                  if policy_owned is None else policy_owned)
         if "joint_boundary" in self.config.available_terms and joint_boundary_shortfall_rad is None:
@@ -196,10 +203,17 @@ class LabFormalReward:
             joint_boundary_shortfall_rad=joint_boundary_shortfall_rad,
             wheel_contact_tangent_speed_m_s=wheel_contact_tangent_speed_m_s,
             normal_load_source=self.config.normal_load_source)
+        if body_contact_allowed is not None:
+            if (body_contact_allowed.shape != (self.num_envs,)
+                    or body_contact_allowed.dtype != torch.bool
+                    or body_contact_allowed.device != self.device):
+                raise ValueError('intentional base contact requires a bool row mask')
         reference = reward_reference_from_command(
             command, mode, phase=phase, jump_height_world_z_m=jump_height_world_z_m,
             jump_velocity_world_z_m_s=jump_velocity_world_z_m_s,
             target_roll_pitch_rad=target_roll_pitch_rad)
+        if body_contact_allowed is not None:
+            reference = replace(reference, intentional_base_contact=body_contact_allowed.clone())
         self.composer.observe(physics, reference)
 
     def finish(self, *, terminated, truncated, physical_success_request_id=None,

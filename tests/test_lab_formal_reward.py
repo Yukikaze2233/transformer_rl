@@ -1,6 +1,7 @@
 """LabEnv 正式 reward 适配器单测；不启动 Isaac。"""
 from dataclasses import replace
 
+import pytest
 import torch
 
 from test_physical_observation import fixture
@@ -69,3 +70,46 @@ def test_reward_reference_is_normal_mode_for_flat_commands():
     _, _, _, command = enabled_fixture()
     assert command.mode.eq(int(CommandMode.NORMAL)).all()
     assert command.admitted_body_command.shape == (2, 4)
+
+
+def test_intentional_base_contact_changes_only_harmful_cost_not_measured_force():
+    binding, state, sample, command = enabled_fixture()
+    base = binding.native_body_names.index('base_link')
+    force = sample.terrain_contact_force_world_n.clone()
+    force[:, base, 2] = 10
+    physical = replace(sample, terrain_contact_force_world_n=force)
+    mode = torch.full((2,), int(CommandMode.STAIR), dtype=torch.long)
+    ids = torch.zeros(2, dtype=torch.long)
+
+    def interval(allowed):
+        reward = LabFormalReward(binding, 2, FormalRewardConfig(13.886))
+        reward.reset(torch.ones(2, dtype=torch.bool), torch.zeros(2, dtype=torch.float64), ids, ids)
+        reward.begin(torch.zeros(2, 6), torch.zeros(2, 6), now_s=torch.zeros(2, dtype=torch.float64),
+                     episode_id=ids, control_epoch=ids, command=command.admitted_body_command, mode=mode)
+        for tick in (1, 2):
+            current = replace(physical, timestamp_s=torch.full((2,), tick * .005, dtype=torch.float64))
+            reward.observe(current, replace(state, timestamp_s=current.timestamp_s),
+                           effort_nm=torch.zeros(2, 6), episode_id=ids, control_epoch=ids,
+                           command=command.admitted_body_command, mode=mode,
+                           body_contact_allowed=torch.full((2,), allowed, dtype=torch.bool))
+        return reward.finish(terminated=torch.zeros(2, dtype=torch.bool),
+                             truncated=torch.zeros(2, dtype=torch.bool))
+
+    ordinary, intentional = interval(False), interval(True)
+    difference = ordinary.raw_cost_densities['harmful_contact'] - intentional.raw_cost_densities['harmful_contact']
+    torch.testing.assert_close(difference, torch.full_like(difference, 2.))
+    assert physical.terrain_contact_force_world_n[:, base, 2].eq(10).all()
+
+
+def test_intentional_base_contact_does_not_allow_other_modes():
+    binding, state, sample, command = enabled_fixture()
+    reward = LabFormalReward(binding, 2, FormalRewardConfig(13.886))
+    ids = torch.zeros(2, dtype=torch.long)
+    reward.reset(torch.ones(2, dtype=torch.bool), torch.zeros(2, dtype=torch.float64), ids, ids)
+    reward.begin(torch.zeros(2, 6), torch.zeros(2, 6), now_s=torch.zeros(2, dtype=torch.float64),
+                 episode_id=ids, control_epoch=ids, command=command.admitted_body_command, mode=command.mode)
+    current = replace(sample, timestamp_s=torch.full((2,), .005, dtype=torch.float64))
+    with pytest.raises(ValueError):
+        reward.observe(current, replace(state, timestamp_s=current.timestamp_s), effort_nm=torch.zeros(2, 6),
+                       episode_id=ids, control_epoch=ids, command=command.admitted_body_command,
+                       mode=command.mode, body_contact_allowed=torch.ones(2, dtype=torch.bool))

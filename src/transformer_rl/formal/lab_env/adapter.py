@@ -44,6 +44,12 @@ class LabLabeledEnv:
         sample = self.env._sample()
         return self.env._observations.assembler.measure(sample), sample
 
+    def _policy_allowed(self):
+        recovery = getattr(self.env, '_recover_task', None)
+        if recovery is not None:
+            return ~recovery.hold_mask
+        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+
     def _labels(self, state, timestamp, *, episode_id=None, control_epoch=None):
         force = state.wheel_ground_force_n
         contact = (force > self.contact_threshold_n).to(torch.float32)
@@ -73,7 +79,7 @@ class LabLabeledEnv:
             timestamp_s=timestamp.clone(),
             episode_id=self._episode_id.clone(),
             control_epoch=self._control_epoch.clone(),
-            policy_allowed=torch.ones(self.num_envs, dtype=torch.bool, device=self.device),
+            policy_allowed=self._policy_allowed().clone(),
             labels=self._labels(state, timestamp),
         )
 
@@ -87,8 +93,8 @@ class LabLabeledEnv:
         return self._observation(state, self.env._clock())
 
     def step(self, issued_action, completed_estimate):
-        # M1 没有下一 tick 的 recovery/jump 请求；保留参数以匹配 collector 契约。
-        del completed_estimate
+        policy_before = self._policy_allowed().clone()
+        self.env._completed_estimate = completed_estimate
         obs, reward, terminated, truncated, extras = self.env.step(issued_action)
         self.last_timing = dict(extras.get("timing", {}))
         self.last_counts = {}
@@ -102,8 +108,9 @@ class LabLabeledEnv:
         final_labels = self._labels(final_state, final_time,
                                     episode_id=final_episode, control_epoch=final_control)
         done = terminated | truncated
+        handoff = (policy_before != self._policy_allowed()) & ~done
         self._episode_id.add_(done.long())
-        self._control_epoch.add_(done.long())
+        self._control_epoch.add_((done | handoff).long())
         next_state, _ = self._sample_state()
         next_observation = self._observation(next_state, self.env._clock())
         final_critic = self.env._terminal_critic_182.clone()
@@ -115,7 +122,7 @@ class LabLabeledEnv:
             final_critic=final_critic,
             final_critic_valid=torch.isfinite(final_critic).all(-1),
             final_labels=final_labels,
-            fully_policy_owned=torch.ones(self.num_envs, dtype=torch.bool, device=self.device),
-            handoff_after=torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+            fully_policy_owned=policy_before,
+            handoff_after=handoff,
             terminal_frame=self.env._terminal_frame.clone(),
         )

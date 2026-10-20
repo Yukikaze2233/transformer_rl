@@ -17,6 +17,7 @@ from ..learning.contracts import (AuxiliaryLabels, BoundaryMasks, ObservationWin
                                   masked_gae)
 from ..learning.optimization import StructuredBatch
 from .adapter import LabLabeledEnv
+from .course_tasks import completed_policy_estimate
 
 
 class LabCollector:
@@ -84,7 +85,9 @@ class LabCollector:
             old_critic = self.model.critic_features(current.critic, raw_state)
             old_value = self.model.critic(old_critic)
             self.attempted_vector_steps += 1
-            returned = self.env.step(issued, None)
+            estimate = (completed_policy_estimate(current.frame, raw_state, current.timestamp_s)
+                        if getattr(getattr(self.env, 'env', None), '_terrain_course', None) is not None else None)
+            returned = self.env.step(issued, estimate)
             self.returned_vector_steps += 1
             for name, elapsed in self.env.last_timing.items():
                 environment_timing[name] = environment_timing.get(name, 0.0) + elapsed
@@ -190,7 +193,7 @@ class LabCollector:
             "policy_owned_fraction": float(flat_masks.actor.float().mean()),
             "reward_mean": float(records["reward"].mean()),
             "return_mean": float(returns.mean()),
-            "advantage_std": float(advantage.std()),
+            "advantage_std": float(advantage.std(unbiased=False)),
         }
         if environment_timing:
             self.last_metrics["environment_host_wall_s"] = environment_timing

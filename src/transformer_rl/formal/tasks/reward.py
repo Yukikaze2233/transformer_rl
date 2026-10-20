@@ -92,6 +92,7 @@ class RewardReference:
     jump_height_world_z_m: torch.Tensor
     jump_velocity_world_z_m_s: torch.Tensor
     target_roll_pitch_rad: torch.Tensor
+    intentional_base_contact: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -285,6 +286,9 @@ class PhysicalRewardComposer:
                     or len(set(sample.available_terms)) != len(sample.available_terms)
                     or any(name not in REWARD_TERMS for name in sample.available_terms)):
                 raise ValueError('reward available term list is unknown or duplicated')
+        if reference.intentional_base_contact is not None:
+            self._tensor('intentional base contact', reference.intentional_base_contact, dtype=torch.bool)
+            invalid |= reference.intentional_base_contact & (reference.mode != int(CommandMode.STAIR))
         invalid |= ((sample.body_normal_load_n < 0).any(-1) | (sample.wheel_contact_tangent_speed_m_s < 0).any(-1)
                     | (sample.joint_boundary_shortfall_rad < 0).any(-1)
                     | (sample.gravity_body.norm(dim=-1) - 1).abs().gt(1e-4)
@@ -361,6 +365,10 @@ class PhysicalRewardComposer:
                 'joint_boundary': 2 * (sample.joint_boundary_shortfall_rad / .05).square().sum(-1),
                 'flight_wheel_effort': .2 * (jump & (phase == int(RewardPhase.FLIGHT))) * (effort[:, 4:] / 4.5).square().sum(-1),
                 'landing_impact': .5 * landing * h(excess_landing)}
+        if reference.intentional_base_contact is not None:
+            base = self.binding.native_body_names.index('base_link')
+            cost['harmful_contact'] -= 2 * (reference.intentional_base_contact
+                                          & (sample.body_normal_load_n[:, base] > 3)).long()
         if sample.available_terms is not None:
             available = set(sample.available_terms)
             positive = {key: value if key in available else torch.zeros_like(value)

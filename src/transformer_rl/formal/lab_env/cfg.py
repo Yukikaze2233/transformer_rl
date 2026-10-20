@@ -171,9 +171,16 @@ def build_forward_scanners_cfg() -> tuple[RayCasterCfg, RayCasterCfg, RayCasterC
     return one("L_link3", 0.0), one("L_link3", 0.25), one("R_link3", 0.0), one("R_link3", 0.25)
 
 
-def build_terrain_cfg(profile: str = "plane") -> TerrainImporterCfg:
-    if profile not in ("plane", "rough"):
-        raise ValueError("terrain profile 只支持 plane/rough")
+def build_terrain_cfg(profile: str = "plane", *, atlas_manifest=None) -> TerrainImporterCfg:
+    if profile not in ("plane", "rough", "course"):
+        raise ValueError("terrain profile 只支持 plane/rough/course")
+    if profile == 'course':
+        from pathlib import Path
+        if atlas_manifest is None:
+            raise ValueError('course requires a prepared terrain atlas manifest')
+        return TerrainImporterCfg(
+            prim_path='/World/ground', terrain_type='usd', collision_group=-1,
+            usd_path=str(Path(atlas_manifest).resolve().parent / 'terrain.usda'), debug_vis=False)
     if profile == "rough":
         generator = TerrainGeneratorCfg(
             size=(8.0, 8.0), border_width=20.0, num_rows=4, num_cols=4,
@@ -276,6 +283,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
                   terrain_scan: bool = False,
                   forward_scan: bool = False,
                   terrain_profile: str = "plane",
+                  terrain_atlas_manifest: str | None = None,
                   seed: int | None = 0,
                   expected_manifest_sha256: str | None = None) -> WheeledLabEnvCfg:
     """从资产目录构造可直接交给 WheeledLabEnv 的配置。"""
@@ -299,6 +307,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     object.__setattr__(cfg, "pair_domain_spec", pair_domain)
     object.__setattr__(cfg, "formal_reward_spec", formal_reward)
     object.__setattr__(cfg, "recover_spec", recover)
+    object.__setattr__(cfg, "course_manifest", terrain_atlas_manifest)
     if recover is not None:
         cfg.episode_length_s = recover.episode_length_s
     cfg.robot_cfg = build_robot_cfg(asset, response=response)
@@ -309,5 +318,10 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
                           if height_scanner and not terrain_scan else None)
     cfg.terrain_scanner = build_terrain_scan_cfg() if terrain_scan else None
     cfg.forward_scanners = build_forward_scanners_cfg() if forward_scan else ()
-    cfg.terrain = build_terrain_cfg(terrain_profile)
+    cfg.terrain = build_terrain_cfg(terrain_profile, atlas_manifest=terrain_atlas_manifest)
+    if terrain_profile == 'course':
+        # The course uses its exact collision-triangle query index. Avoid
+        # constructing a second RayCaster/BVH over the same atlas for every ray.
+        cfg.height_scanner = cfg.terrain_scanner = None
+        cfg.forward_scanners = ()
     return cfg

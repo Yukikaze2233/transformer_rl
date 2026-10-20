@@ -1,6 +1,9 @@
 """Fast LabCollector boundary checks for the 182D -> 185D path."""
 from __future__ import annotations
 
+from dataclasses import replace
+from types import SimpleNamespace
+
 import torch
 
 from transformer_rl.formal.contracts import (LabeledObservation, LabeledStep,
@@ -85,3 +88,45 @@ def test_lab_collector_preserves_terminal_reward_and_uses_five_frame_critic():
     assert torch.isfinite(batch.advantages).all()
     assert collector.last_metrics["terminated_rows"] == 0
     assert collector.last_metrics["truncated_rows"] == 1
+
+
+def test_adapter_excludes_script_hold_and_separates_handoff_from_partial_reset():
+    from test_physical_observation import fixture
+    _, _, assembler, sample, _ = fixture()
+
+    class FakeLab:
+        num_envs, step_dt, device = 2, .01, 'cpu'
+
+        def __init__(self):
+            self._observations = SimpleNamespace(assembler=assembler)
+            self._recover_task = SimpleNamespace(hold_mask=torch.tensor([True, False]))
+            self.obs_buf = {'policy': torch.zeros(2, 175), 'critic': torch.zeros(2, 182)}
+            self.sample = sample
+
+        def _sample(self):
+            return self.sample
+
+        def _clock(self):
+            return self.sample.timestamp_s
+
+        def reset(self):
+            pass
+
+        def step(self, action):
+            self.sample = replace(sample, timestamp_s=torch.full((2,), .01, dtype=torch.float64))
+            self._terminal_sample = self.sample
+            self._terminal_state = assembler.measure(self.sample)
+            self._terminal_critic_182 = torch.ones(2, 182)
+            self._terminal_frame = torch.ones(2, 35)
+            self._recover_task.hold_mask[:] = False
+            return self.obs_buf, torch.ones(2), torch.tensor([False, False]), torch.tensor([False, True]), {}
+
+    adapter = LabLabeledEnv(FakeLab())
+    initial = adapter.reset()
+    assert initial.policy_allowed.tolist() == [False, True]
+    returned = adapter.step(torch.zeros(2, 6), None)
+    assert returned.fully_policy_owned.tolist() == [False, True]
+    assert returned.handoff_after.tolist() == [True, False]
+    assert returned.final_labels.control_epoch.tolist() == [1, 1]
+    assert returned.observation.control_epoch.tolist() == [2, 2]
+    assert returned.observation.episode_id.tolist() == [1, 2]

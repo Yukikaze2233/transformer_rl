@@ -18,6 +18,7 @@ import torch
 from .geometry import TerrainKind
 from .terrain import ContinuousTerrainGenerator, TerrainExtent, TerrainRequest, TerrainTuning
 from .terrain_assets import file_pin, write_collision_usda
+from .terrain_query import build_query_index
 
 
 def surface_height(vertices, faces, xy):
@@ -82,7 +83,7 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
     rng = np.random.default_rng(seed)
     tuning = TerrainTuning(.7, (.2, 1.1), .25, platform_tread_m=.8, stair_tread_m=.8)
     generator = ContinuousTerrainGenerator(seed, tuning)
-    vertices, faces, materials, tiles = [], [], [], []
+    vertices, faces, materials, face_tiles, tiles = [], [], [], [], []
     vertex_count = 0
 
     def append(parts, material_values, tile):
@@ -95,6 +96,7 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
             faces.append(triangles + vertex_count)
             vertex_count += len(points)
             materials.extend([float(mu)] * len(triangles))
+            face_tiles.extend([len(tiles)] * len(triangles))
         tiles.append(tile)
 
     append([_rectangle(-90, 90, -90, 90, 0, 0)], [.7], {
@@ -139,7 +141,10 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
     write_collision_usda(output / 'terrain.usda', vertices, faces, static_friction=.7,
                          dynamic_friction=.7, face_material=material_ids, material_coefficients=coefficients)
     np.savez_compressed(output / 'geometry.npz', vertices_m=vertices, triangles=faces,
-                        face_material=material_ids, material_coefficients=coefficients)
+                        face_material=material_ids, material_coefficients=coefficients,
+                        face_tile=np.asarray(face_tiles, np.int32))
+    np.savez_compressed(output / 'query_index.npz',
+                        **build_query_index(vertices, faces, face_tiles, len(tiles)))
     manifest = {'format': 'terrain_course_atlas_v1', 'seed': seed, 'levels': levels,
                 'source_assets': file_pin(prepared_assets / 'manifest.json'), 'tuning': asdict(tuning),
                 'tiles': tiles, 'files': {p.name: file_pin(p) for p in sorted(output.iterdir())},
