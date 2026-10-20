@@ -283,6 +283,13 @@ class WheeledLabEnv(DirectRLEnv):
     def _terrain_scan_77(self):
         if self._terrain_course is not None:
             return self._terrain_course.scan_77()
+        plane = getattr(self.cfg, 'static_plane_height_m', None)
+        if plane is not None:
+            ground = torch.full_like(self._ground_at_root, plane)
+            height = self._root_link_position()[:, 2] - ground - self._task.nominal_height_m
+            if not torch.isfinite(height).all():
+                raise ValueError('nonfinite root position in the fixed-plane scan')
+            return (5 * height[:, None]).clamp(-1, 1).expand(-1, TERRAIN_SCAN_DIM), ground
         if self.terrain_scanner is None:
             raise RuntimeError("182D critic 需要 terrain scanner；请启用 --terrain-scan")
         hits = self._as_torch(self.terrain_scanner.data.ray_hits_w)

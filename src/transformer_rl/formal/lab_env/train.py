@@ -73,6 +73,8 @@ def _parse_args(argv=None):
                         help="启用左右轮轮下/轮前 raycast 和 StairFSM")
     parser.add_argument("--terrain-profile", choices=("plane", "rough", "course"), default="plane")
     parser.add_argument('--terrain-atlas', type=Path, help='Prepared terrain atlas manifest; never a raw source USD')
+    parser.add_argument('--profile-collection', action='store_true',
+                        help='Diagnostic GPU fences and per-stage collection logs; disabled by default')
     return parser.parse_args(argv)
 
 
@@ -236,7 +238,7 @@ def main(argv=None):
             command_curriculum = LabCommandCurriculum(
                 args.num_envs, device=args.device, stage=stage, seed=args.seed)
             env.set_command_sampler(command_curriculum.sample)
-        collector = LabCollector(LabLabeledEnv(env), model)
+        collector = LabCollector(LabLabeledEnv(env), model, profile=args.profile_collection)
         if args.resume is not None and env._terrain_course is not None:
             if payload.get('terrain_course') is None or payload.get('global_rng') is None:
                 raise ValueError('course resume requires terrain/request state and global RNG; no implicit migration')

@@ -308,6 +308,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     object.__setattr__(cfg, "formal_reward_spec", formal_reward)
     object.__setattr__(cfg, "recover_spec", recover)
     object.__setattr__(cfg, "course_manifest", terrain_atlas_manifest)
+    object.__setattr__(cfg, 'static_plane_height_m', 0. if terrain_profile == 'plane' else None)
     if recover is not None:
         cfg.episode_length_s = recover.episode_length_s
     cfg.robot_cfg = build_robot_cfg(asset, response=response)
@@ -319,9 +320,9 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     cfg.terrain_scanner = build_terrain_scan_cfg() if terrain_scan else None
     cfg.forward_scanners = build_forward_scanners_cfg() if forward_scan else ()
     cfg.terrain = build_terrain_cfg(terrain_profile, atlas_manifest=terrain_atlas_manifest)
-    if terrain_profile == 'course':
-        # The course uses its exact collision-triangle query index. Avoid
-        # constructing a second RayCaster/BVH over the same atlas for every ray.
+    if terrain_profile in ('course', 'plane'):
+        # Query the fixed plane analytically, or the course's exact triangles.
+        # Neither path needs a second RayCaster/BVH or an exported Warp view.
         cfg.height_scanner = cfg.terrain_scanner = None
         cfg.forward_scanners = ()
     return cfg

@@ -7,6 +7,7 @@ collector 的逐 step 所有权/协议校验，因为这些检查属于正式 re
 from __future__ import annotations
 
 from dataclasses import fields
+import json
 import time
 
 import torch
@@ -24,7 +25,7 @@ class LabCollector:
     """M1 collector；输入 LabLabeledEnv，输出 StructuredBatch。"""
 
     def __init__(self, env: LabLabeledEnv, model,
-                 config: StructuredCollectionConfig = StructuredCollectionConfig()):
+                 config: StructuredCollectionConfig = StructuredCollectionConfig(), *, profile=False):
         if not isinstance(env, LabLabeledEnv):
             raise TypeError("env 必须是 LabLabeledEnv")
         if not isinstance(config, StructuredCollectionConfig):
@@ -43,6 +44,18 @@ class LabCollector:
         self.returned_vector_steps = 0
         self.last_metrics = {}
         self.last_timing = {}
+        if type(profile) is not bool:
+            raise TypeError('collection profiling requires an explicit bool')
+        self._profile = profile
+
+    def _profile_boundary(self, stage, step=None):
+        """Diagnostic fences are opt-in; ordinary sampling never adds them."""
+        if self._profile:
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize(self.device)
+            print('COLLECTION_PROFILE ' + json.dumps({
+                'stage': stage, 'completed_step': step, 'host_time_s': time.perf_counter(),
+            }), flush=True)
 
     @torch.no_grad()
     def reset(self, seed=None):
@@ -84,10 +97,12 @@ class LabCollector:
             issued = raw_action.clamp(-self.bounds, self.bounds)
             old_critic = self.model.critic_features(current.critic, raw_state)
             old_value = self.model.critic(old_critic)
+            self._profile_boundary('policy', step + 1)
             self.attempted_vector_steps += 1
             estimate = (completed_policy_estimate(current.frame, raw_state, current.timestamp_s)
                         if getattr(getattr(self.env, 'env', None), '_terrain_course', None) is not None else None)
             returned = self.env.step(issued, estimate)
+            self._profile_boundary('environment', step + 1)
             self.returned_vector_steps += 1
             for name, elapsed in self.env.last_timing.items():
                 environment_timing[name] = environment_timing.get(name, 0.0) + elapsed
@@ -102,6 +117,7 @@ class LabCollector:
             next_history[reset_before] = next_observation.frame[reset_before, None].expand(
                 -1, self.history_length, -1)
             _, next_raw_state, _ = self.model.actor.policy.outputs(next_history)
+            self._profile_boundary('next_policy', step + 1)
             same_final_epoch = ((final.episode_id == current.episode_id)
                                 & (final.control_epoch == current.control_epoch))
             rollout_end = torch.full_like(returned.terminated, step == steps - 1)
@@ -116,6 +132,7 @@ class LabCollector:
                 next_label_valid=current.labels.valid & final.valid,
                 next_same_control_epoch=same_final_epoch,
             )
+            self._profile_boundary('masks', step + 1)
             next_value = torch.zeros_like(old_value)
             ordinary = (masks.bootstrap & ~returned.truncated).nonzero().flatten()
             if ordinary.numel():
@@ -133,6 +150,7 @@ class LabCollector:
                 final_critic = self.model.critic_features(
                     returned.final_critic.index_select(0, timeout), terminal_raw_state)
                 next_value[timeout] = self.model.critic(final_critic)
+            self._profile_boundary('next_values', step + 1)
 
             values = {
                 "frame": current.frame,
@@ -162,10 +180,13 @@ class LabCollector:
 
             self._history = next_history
             self._current = next_observation
+            self._profile_boundary('stored', step + 1)
 
+        self._profile_boundary('rollout_complete', steps)
         masks = BoundaryMasks(*(mask_records[field.name] for field in fields(BoundaryMasks)))
         advantage, returns = masked_gae(records["reward"], records["value"], records["next_value"],
                                         masks, gamma=self.config.gamma, gae_lambda=self.config.gae_lambda)
+        self._profile_boundary('gae', steps)
         windows = ObservationWindows(prefix, records["frame"], records["reset"])
         flat_masks = BoundaryMasks(*(getattr(masks, field.name).flatten() for field in fields(masks)))
         labels = AuxiliaryLabels(records["velocity"].flatten(0, 1), records["contact"].flatten(0, 1),
@@ -176,6 +197,7 @@ class LabCollector:
                                 records["logp"].flatten(), records["value"].flatten(),
                                 advantage.flatten(), returns.flatten(), flat_masks, labels)
         batch.validate(self.model)
+        self._profile_boundary('batch_validated', steps)
         if self.device.type == "cuda":
             torch.cuda.synchronize(self.device)
         elapsed = time.perf_counter() - started
