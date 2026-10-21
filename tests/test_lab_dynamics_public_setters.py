@@ -77,8 +77,8 @@ def test_public_setters_refresh_a_preheated_com_cache_and_preserve_the_raw_draw(
     assert torch.equal(before, torch.get_rng_state())
     assert not legacy_calls
     assert [call[0] for call in ga_calls] == [
-        'set_masses_index', 'set_coms_index', 'set_inertias_index']
-    assert ga_robot.data.invalidations == 1
+        'set_masses_index', 'set_coms_index', 'set_inertias_index', 'set_coms_index']
+    assert ga_robot.data.invalidations == 2
     # This is the discriminating assertion: native readback alone passes on
     # the legacy path, even though the preheated public cache remains stale.
     assert torch.equal(legacy_robot.data.body_com_pose_b.torch, old_cache)
@@ -100,8 +100,8 @@ def test_public_all_row_writes_do_not_use_the_legacy_native_converter():
 
     apply(robot, binding, view, StartupDynamicsConfig(), use_public_setters=True,
           tensor_to_native=reject_legacy_conversion)
-    assert writes == ['masses', 'local_com', 'inertias']
-    assert [call[4].shape for call in calls] == [(2, 19), (2, 19, 7), (2, 19, 9)]
+    assert writes == ['masses', 'local_com', 'inertias', 'local_com']
+    assert [call[4].shape for call in calls] == [(2, 19), (2, 19, 7), (2, 19, 9), (2, 19, 7)]
     assert all(call[1:4] == (None, None, True) for call in calls)
 
 
@@ -123,14 +123,120 @@ def test_public_setters_reject_a_native_public_body_order_mismatch_before_writin
 
 def test_public_com_readback_rejects_a_unit_length_quaternion_permutation():
     robot, binding, view, _, _ = public_native()
-    original = robot.set_inertias_index
+    original = robot.set_coms_index
 
-    def corrupt_after_inertias(**kwargs):
+    def corrupt_com_write(**kwargs):
         original(**kwargs)
         view.local_com[..., 3:] = view.local_com[..., 3:].roll(1, dims=-1)
 
-    robot.set_inertias_index = corrupt_after_inertias
-    with pytest.raises(RuntimeError, match='xyzw orientation'):
+    robot.set_coms_index = corrupt_com_write
+    with pytest.raises(RuntimeError, match='position or xyzw rotation'):
+        apply(robot, binding, view, StartupDynamicsConfig(), use_public_setters=True)
+
+
+def test_public_com_write_accepts_independent_quaternion_sign_changes():
+    robot, binding, view, _, _ = public_native()
+    original = robot.set_coms_index
+
+    def change_signs(**kwargs):
+        values = kwargs['coms'].clone()
+        values[0, ::2, 3:] *= -1
+        original(**{**kwargs, 'coms': values})
+
+    robot.set_coms_index = change_signs
+    apply(robot, binding, view, StartupDynamicsConfig(), use_public_setters=True)
+    assert torch.equal(robot.data.body_com_pose_b.torch, view.local_com)
+
+
+def reselected_native():
+    robot, binding, view, writes, calls = public_native()
+    view.local_com[..., 3:] = torch.tensor([0., 0., 0., 1.])
+    view.inertias.copy_(torch.diag(torch.tensor([.01, .02, .03])).reshape(1, 1, 9).expand(2, 19, 9))
+    original = robot.set_inertias_index
+    boundaries = []
+
+    def reselect_principal_axes(**kwargs):
+        original(**kwargs)
+        # A 180-degree principal-axis sign change preserves this anisotropic
+        # link-frame inertia. GA's inertia setter leaves the static cache old.
+        view.local_com[..., 3:] = torch.tensor([0., 0., 1., 0.])
+        boundaries.append((view.local_com.clone(), robot.data.body_com_pose_b.torch.clone(),
+                           view.inertias.clone()))
+
+    robot.set_inertias_index = reselect_principal_axes
+    return robot, binding, view, writes, calls, boundaries
+
+
+def test_principal_frame_reselection_preserves_physics_and_refreshes_the_static_cache():
+    robot, binding, view, writes, calls, boundaries = reselected_native()
+    robot.data.body_com_pose_b  # Deliberately prewarm the static GA cache.
+    original_mass, original_inertia = view.masses.clone(), view.inertias.clone()
+    before = torch.get_rng_state().clone()
+
+    result = apply(robot, binding, view, StartupDynamicsConfig(nominal_fraction=0), use_public_setters=True)
+
+    assert torch.equal(before, torch.get_rng_state())
+    native_after_inertia, cache_after_inertia, inertia_after_write = boundaries[0]
+    assert not torch.equal(native_after_inertia[..., 3:], cache_after_inertia[..., 3:])
+    assert torch.equal(calls[-1][4], native_after_inertia)
+    assert torch.equal(view.local_com, native_after_inertia)
+    assert torch.equal(robot.data.body_com_pose_b.torch, native_after_inertia)
+    assert torch.equal(view.inertias, inertia_after_write)
+    torch.testing.assert_close(view.inertias, original_inertia * (view.masses / original_mass)[..., None])
+    assert writes == ['masses', 'local_com', 'inertias', 'local_com']
+    assert result.receipt['status'] == 'native_readback_matched'
+
+
+@pytest.mark.parametrize('field', ['inertias', 'local_com'])
+def test_principal_frame_reselection_does_not_hide_wrong_inertia_or_com_translation(field):
+    robot, binding, view, _, calls, _ = reselected_native()
+    original = robot.set_inertias_index
+
+    def corrupt(**kwargs):
+        original(**kwargs)
+        getattr(view, field)[0, 0, 0] += .1
+
+    robot.set_inertias_index = corrupt
+    with pytest.raises(RuntimeError, match='post-write readback'):
+        apply(robot, binding, view, StartupDynamicsConfig(), use_public_setters=True)
+    assert len(calls) == 3  # Invalid physics must not be republished as accepted cache data.
+
+
+@pytest.mark.parametrize('field', ['masses', 'inertias', 'local_com'])
+def test_final_cache_publication_must_not_change_native_mechanical_parameters(field):
+    robot, binding, view, _, _, _ = reselected_native()
+    original = robot.set_coms_index
+    count = 0
+
+    def corrupt_final_publication(**kwargs):
+        nonlocal count
+        original(**kwargs)
+        count += 1
+        if count == 2:
+            value = getattr(view, field)
+            if field == 'masses':
+                value[0, 0] += .1
+            else:
+                value[0, 0, 0] += .1
+
+    robot.set_coms_index = corrupt_final_publication
+    with pytest.raises(RuntimeError, match='cache publication changed native'):
+        apply(robot, binding, view, StartupDynamicsConfig(), use_public_setters=True)
+
+
+def test_final_cache_publication_rejects_a_stale_public_pose():
+    robot, binding, view, _, _, _ = reselected_native()
+    original = robot.data.publish
+    count = 0
+
+    def leave_final_cache_stale(value):
+        nonlocal count
+        count += 1
+        if count == 1:
+            original(value)
+
+    robot.data.publish = leave_final_cache_stale
+    with pytest.raises(RuntimeError, match='cache differs from the final native principal frame'):
         apply(robot, binding, view, StartupDynamicsConfig(), use_public_setters=True)
 
 

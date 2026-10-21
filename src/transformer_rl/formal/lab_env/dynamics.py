@@ -44,6 +44,19 @@ class LabStartupDynamics:
                 raise ValueError('invalid Lab native mechanical source: ' + name)
             return value.detach().cpu().clone()
 
+        def same_com_pose(actual, expected):
+            if not torch.allclose(actual[..., :3], expected[..., :3], rtol=0, atol=1e-6):
+                return False
+            left, right = actual[..., 3:], expected[..., 3:]
+            left_norm, right_norm = left.norm(dim=-1, keepdim=True), right.norm(dim=-1, keepdim=True)
+            if (not torch.allclose(left_norm, torch.ones_like(left_norm), rtol=0, atol=1e-4)
+                    or not torch.allclose(right_norm, torch.ones_like(right_norm), rtol=0, atol=1e-4)):
+                return False
+            left, right = left / left_norm, right / right_norm
+            # Quaternion signs can differ per body without changing its rotation.
+            difference = torch.minimum((left - right).abs().amax(-1), (left + right).abs().amax(-1))
+            return bool(difference.le(1e-6).all())
+
         masses = read('get_masses', (num_envs, 19))
         coms = read('get_coms', (num_envs, 19, 7))
         inertias = read('get_inertias', (num_envs, 19, 9))
@@ -69,6 +82,8 @@ class LabStartupDynamics:
                                        env_ids=None, body_ids=None, full_data=True)
                 robot.set_coms_index(coms=target_com.to(device).contiguous(),
                                      env_ids=None, body_ids=None, full_data=True)
+                if not same_com_pose(read('get_coms', coms.shape), target_com):
+                    raise RuntimeError('Lab public COM write changed the selected position or xyzw rotation')
                 robot.set_inertias_index(inertias=target_inertia.to(device).contiguous(),
                                          env_ids=None, body_ids=None, full_data=True)
             else:
@@ -84,9 +99,24 @@ class LabStartupDynamics:
                 or not torch.allclose(actual_inertia, target_inertia, rtol=1e-4, atol=1e-7)
                 or not torch.allclose(actual_com[..., 3:].norm(dim=-1), torch.ones(num_envs, 19), atol=1e-4, rtol=0)):
             raise RuntimeError('Lab native startup parameters failed their actual post-write readback')
-        if use_public_setters and not torch.allclose(actual_com[..., 3:], target_com[..., 3:],
-                                                    rtol=0, atol=1e-6):
-            raise RuntimeError('Lab public COM setter changed the selected xyzw orientation')
+        if use_public_setters and config is not None:
+            # PhysX may reselect principal axes when writing the link-frame
+            # inertia matrix. Publish its final pose, never the previous axes.
+            robot.set_coms_index(coms=actual_com.to(device).contiguous(),
+                                 env_ids=None, body_ids=None, full_data=True)
+            published_mass = read('get_masses', masses.shape)
+            published_com = read('get_coms', coms.shape)
+            published_inertia = read('get_inertias', inertias.shape)
+            if (not torch.allclose(published_mass, actual_mass, rtol=1e-5, atol=1e-7)
+                    or not same_com_pose(published_com, actual_com)
+                    or not torch.allclose(published_inertia, actual_inertia, rtol=1e-4, atol=1e-7)):
+                raise RuntimeError('Lab final COM cache publication changed native mechanical parameters')
+            cached_com = robot.data.body_com_pose_b.torch
+            if (not isinstance(cached_com, torch.Tensor) or cached_com.shape != coms.shape
+                    or cached_com.dtype != torch.float32 or not torch.isfinite(cached_com).all()
+                    or not same_com_pose(cached_com.detach().cpu(), published_com)):
+                raise RuntimeError('Lab public COM cache differs from the final native principal frame')
+            actual_mass, actual_com, actual_inertia = published_mass, published_com, published_inertia
         self.mass_kg_by_environment = actual_mass.sum(-1).to(device)
         self.mass_scale = (actual_mass.sum(-1) / nominal).to(device)[:, None]
         self.base_com_local_m = actual_com[:, 0, :3].to(device)
