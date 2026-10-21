@@ -132,9 +132,16 @@ class ManagedLabRuntime:
                 or state['cold_physical_state_restored'] is not False):
             raise ValueError('managed Lab restore requires the original sources before fresh physical sampling')
         course = deepcopy(state['course'])
+        if not isinstance(course, dict):
+            raise ValueError('managed Lab course snapshot must be a mapping')
         task = course.get('tasks', {})
         protocol = self.components.protocol
-        if (set(course) != {'format', 'router', 'tasks', 'stair_requests', 'stair_next_id'}
+        course_keys = {'format', 'router', 'tasks', 'stair_requests', 'stair_next_id'}
+        if course.get('format') == 'lab_terrain_course_v3':
+            course_keys |= {'recovery', 'birth_family_counts'}
+        elif course.get('format') != 'lab_terrain_course_v2':
+            raise ValueError('managed Lab course snapshot format differs')
+        if (set(course) != course_keys
                 or not isinstance(task, dict)
                 or set(task) != {'format', 'next_id', 'paid_id', 'rng',
                                 *self.course.tasks._COUNTERS}):

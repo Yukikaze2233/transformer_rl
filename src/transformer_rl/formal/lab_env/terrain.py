@@ -10,10 +10,12 @@ from ..control.observation import CommandMode
 from ..simulation.ground import WheelCollisionCentres
 from ..tasks.reward import RewardPhase
 from ..tasks.geometry import TerrainKind
+from ..tasks.curriculum import TaskFamily
 from ..tasks.terrain_courses import TerrainCourseRouter
 from ..tasks.terrain_query import StaticTerrainQuery, wheel_lookahead_points
 from ..tasks.trajectory import DriveEnvelope
 from .course_tasks import LabCourseTasks, RequestCommand, StairRequestProtocol
+from .recovery_lifecycle import RecoveryLifecycle
 
 
 class LabTerrainCourse:
@@ -35,6 +37,8 @@ class LabTerrainCourse:
                                                 torch.zeros(1, 3, dtype=torch.float64))
         self.nominal_spawn_height_m = float(nominal_spawn.root_pose_xyzw[0, 2])
         self.tasks = LabCourseTasks(env.num_envs, envelope, seed=int(env.cfg.seed or 0), device=env._device)
+        self.recovery = RecoveryLifecycle(env.num_envs, device=env._device)
+        self._birth_family_counts = torch.zeros(len(TaskFamily), dtype=torch.long, device=env._device)
         self.stair_requests = StairRequestProtocol(env.num_envs, device=env._device)
         self.body_contact_allowed = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
         self.wheel_ground = torch.zeros(env.num_envs, 2, device=env._device)
@@ -339,6 +343,8 @@ class LabTerrainCourse:
     def reset_commands(self, ids, task):
         env = self.env
         self.tasks.reset(ids, task, env._clock())
+        self.recovery.reset(ids, task.mode == int(CommandMode.RECOVERY))
+        self._birth_family_counts.add_(torch.bincount(task.draw.family, minlength=len(TaskFamily)))
         env._command[ids] = self.tasks.stream.current[ids]
         env._command_base[ids] = env._command[ids]
         env._command_mode[ids] = self.tasks.base_mode[ids]
@@ -386,6 +392,16 @@ class LabTerrainCourse:
         height_m = torch.where(issue, self._course_stair_height, height_m)
         self._course_stair_pending &= ~issue
         return request_id, height_m
+
+    def finish_recovery_interval(self):
+        """Finish the old reward interval before changing the next command mode."""
+        env = self.env
+        boundary = self.recovery.finish_interval(
+            env._clock(), env._completed_estimate,
+            policy_owned=env._interval_policy_owned, failed=env._terminated)
+        self.tasks.base_mode.masked_fill_(boundary.handoff, int(CommandMode.NORMAL))
+        self.tasks.family.masked_fill_(boundary.handoff, int(TaskFamily.HEIGHT))
+        return boundary.timeout
 
     def advance_skill(self):
         # Deployment-visible request decision: env._completed_estimate comes
@@ -465,6 +481,14 @@ class LabTerrainCourse:
 
     def observe_reward(self, sample, state, boundary):
         env = self.env
+        self.recovery.observe_physics(
+            height_m=state.height_above_ground_m, command_height_m=env._command[:, 3],
+            tilt_rad=env._last_tilt,
+            angular_speed_rad_s=state.angular_velocity_body_rad_s.norm(dim=-1),
+            velocity_z_m_s=sample.root_com_velocity_world_m_s[:, 2],
+            wheel_load_n=state.wheel_ground_force_n,
+            base_load_n=sample.body_normal_load_n[:, env._base_body_index],
+            policy_owned=env._interval_policy_owned)
         self.tasks.observe_physics(state.wheel_ground_force_n, sample.root_com_velocity_world_m_s[:, 2],
                                    env._last_tilt, sample.root_link_position_world_m[:, 2],
                                    angular_speed_rad_s=state.angular_velocity_body_rad_s.norm(dim=-1),
@@ -492,14 +516,18 @@ class LabTerrainCourse:
         return terminated & ~allowed_contact
 
     def state_dict(self):
-        return {'format': 'lab_terrain_course_v2', 'router': self.router.state_dict(),
+        return {'format': 'lab_terrain_course_v3', 'router': self.router.state_dict(),
                 'tasks': self.tasks.state_dict(), 'stair_requests': self.stair_requests.state_dict(),
-                'stair_next_id': self.stair_next_id.clone()}
+                'stair_next_id': self.stair_next_id.clone(),
+                'recovery': self.recovery.state_dict(),
+                'birth_family_counts': self._birth_family_counts.clone()}
 
     def restore_after_physical_reset(self, state):
+        legacy = isinstance(state, dict) and state.get('format') == 'lab_terrain_course_v2'
+        expected = {'format', 'router', 'tasks', 'stair_requests', 'stair_next_id'}
         if (not isinstance(state, dict)
-                or set(state) != {'format', 'router', 'tasks', 'stair_requests', 'stair_next_id'}
-                or state.get('format') != 'lab_terrain_course_v2'):
+                or set(state) != (expected if legacy else expected | {'recovery', 'birth_family_counts'})
+                or state.get('format') not in ('lab_terrain_course_v2', 'lab_terrain_course_v3')):
             raise ValueError('terrain course checkpoint format differs')
         next_id = state['stair_next_id']
         if (not isinstance(next_id, torch.Tensor) or next_id.shape != self.stair_next_id.shape
@@ -507,13 +535,25 @@ class LabTerrainCourse:
                 or (next_id.to(self.env._device)
                     <= state['stair_requests']['max_seen_id'].to(self.env._device)).any()):
             raise ValueError('terrain course stair request watermarks differ')
+        if not legacy:
+            births = state['birth_family_counts']
+            if (not isinstance(births, torch.Tensor) or births.shape != self._birth_family_counts.shape
+                    or births.dtype != torch.long or (births < 0).any()):
+                raise ValueError('terrain course birth counters differ')
         self.router.load_state_dict(state['router'])
         self.tasks.restore_after_physical_reset(state['tasks'], self.env._clock())
         self.stair_requests.restore_after_physical_reset(state['stair_requests'], self.env._clock())
         self.stair_next_id.copy_(next_id)
+        if not legacy:
+            self.recovery.restore_after_physical_reset(state['recovery'])
+            self._birth_family_counts.copy_(births)
 
     def metrics(self):
         return {'atlas_sha256': self.router.identity,
+                'recovery': self.recovery.metrics(),
+                'episode_birth_family_counts': dict(zip(
+                    (name.name.lower() for name in TaskFamily), self._birth_family_counts.tolist())),
+                'episode_birth_counts_scope': 'observed source counters; legacy v2 history is unavailable',
                 'spawn_lateral_offsets_m': self._spawn_y_offset.tolist(),
                 'spawn_lateral_offset_scope': 'exact_authored_two_wheel_approach_line',
                 'task_kind_histogram': self.tasks.kind_counts.tolist(),

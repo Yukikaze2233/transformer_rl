@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from transformer_rl.formal.lab_env.recovery_lifecycle import RecoveryLifecycle
 
 from transformer_rl.formal.tasks.curriculum import COMPLETE_STAGE_BUDGETS, TaskFamily
 from transformer_rl.formal.lab_env.formal_curriculum import FormalCurriculumCapabilities, FormalTaskCurriculum
@@ -327,6 +328,8 @@ def _stair_command_with_truth(truth_height, *, return_course=False):
     course = LabTerrainCourse.__new__(LabTerrainCourse)
     course.env = env
     course.tasks = tasks
+    course.recovery = RecoveryLifecycle(n)
+    course._birth_family_counts = torch.zeros(6, dtype=torch.long)
     course._skill_fsm = fsm
     course.body_contact_allowed = torch.zeros(n, dtype=torch.bool)
     course.stair_requests = StairRequestProtocol(n)

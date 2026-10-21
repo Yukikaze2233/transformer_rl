@@ -1050,6 +1050,10 @@ class WheeledLabEnv(DirectRLEnv):
             self._preparation_handoff.copy_(handoff & ~self._terminated)
             self.extras['recovery_preparation_timeouts'] = preparation_timeout.sum()
         time_limit = self.episode_length_buf >= self.max_episode_length - 1
+        if self._terrain_course is not None:
+            recovery_timeout = self._terrain_course.finish_recovery_interval()
+            time_limit |= recovery_timeout
+            self.extras['recovery_timeouts'] = recovery_timeout.sum()
         spatial_exit = torch.zeros_like(time_limit)
         if self._terrain_course is not None:
             spatial_exit = self._terrain_course.router.observe_end(self._root_link_position(), self._terminated)

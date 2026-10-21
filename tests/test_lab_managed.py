@@ -14,6 +14,7 @@ from transformer_rl.formal.lab_env.formal_curriculum import FormalCurriculumCapa
 from transformer_rl.formal.lab_env.formal_reward import FormalRewardConfig
 from transformer_rl.formal.lab_env.managed import ManagedCurriculum, ManagedLabRuntime
 from transformer_rl.formal.lab_env.sensors import LabSensorModel
+from transformer_rl.formal.lab_env.recovery_lifecycle import RecoveryLifecycle
 from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
 from transformer_rl.formal.tasks.terrain_courses import TerrainCourseRouter
 from transformer_rl.formal.tasks.trajectory import DriveEnvelope
@@ -32,6 +33,8 @@ def scene(tmp_path, components, *, seed=13):
     course = LabTerrainCourse.__new__(LabTerrainCourse)
     course.router = TerrainCourseRouter(path, 4, seed=seed)
     course.tasks = LabCourseTasks(4, DriveEnvelope(.06, .4), seed=seed)
+    course.recovery = RecoveryLifecycle(4)
+    course._birth_family_counts = torch.zeros(6, dtype=torch.long)
     course.stair_requests = StairRequestProtocol(4)
     course.stair_next_id = torch.zeros(4, dtype=torch.long)
     course._last_stair_response = torch.zeros(4, dtype=torch.long)
