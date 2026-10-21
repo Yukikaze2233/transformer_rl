@@ -334,7 +334,7 @@ def main(argv=None):
             formal_curriculum = FormalTaskCurriculum(
                 args.num_envs, device=args.device, seed=args.seed,
                 promotion="exposure", capabilities=capabilities,
-                include_jump=args.include_jump,
+                include_jump=args.include_jump, continuous=args.include_jump,
             )
             if args.diagnostic_stage is not None:
                 if args.resume is not None:

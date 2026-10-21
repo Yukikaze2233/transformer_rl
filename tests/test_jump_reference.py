@@ -77,7 +77,7 @@ def test_world_translation_row_permutation_and_inactive_rows_do_not_change_clock
 
 
 @pytest.mark.parametrize('height,rise,clock', [(.16, .1, 0), (.41, .1, 0), (.3, .02, 0),
-                                            (.3, .31, 0), (.3, .1, -.01), (.3, float('nan'), 0)])
+                                            (.3, .41, 0), (.3, .1, -.01), (.3, float('nan'), 0)])
 def test_invalid_visible_target_or_clock_is_rejected(height, rise, clock):
     with pytest.raises(ValueError, match='invalid visible'):
         sample([height], [rise], clock)

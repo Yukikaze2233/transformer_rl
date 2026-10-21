@@ -126,8 +126,11 @@ class LearningRecipe:
                                 stage_names=names, stage_budgets=budgets)
 
     def make_sampler(self):
-        return ContinuousTaskSampler(self.training_seed, device=self.device, domain=self.domain,
-                                     stage_weights=self.stage_schedule[2])
+        return ContinuousTaskSampler(
+            self.training_seed, device=self.device, domain=self.domain,
+            stage_weights=self.stage_schedule[2],
+            continuous=self.target_rollouts > task_curriculum.TOTAL_BUDGET,
+        )
 
 
 @dataclass

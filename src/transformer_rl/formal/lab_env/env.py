@@ -132,7 +132,6 @@ class WheeledLabEnv(DirectRLEnv):
         self._pressure = self._build_pressure()
         self._spring_force = self._build_spring_force()
         self._spring_strength = torch.ones(self.num_envs, 1, dtype=torch.float32, device=self._device)
-        self._spring_pressure_frame = None
         self._spring_source_sha256 = getattr(self, '_spring_source_sha256', {})
         # Rollout-level mechanical telemetry. Accumulate device tensors here;
         # read them once at the collector boundary, not per physics substep.
@@ -140,12 +139,38 @@ class WheeledLabEnv(DirectRLEnv):
         self._spring_mount_max = torch.full((), -float('inf'), dtype=torch.float32, device=self._device)
         self._spring_compression_min = torch.full((), float('inf'), dtype=torch.float32, device=self._device)
         self._spring_compression_max = torch.full((), -float('inf'), dtype=torch.float32, device=self._device)
+        self._spring_slider_compression_min = torch.full((), float('inf'), dtype=torch.float32, device=self._device)
+        self._spring_slider_compression_max = torch.full((), -float('inf'), dtype=torch.float32, device=self._device)
         self._spring_force_max = torch.full((), 0., dtype=torch.float32, device=self._device)
+        self._spring_compression_mismatch_max = torch.full((), 0., dtype=torch.float32, device=self._device)
+        # Last physical-substep values, kept per side for the two mounts.
+        self._spring_mount_compression_last = torch.zeros(self.num_envs, 2, dtype=torch.float32, device=self._device)
+        self._spring_slider_compression_last = torch.zeros(self.num_envs, 2, dtype=torch.float32, device=self._device)
+        self._spring_mount_stroke_last = torch.zeros(self.num_envs, 2, dtype=torch.bool, device=self._device)
+        self._spring_slider_stroke_last = torch.zeros(self.num_envs, 2, dtype=torch.bool, device=self._device)
+        self._spring_mount_fit_last = torch.zeros(self.num_envs, 2, dtype=torch.bool, device=self._device)
+        self._spring_slider_fit_last = torch.zeros(self.num_envs, 2, dtype=torch.bool, device=self._device)
+        self._spring_mount_valid_last = torch.zeros(self.num_envs, 2, dtype=torch.bool, device=self._device)
+        self._spring_slider_valid_last = torch.zeros(self.num_envs, 2, dtype=torch.bool, device=self._device)
+        self._spring_telemetry_samples = torch.zeros((), dtype=torch.long, device=self._device)
+        self._spring_mount_invalid_samples = torch.zeros((), dtype=torch.long, device=self._device)
+        self._spring_slider_invalid_samples = torch.zeros((), dtype=torch.long, device=self._device)
+        self._spring_mount_stroke_invalid_samples = torch.zeros((), dtype=torch.long, device=self._device)
+        self._spring_slider_stroke_invalid_samples = torch.zeros((), dtype=torch.long, device=self._device)
+        self._spring_mount_fit_invalid_samples = torch.zeros((), dtype=torch.long, device=self._device)
+        self._spring_slider_fit_invalid_samples = torch.zeros((), dtype=torch.long, device=self._device)
         self._last_reset_closure_max = None
         self._last_reset_q_closure_max = None
         self._last_reset_pose_closure_max = None
         self._last_reset_native_closure_max = None
         self._last_reset_support_clearance = None
+        self._last_reset_support_clearance_lr = None
+        self._last_reset_support_rows = 0
+        self._last_reset_support_bilateral_rows = 0
+        self._reset_support_left_min = None
+        self._reset_support_right_min = None
+        self._reset_support_rows = 0
+        self._reset_support_bilateral_rows = 0
         self._observations = LabObservationBuilder(self._binding, self.num_envs,
                                                    device=self._device,
                                                    history_length=self.cfg.history_length)
@@ -296,32 +321,116 @@ class WheeledLabEnv(DirectRLEnv):
         self._spring_mount_max.fill_(-float('inf'))
         self._spring_compression_min.fill_(float('inf'))
         self._spring_compression_max.fill_(-float('inf'))
+        self._spring_slider_compression_min.fill_(float('inf'))
+        self._spring_slider_compression_max.fill_(-float('inf'))
         self._spring_force_max.zero_()
+        self._spring_compression_mismatch_max.zero_()
+        self._spring_mount_compression_last.zero_()
+        self._spring_slider_compression_last.zero_()
+        self._spring_mount_stroke_last.zero_()
+        self._spring_slider_stroke_last.zero_()
+        self._spring_mount_fit_last.zero_()
+        self._spring_slider_fit_last.zero_()
+        self._spring_mount_valid_last.zero_()
+        self._spring_slider_valid_last.zero_()
+        self._spring_telemetry_samples.zero_()
+        self._spring_mount_invalid_samples.zero_()
+        self._spring_slider_invalid_samples.zero_()
+        self._spring_mount_stroke_invalid_samples.zero_()
+        self._spring_slider_stroke_invalid_samples.zero_()
+        self._spring_mount_fit_invalid_samples.zero_()
+        self._spring_slider_fit_invalid_samples.zero_()
         self._last_reset_closure_max = None
         self._last_reset_q_closure_max = None
         self._last_reset_pose_closure_max = None
         self._last_reset_native_closure_max = None
         self._last_reset_support_clearance = None
+        self._last_reset_support_clearance_lr = None
+        self._last_reset_support_rows = 0
+        self._last_reset_support_bilateral_rows = 0
+        self._reset_support_left_min = None
+        self._reset_support_right_min = None
+        self._reset_support_rows = 0
+        self._reset_support_bilateral_rows = 0
 
     @property
     def mechanical_metrics(self):
-        """Rollout mechanical evidence, read only at the collection boundary."""
+        """Rollout mechanical evidence, read only at the collection boundary.
+
+        ``last_reset_*`` describes only the rows reset by the most recent
+        partial or ordinary reset call. Reset-window fields aggregate every
+        reset observed since ``reset_mechanical_metrics``. ``six_loop_*``
+        separates forward(dt=0), the first returned physical substep and the
+        full physical window.
+        """
         def scalar(value):
             if value is None:
                 return None
             value = float(value.detach().cpu())
             return value if math.isfinite(value) else None
+
+        def side_min(value, side):
+            if value is None:
+                return None
+            selected = value[:, side]
+            finite = selected[torch.isfinite(selected)]
+            return float(finite.amin().detach().cpu()) if finite.numel() else None
+
+        def side_last(value, side):
+            if value is None:
+                return None
+            return scalar(value[:, side].amin())
+
+        support_lr = self._last_reset_support_clearance_lr
         return {
+            'last_reset_closure_before_m': scalar(self._last_reset_closure_max),
+            'last_reset_q_closure_after_physics_m': scalar(self._last_reset_q_closure_max),
+            'last_reset_body_pose_closure_after_physics_m': scalar(self._last_reset_pose_closure_max),
+            'last_reset_closure_after_physics_m': scalar(self._last_reset_native_closure_max),
             'reset_closure_before_m': scalar(self._last_reset_closure_max),
             'reset_q_closure_after_physics_m': scalar(self._last_reset_q_closure_max),
             'reset_body_pose_closure_after_physics_m': scalar(self._last_reset_pose_closure_max),
             'reset_closure_after_physics_m': scalar(self._last_reset_native_closure_max),
             'reset_support_clearance_m': scalar(self._last_reset_support_clearance),
+            'last_reset_support_clearance_left_m': side_min(support_lr, 0),
+            'last_reset_support_clearance_right_m': side_min(support_lr, 1),
+            'last_reset_support_rows': int(self._last_reset_support_rows),
+            'last_reset_both_clearance_nonnegative_rows': int(
+                self._last_reset_support_bilateral_rows),
+            'reset_support_window_left_min_m': scalar(self._reset_support_left_min),
+            'reset_support_window_right_min_m': scalar(self._reset_support_right_min),
+            'reset_support_window_rows': int(self._reset_support_rows),
+            'reset_support_window_both_clearance_nonnegative_rows': int(
+                self._reset_support_bilateral_rows),
+            'reset_scope': 'last_reset_* = most recent reset call; reset_support_window_* = all resets since collection start',
             'spring_mount_distance_min_m': scalar(self._spring_mount_min),
             'spring_mount_distance_max_m': scalar(self._spring_mount_max),
+            'spring_mount_compression_min_m': scalar(self._spring_compression_min),
+            'spring_mount_compression_max_m': scalar(self._spring_compression_max),
             'spring_compression_min_m': scalar(self._spring_compression_min),
             'spring_compression_max_m': scalar(self._spring_compression_max),
+            'spring_slider_compression_min_m': scalar(self._spring_slider_compression_min),
+            'spring_slider_compression_max_m': scalar(self._spring_slider_compression_max),
+            'spring_compression_mismatch_max_m': scalar(self._spring_compression_mismatch_max),
+            'spring_mount_compression_last_left_m': side_last(self._spring_mount_compression_last, 0),
+            'spring_mount_compression_last_right_m': side_last(self._spring_mount_compression_last, 1),
+            'spring_slider_compression_last_left_m': side_last(self._spring_slider_compression_last, 0),
+            'spring_slider_compression_last_right_m': side_last(self._spring_slider_compression_last, 1),
+            'spring_mount_stroke_valid_last': bool(self._spring_mount_stroke_last.all()),
+            'spring_slider_stroke_valid_last': bool(self._spring_slider_stroke_last.all()),
+            'spring_mount_fit_valid_last': bool(self._spring_mount_fit_last.all()),
+            'spring_slider_fit_valid_last': bool(self._spring_slider_fit_last.all()),
+            'spring_mount_valid_last': bool(self._spring_mount_valid_last.all()),
+            'spring_slider_valid_last': bool(self._spring_slider_valid_last.all()),
+            'spring_telemetry_samples': int(self._spring_telemetry_samples),
+            'spring_mount_invalid_samples': int(self._spring_mount_invalid_samples),
+            'spring_slider_invalid_samples': int(self._spring_slider_invalid_samples),
+            'spring_mount_stroke_invalid_samples': int(self._spring_mount_stroke_invalid_samples),
+            'spring_slider_stroke_invalid_samples': int(self._spring_slider_stroke_invalid_samples),
+            'spring_mount_fit_invalid_samples': int(self._spring_mount_fit_invalid_samples),
+            'spring_slider_fit_invalid_samples': int(self._spring_slider_fit_invalid_samples),
             'spring_pressure_force_max_n': scalar(self._spring_force_max),
+            'spring_telemetry_scope': 'post-physics substep state; mount compression drives the wrenches, slider compression is the native guide coordinate',
             'spring_source_sha256': dict(self._spring_source_sha256),
             'reset_readback_scope': 'forward(dt=0), before the next physical substep',
             **self._loop_telemetry.summary(),
@@ -736,17 +845,6 @@ class WheeledLabEnv(DirectRLEnv):
             )
             if not bool(frame.valid.all()):
                 raise FloatingPointError('invalid gas-spring mount geometry before physics')
-            self._spring_pressure_frame = frame
-            self._spring_mount_min = torch.minimum(
-                self._spring_mount_min, frame.mount_distance_m.amin())
-            self._spring_mount_max = torch.maximum(
-                self._spring_mount_max, frame.mount_distance_m.amax())
-            self._spring_compression_min = torch.minimum(
-                self._spring_compression_min, frame.compression_m.amin())
-            self._spring_compression_max = torch.maximum(
-                self._spring_compression_max, frame.compression_m.amax())
-            self._spring_force_max = torch.maximum(
-                self._spring_force_max, frame.pressure_force_n.abs().amax())
             self.robot.instantaneous_wrench_composer.add_forces_and_torques_index(
                 forces=frame.forces_world.contiguous(),
                 torques=frame.torques_about_com_world.contiguous(),
@@ -757,6 +855,74 @@ class WheeledLabEnv(DirectRLEnv):
         self.robot.set_joint_effort_target(command)
         self._last_effort.copy_(effort)
 
+    def _observe_spring_state(self):
+        """Measure both spring coordinates from the *returned* physical state.
+
+        The mount wrenches were already applied once in ``_apply_action`` from
+        the pre-substep geometry. This method only evaluates the same pure
+        element again for telemetry; it never adds a second wrench.
+        """
+        if self._spring_force is None:
+            return None, None
+        mount = self._spring_force.evaluate(
+            self._as_torch(self.robot.data.body_link_pose_w),
+            self._as_torch(self.robot.data.body_com_pose_w)[..., :3],
+            self._spring_strength,
+        )
+        slider = self._pressure.evaluate(
+            self._as_torch(self.robot.data.joint_pos).index_select(1, self._spring_indices))
+        mount_valid = mount.valid
+        mount_valid_lr = mount_valid[:, None]
+        slider_compression = slider.compression_m.to(torch.float32)
+        slider_valid = torch.isfinite(slider_compression)
+        finite_mount = torch.isfinite(mount.compression_m) & mount_valid_lr
+        finite_slider = slider_valid
+        self._spring_telemetry_samples.add_(1)
+        self._spring_mount_invalid_samples.add_((~mount_valid).sum())
+        self._spring_slider_invalid_samples.add_((~slider_valid).sum())
+        self._spring_mount_stroke_invalid_samples.add_(
+            (~mount.within_mechanical_stroke).sum())
+        self._spring_slider_stroke_invalid_samples.add_(
+            (~slider.within_mechanical_stroke).sum())
+        self._spring_mount_fit_invalid_samples.add_(
+            (~mount.within_fitted_domain).sum())
+        self._spring_slider_fit_invalid_samples.add_(
+            (~slider.within_fitted_curve).sum())
+        self._spring_mount_min = torch.minimum(
+            self._spring_mount_min,
+            torch.where(finite_mount, mount.mount_distance_m, float('inf')).amin())
+        self._spring_mount_max = torch.maximum(
+            self._spring_mount_max,
+            torch.where(finite_mount, mount.mount_distance_m, float('-inf')).amax())
+        self._spring_compression_min = torch.minimum(
+            self._spring_compression_min,
+            torch.where(finite_mount, mount.compression_m, float('inf')).amin())
+        self._spring_compression_max = torch.maximum(
+            self._spring_compression_max,
+            torch.where(finite_mount, mount.compression_m, float('-inf')).amax())
+        self._spring_slider_compression_min = torch.minimum(
+            self._spring_slider_compression_min,
+            torch.where(finite_slider, slider_compression, float('inf')).amin())
+        self._spring_slider_compression_max = torch.maximum(
+            self._spring_slider_compression_max,
+            torch.where(finite_slider, slider_compression, float('-inf')).amax())
+        self._spring_force_max = torch.maximum(
+            self._spring_force_max,
+            torch.where(mount_valid_lr, mount.pressure_force_n.abs(), 0.).amax())
+        mismatch = (mount.compression_m-slider_compression).abs()
+        mismatch = torch.where(finite_mount & finite_slider, mismatch, 0.)
+        self._spring_compression_mismatch_max = torch.maximum(
+            self._spring_compression_mismatch_max, mismatch.amax())
+        self._spring_mount_compression_last.copy_(mount.compression_m)
+        self._spring_slider_compression_last.copy_(slider_compression)
+        self._spring_mount_stroke_last.copy_(mount.within_mechanical_stroke)
+        self._spring_slider_stroke_last.copy_(slider.within_mechanical_stroke)
+        self._spring_mount_fit_last.copy_(mount.within_fitted_domain)
+        self._spring_slider_fit_last.copy_(slider.within_fitted_curve)
+        self._spring_mount_valid_last.copy_(mount_valid_lr.expand(-1, 2))
+        self._spring_slider_valid_last.copy_(slider_valid)
+        return mount, slider
+
     def _observe_substep(self) -> None:
         self._loop_telemetry.observe_physics(
             self._as_torch(self.robot.data.body_link_pose_w),
@@ -766,14 +932,22 @@ class WheeledLabEnv(DirectRLEnv):
         if self._sensor_model is not None:
             self._sensor_model.push(state, self._physical_tick)
         boundary = None
+        mount, pressure = self._observe_spring_state()
         if self._failure_latch is not None:
             boundary = self._boundary_geometry.evaluate(
                 self._as_torch(self.robot.data.body_link_pose_w),
                 self._as_torch(self.robot.data.joint_pos), self._targets, knee_margin_rad=.05)
-            pressure = self._pressure.evaluate(
-                self._as_torch(self.robot.data.joint_pos).index_select(1, self._spring_indices))
+            if pressure is None:
+                pressure = self._pressure.evaluate(
+                    self._as_torch(self.robot.data.joint_pos).index_select(1, self._spring_indices))
             allowed = (None if self._terrain_course is None
                        else self._terrain_course.body_contact_allowed)
+            # Mount compression is the actual pressure path. Keep the native
+            # slider stop as an independent gate: either coordinate leaving
+            # its authored travel invalidates the physical spring state.
+            within_stroke = pressure.within_mechanical_stroke
+            if mount is not None:
+                within_stroke = within_stroke & mount.within_mechanical_stroke
             conditions = self._failure_latch.observe(
                 height_m=state.height_above_ground_m, gravity_body=state.gravity_body,
                 forbidden_body_load_n=(sample.body_normal_load_n[:, self._forbidden_bodies]
@@ -781,7 +955,7 @@ class WheeledLabEnv(DirectRLEnv):
                         :, self._forbidden_bodies].norm(dim=-1)),
                 knee_signed_clearance_rad=boundary.knee_signed_clearance_rad,
                 knee_pivot_residual_m=boundary.knee_pivot_residual_m,
-                within_pressure_stroke=pressure.within_mechanical_stroke,
+                within_pressure_stroke=within_stroke,
                 recovery=self._command_mode == int(CommandMode.RECOVERY),
                 body_contact_allowed=allowed)
             terminated = conditions.true_failure
@@ -987,10 +1161,28 @@ class WheeledLabEnv(DirectRLEnv):
         root_pose[:, :3] += self.scene.env_origins.index_select(0, ids)
         if self._terrain_course is not None:
             self._terrain_course.place_reset(ids, task_sample, root_pose)
-            support = self._terrain_course._last_support_clearance.index_select(0, ids)
-            support = support[torch.isfinite(support)]
+            support_lr = self._terrain_course._last_support_clearance_lr.index_select(0, ids)
+            self._last_reset_support_clearance_lr = support_lr
+            finite_rows = torch.isfinite(support_lr).all(-1)
+            last_ordinary = int(finite_rows.sum())
+            last_bilateral = int((finite_rows & (support_lr[:, 0] >= 0)
+                                  & (support_lr[:, 1] >= 0)).sum())
+            self._last_reset_support_rows = last_ordinary
+            self._last_reset_support_bilateral_rows = last_bilateral
+            support = support_lr[finite_rows]
             self._last_reset_support_clearance = (
                 support.amin() if support.numel() else None)
+            self._reset_support_rows += last_ordinary
+            self._reset_support_bilateral_rows += last_bilateral
+            for side, name in ((0, '_reset_support_left_min'),
+                               (1, '_reset_support_right_min')):
+                values = support_lr[:, side]
+                values = values[torch.isfinite(values)]
+                if values.numel():
+                    value = values.amin()
+                    previous = getattr(self, name)
+                    setattr(self, name, value if previous is None
+                            else torch.minimum(previous, value))
         root_velocity = torch.zeros(count, 6, dtype=torch.float32, device=self._device)
         joint_position = self._as_torch(self.robot.data.default_joint_pos).index_select(0, ids).clone()
         joint_velocity = torch.zeros_like(joint_position)

@@ -44,6 +44,8 @@ def test_pressure_pair_conserves_world_force_and_moment_with_offset_coms():
     saved_pose, saved_com = pose.clone(), com.clone()
     frame = element.evaluate(pose, com, torch.ones(1, 2, dtype=torch.float64))
     assert frame.valid.all()
+    assert frame.within_mechanical_stroke.all()
+    assert frame.within_fitted_domain.all()
     torch.testing.assert_close(frame.forces_world.sum(1), torch.zeros(1, 3, dtype=torch.float64))
     arms = com[:, element.body_ids] - com[:, 0:1]
     moment = frame.torques_about_com_world + torch.linalg.cross(arms, frame.forces_world)
@@ -100,3 +102,69 @@ def test_invalid_mount_geometry_is_explicit_and_does_not_invent_a_nominal_pose()
     next(c for c in changed['constraints'] if c['name'] == 'L_spring_upper_mount')['body0'] = 'base_link'
     with pytest.raises(ValueError, match='mounts'):
         SpringForceElement(changed, manifest, fit, names, 'cpu', dtype=torch.float64)
+
+
+def test_mount_travel_and_fit_domain_flags_cover_the_independent_ranges():
+    element, pose, com, _, _, fit, _ = fixture()
+    strength = torch.ones(1, 2, dtype=torch.float64)
+    nominal = element.evaluate(pose, com, strength)
+    body = element.body_ids[0]
+    direction = (nominal.mount_positions_world[0, 0]
+                 - nominal.mount_positions_world[0, 1])
+    distance = nominal.mount_distance_m[0, 0]
+    direction = direction / distance
+
+    def at_compression(target):
+        changed = pose.clone()
+        full_length = distance + nominal.compression_m[0, 0]
+        changed[:, body, :3] += ((full_length-target)
+                                 - distance) * direction
+        return element.evaluate(changed, com, strength)
+
+    normal = at_compression(nominal.compression_m[0, 0])
+    assert normal.valid.all()
+    assert normal.within_mechanical_stroke.all()
+    assert normal.within_fitted_domain.all()
+
+    over = at_compression(fit['stroke_m'] + .005)
+    assert over.valid.all()
+    assert not over.within_mechanical_stroke[0, 0]
+    assert not over.within_fitted_domain[0, 0]
+    assert over.within_mechanical_stroke[0, 1]
+
+    under = at_compression(-.005)
+    assert under.valid.all()
+    assert not under.within_mechanical_stroke[0, 0]
+    assert not under.within_fitted_domain[0, 0]
+
+    tail = at_compression(fit['normalized_fit_domain'][1] * fit['stroke_m'] + .005)
+    assert tail.valid.all()
+    assert tail.within_mechanical_stroke[0, 0]
+    assert not tail.within_fitted_domain[0, 0]
+
+
+def test_nonfinite_mount_input_is_invalid_and_has_no_travel_claim():
+    element, pose, com, *_ = fixture()
+    invalid = pose.clone()
+    invalid[:, element.body_ids[0], 0] = float('nan')
+    frame = element.evaluate(invalid, com, torch.ones(1, 2, dtype=torch.float64))
+    assert not frame.valid.any()
+    assert frame.forces_world.isnan().all()
+    assert not frame.within_mechanical_stroke.any()
+    assert not frame.within_fitted_domain.any()
+
+
+def test_mount_and_slider_compressions_remain_independently_observable():
+    from transformer_rl.formal.control.pressure import NativeSliderPressure, PressureParameters
+
+    element, pose, com, spec, manifest, fit, _ = fixture()
+    mount = element.evaluate(pose, com, torch.ones(1, 2, dtype=torch.float64))
+    parameters = PressureParameters.from_asset(manifest, spec, fit)
+    slider = NativeSliderPressure(parameters, 1).evaluate(
+        torch.zeros(1, 2, dtype=torch.float32))
+    assert mount.valid.all()
+    assert slider.within_mechanical_stroke.all()
+    # A valid natural-coordinate (slider) state is not evidence that the
+    # main-link mount compression has the same value.
+    assert not torch.equal(mount.compression_m.float(), slider.compression_m.float())
+    assert mount.compression_m[0, 0] != slider.compression_m[0, 0]

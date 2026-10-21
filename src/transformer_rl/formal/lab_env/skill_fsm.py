@@ -303,7 +303,7 @@ class JumpFSMConfig:
     failure_tilt_rad: float = math.radians(40.0)
     base_contact_force_n: float = 1.0
     min_rise_m: float = .03
-    max_rise_m: float = .20
+    max_rise_m: float = .40
     preload_speed_scale: float = .6
     flight_speed_scale: float = 1.0
     landing_speed_scale: float = .5

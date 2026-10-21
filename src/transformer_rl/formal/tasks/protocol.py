@@ -39,7 +39,7 @@ class RequestProtocolConfig:
     policy_dt_s: float = 0.01
     estimate_max_age_s: float = 0.03
     height_min_m: float = 0.03
-    height_max_m: float = 0.30
+    height_max_m: float = 0.40
     contact_ground_probability: float = 0.8
     contact_air_probability: float = 0.2
     flight_confirm_ticks: int = 2

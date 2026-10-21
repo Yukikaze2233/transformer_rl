@@ -57,7 +57,7 @@ def fixture(period=.005, *, horizons=(.2, .2), jump=False, trace_sink=None):
         target[:, 0], target[:, 3] = 1., .34
         plan = TaskCommandPlan(CommandTrajectory(initial, target, torch.ones(2), torch.ones(2, dtype=torch.long)),
                                 torch.zeros(2, dtype=torch.long), torch.tensor(horizons, dtype=torch.float64),
-                                torch.full((2,), .1 if jump else 0.), torch.full((2,), .1, dtype=torch.float64))
+                                torch.full((2,), .2 if jump else 0.), torch.full((2,), .1, dtype=torch.float64))
         return NativeTaskResetPlan(*(v.clone() for v in template), life.course_sha256, plan)
 
     env = NativeTaskEnvironment(life, reward, skills, program, limits, reset_source=reset_source,

@@ -155,6 +155,7 @@ def test_course_spawn_is_on_declared_approach_not_inside_first_rise(atlas):
     course._wheel_radius = torch.tensor([.06, .06])
     course._reset_clearance_m = .002
     course._last_support_clearance = torch.full((2,), float('nan'))
+    course._last_support_clearance_lr = torch.full((2, 2), float('nan'))
     course._spawn_y_offset = course._measure_spawn_y_offsets()
     task = SimpleNamespace(terrain_kind=torch.tensor([3, 0]), command=torch.zeros(2, 4),
                            mode=torch.full((2,), int(CommandMode.NORMAL), dtype=torch.long))
@@ -200,6 +201,7 @@ def test_reset_support_query_uses_the_final_forward_or_reverse_wheel_stance(forw
     course._wheel_radius = torch.full((2,), .05)
     course._reset_clearance_m = .002
     course._last_support_clearance = torch.full((1,), float('nan'))
+    course._last_support_clearance_lr = torch.full((1, 2), float('nan'))
     queried = []
 
     def sloping_support(points, tiles):
@@ -215,6 +217,60 @@ def test_reset_support_query_uses_the_final_forward_or_reverse_wheel_stance(forw
     torch.testing.assert_close(queried[0][..., 0], torch.full((1, 2), -1 + forward * .2))
     torch.testing.assert_close(pose[:, 2], torch.tensor([.2 + forward * .02 + .3 + .05 + .002]))
     torch.testing.assert_close(course._last_support_clearance, torch.tensor([.002]), atol=1e-7, rtol=0)
+    clearance = course._last_support_clearance_lr
+    assert torch.isfinite(clearance).all()
+    assert abs(float(clearance.amin()) - .002) < 1e-7
+    torch.testing.assert_close(clearance, clearance[:, :1].expand(-1, 2), atol=1e-7, rtol=0)
+
+
+def test_reset_support_retains_left_and_right_wheel_clearance_separately():
+    from transformer_rl.formal.control.observation import CommandMode
+    from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+
+    course = LabTerrainCourse.__new__(LabTerrainCourse)
+    origins = torch.zeros(3, 3)
+    course.env = SimpleNamespace(scene=SimpleNamespace(env_origins=origins),
+                                 _task_sampler=SimpleNamespace(stage=1), _as_torch=lambda x: x,
+                                 _device=torch.device('cpu'))
+    course.router = SimpleNamespace(
+        reset=lambda ids, *args, **kwargs: (origins[ids], torch.zeros(len(ids))),
+        tile=torch.zeros(3, dtype=torch.long), starts=torch.tensor([-1.5]))
+    course.nominal_spawn_height_m = .32
+    course._spawn_y_offset = torch.zeros(3)
+    course._wheel_centres_root = torch.tensor([[0., .1, -.25], [0., -.1, -.25]])
+    course._wheel_radius = torch.full((2,), .05)
+    course._reset_clearance_m = .002
+    course._last_support_clearance = torch.full((3,), float('nan'))
+    course._last_support_clearance_lr = torch.full((3, 2), float('nan'))
+
+    def asymmetric_support(points, tiles):
+        heights = torch.tensor([[.20, .23]]).expand(len(points), -1)
+        return heights, torch.ones_like(tiles, dtype=torch.bool), None, None
+
+    course.query = asymmetric_support
+    course.query._ceiling_m = 3.
+    task = SimpleNamespace(terrain_kind=torch.zeros(3, dtype=torch.long),
+                           command=torch.zeros(3, 4),
+                           mode=torch.tensor([int(CommandMode.NORMAL),
+                                              int(CommandMode.RECOVERY),
+                                              int(CommandMode.NORMAL)]))
+    pose = torch.zeros(3, 7)
+    pose[:, 2] = .32
+    pose[:, 6] = 1.
+    course.place_reset(torch.arange(3), task, pose)
+    clearance = course._last_support_clearance_lr
+    assert torch.isfinite(clearance[0]).all()
+    assert torch.isnan(clearance[1]).all()
+    assert abs(float(clearance[0, 0] - clearance[0, 1])) > .02
+    assert abs(float(clearance[0].amin() - course._last_support_clearance[0])) < 1e-7
+
+    saved = clearance[0].clone()
+    partial_task = SimpleNamespace(terrain_kind=torch.zeros(1, dtype=torch.long),
+                                   command=torch.zeros(1, 4),
+                                   mode=torch.tensor([int(CommandMode.NORMAL)]))
+    course.place_reset(torch.tensor([2]), partial_task, pose[[2]])
+    torch.testing.assert_close(clearance[0], saved, atol=0, rtol=0)
+    assert torch.isfinite(clearance[2]).all()
 
 
 def test_body_bump_clears_only_allowed_contact_not_other_failures():

@@ -15,9 +15,9 @@ import torch
 from ..control.observation import CommandMode
 from ..tasks.curriculum import (
     COMPLETE_STAGE_BUDGETS, COMPLETE_STAGE_NAMES, COMPLETE_STAGE_WEIGHTS,
-    JUMP_BUDGET, JUMP_WEIGHTS, STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS,
-    TOTAL_BUDGET, ContinuousTaskSampler, CurriculumBudget, TaskDomain, TaskDraw,
-    TaskFamily,
+    INITIAL_DOMAIN, JUMP_BUDGET, JUMP_WEIGHTS, STAGE_BUDGETS, STAGE_NAMES,
+    STAGE_WEIGHTS, TOTAL_BUDGET, ContinuousTaskSampler, CurriculumBudget, TaskDomain,
+    TaskDraw, TaskFamily, interpolate_domain,
 )
 from ..tasks.geometry import TerrainKind
 from ..tasks.reward import RewardPhase
@@ -89,7 +89,8 @@ class FormalTaskCurriculum:
     def __init__(self, num_envs: int, device="cpu", *, seed: int = 0,
                  promotion: str = "exposure",
                  capabilities: FormalCurriculumCapabilities | None = None,
-                 domain: TaskDomain | None = None, include_jump: bool = False):
+                 domain: TaskDomain | None = None, include_jump: bool = False,
+                 continuous: bool = False, initial_domain: TaskDomain | None = None):
         if type(num_envs) is not int or num_envs < 1:
             raise ValueError("num_envs 必须是正整数")
         if type(seed) is not int or not 0 <= seed < 2**63:
@@ -108,13 +109,20 @@ class FormalTaskCurriculum:
         self.device = torch.device(device)
         self.capabilities = capabilities
         self.domain = domain
-        if type(include_jump) is not bool:
-            raise TypeError('include_jump must be bool')
+        if type(include_jump) is not bool or type(continuous) is not bool:
+            raise TypeError('include_jump and continuous must be explicit bool')
+        if initial_domain is None:
+            initial_domain = INITIAL_DOMAIN
+        if not isinstance(initial_domain, TaskDomain):
+            raise TypeError('initial_domain must be a parsed TaskDomain')
         self.include_jump = include_jump
+        self.continuous = continuous
+        self.initial_domain = initial_domain
         self.stage_names = COMPLETE_STAGE_NAMES if include_jump else STAGE_NAMES
         self.stage_budgets = COMPLETE_STAGE_BUDGETS if include_jump else STAGE_BUDGETS
         self.stage_weights = COMPLETE_STAGE_WEIGHTS if include_jump else STAGE_WEIGHTS
-        self.sampler = ContinuousTaskSampler(seed, device=device, domain=domain, stage_weights=self.stage_weights)
+        self.sampler = ContinuousTaskSampler(seed, device=device, domain=domain, stage_weights=self.stage_weights,
+                                             continuous=continuous)
         self.budget = CurriculumBudget(promotion=promotion, stage_names=self.stage_names, stage_budgets=self.stage_budgets)
 
     @property
@@ -127,17 +135,36 @@ class FormalTaskCurriculum:
 
     @property
     def weights(self) -> tuple[float, ...]:
-        return self.stage_weights[self.stage]
+        if not self.continuous or self.stage == 0:
+            return self.stage_weights[self.stage]
+        consumed = self.budget.consumed[self.stage]
+        transition = max(1, self.stage_budgets[self.stage] // 4)
+        fraction = min(consumed / transition, 1.0)
+        fraction = fraction * fraction * (3.0 - 2.0 * fraction)
+        previous, target = self.stage_weights[self.stage - 1], self.stage_weights[self.stage]
+        return tuple(float(a + (b - a) * fraction) for a, b in zip(previous, target))
+
+    def _effective_domain(self) -> TaskDomain:
+        if not self.continuous:
+            return self.domain
+        total = sum(self.stage_budgets)
+        fraction = min(self.budget.total_updates / total, 1.0)
+        fraction = fraction * fraction * (3.0 - 2.0 * fraction)
+        return interpolate_domain(self.initial_domain, self.domain, fraction)
 
     @property
     def status(self) -> str:
         return self.budget.status
 
     def missing_capabilities(self, stage: int | None = None) -> tuple[str, ...]:
-        stage = self.stage if stage is None else stage
-        if type(stage) is not int or not 0 <= stage < len(self.stage_names):
-            raise ValueError("stage 超出正式课程范围")
-        return self.capabilities.missing(stage, self.stage_weights)
+        if stage is None:
+            weights = self.weights
+        else:
+            if type(stage) is not int or not 0 <= stage < len(self.stage_names):
+                raise ValueError("stage 超出正式课程范围")
+            weights = self.stage_weights[stage]
+        return tuple(_FAMILY_NAMES[TaskFamily(family)] for family, weight in enumerate(weights)
+                     if weight > 0 and not self.capabilities.supports(TaskFamily(family)))
 
     def require_supported(self, stage: int | None = None) -> None:
         stage = self.stage if stage is None else stage
@@ -154,6 +181,9 @@ class FormalTaskCurriculum:
         if ids.numel() > self.num_envs:
             raise ValueError("采样行数不能超过环境数")
         self.require_supported()
+        if self.continuous:
+            return self.sampler.sample(ids.numel(), self.stage,
+                                       weights=self.weights, domain=self._effective_domain())
         return self.sampler.sample(ids.numel(), self.stage)
 
     def begin_update(self) -> int:
@@ -167,7 +197,7 @@ class FormalTaskCurriculum:
         return stage
 
     def state_dict(self):
-        return {
+        state = {
             "format": 'lab_formal_curriculum_v2' if self.include_jump else self._FORMAT,
             "num_envs": self.num_envs,
             "promotion": self.budget.promotion,
@@ -176,17 +206,25 @@ class FormalTaskCurriculum:
             "sampler": self.sampler.state_dict(),
             "budget": self.budget.state_dict(),
         }
+        if self.continuous:
+            state.update({'continuous': True, 'initial_domain': self.initial_domain})
+        return state
 
     def load_state_dict(self, state):
-        if (not isinstance(state, dict) or set(state) != {
-                "format", "num_envs", "promotion", "capabilities", "domain", "sampler", "budget"}
+        expected_keys = {"format", "num_envs", "promotion", "capabilities", "domain", "sampler", "budget"}
+        if self.continuous:
+            expected_keys |= {"continuous", "initial_domain"}
+        if (not isinstance(state, dict) or set(state) != expected_keys
                 or state["format"] != ('lab_formal_curriculum_v2' if self.include_jump else self._FORMAT)
                 or state["num_envs"] != self.num_envs
                 or state["promotion"] != self.budget.promotion
                 or state["capabilities"] != self.capabilities.to_dict()
-                or state["domain"] != self.domain):
+                or state["domain"] != self.domain
+                or (self.continuous and (state["continuous"] is not True
+                                          or state["initial_domain"] != self.initial_domain))):
             raise ValueError("正式课程 checkpoint 的身份/能力/域不一致")
-        sampler = ContinuousTaskSampler(0, device=self.device, domain=self.domain, stage_weights=self.stage_weights)
+        sampler = ContinuousTaskSampler(0, device=self.device, domain=self.domain,
+                                        stage_weights=self.stage_weights, continuous=self.continuous)
         budget = CurriculumBudget(promotion=self.budget.promotion, stage_names=self.stage_names, stage_budgets=self.stage_budgets)
         sampler.load_state_dict(state["sampler"])
         budget.load_state_dict(state["budget"])

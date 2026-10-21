@@ -6,7 +6,7 @@ reachable; asset/actuator admission and independent validation remain external.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from enum import IntEnum
 import math
 import re
@@ -48,7 +48,7 @@ class TaskDomain:
     height_m: tuple[float, float] = (0.20, 0.35)
     forward_m_s: tuple[float, float] = (-2.7, 2.7)
     yaw_rad_s: tuple[float, float] = (-6 * math.pi, 6 * math.pi)
-    jump_m: tuple[float, float] = (0.03, 0.30)
+    jump_m: tuple[float, float] = (0.20, 0.40)
     slope_rad: tuple[float, float] = (-math.pi / 12, math.pi / 12)
     roughness_m: tuple[float, float] = (0.0, 0.02)
     step_up_m: tuple[float, float] = (0.0, 0.20)
@@ -76,6 +76,45 @@ class TaskDomain:
             raise ValueError('inconsistent task anchors or physical dimensions')
 
 
+# The first exposure is deliberately narrower than the final task domain. The
+# formal course expands every range continuously; it never switches from a
+# flat-only world to the full course at one update boundary.
+INITIAL_DOMAIN = TaskDomain(
+    height_m=(0.20, 0.32),
+    forward_m_s=(-1.0, 1.0),
+    yaw_rad_s=(-math.pi, math.pi),
+    jump_m=(0.20, 0.22),
+    slope_rad=(-math.pi / 60, math.pi / 60),
+    roughness_m=(0.0, 0.005),
+    step_up_m=(0.0, 0.05),
+    step_down_m=(0.0, 0.03),
+)
+
+
+def interpolate_domain(start: TaskDomain, end: TaskDomain, fraction: float) -> TaskDomain:
+    """Linear continuous domain expansion with the declared endpoint values."""
+    if (not isinstance(start, TaskDomain) or not isinstance(end, TaskDomain)
+            or type(fraction) not in (int, float) or not math.isfinite(fraction)
+            or not 0 <= fraction <= 1):
+        raise ValueError('domain interpolation requires parsed endpoints and a finite [0,1] fraction')
+
+    def blend(left, right):
+        return (float(left[0] + (right[0] - left[0]) * fraction),
+                float(left[1] + (right[1] - left[1]) * fraction))
+
+    return replace(
+        end,
+        height_m=blend(start.height_m, end.height_m),
+        forward_m_s=blend(start.forward_m_s, end.forward_m_s),
+        yaw_rad_s=blend(start.yaw_rad_s, end.yaw_rad_s),
+        jump_m=blend(start.jump_m, end.jump_m),
+        slope_rad=blend(start.slope_rad, end.slope_rad),
+        roughness_m=blend(start.roughness_m, end.roughness_m),
+        step_up_m=blend(start.step_up_m, end.step_up_m),
+        step_down_m=blend(start.step_down_m, end.step_down_m),
+    )
+
+
 class _FairQuota:
     """Carry fractional deficits across small reset batches without starving a pool."""
 
@@ -84,6 +123,13 @@ class _FairQuota:
             raise ValueError('quota weights must be nonnegative and sum to one')
         self.weights = tuple(weights)
         self.credit = [0.0] * len(weights)
+
+    def set_weights(self, weights):
+        weights = tuple(weights)
+        if (len(weights) != len(self.weights) or any(not math.isfinite(v) or v < 0 for v in weights)
+                or abs(sum(weights) - 1) > 1e-9):
+            raise ValueError('dynamic quota weights must be finite, nonnegative and sum to one')
+        self.weights = weights
 
     def allocate(self, count):
         allocation = [0] * len(self.weights)
@@ -123,14 +169,20 @@ class ContinuousTaskSampler:
     cover the interior within each family block, then rows are shuffled.
     """
 
-    def __init__(self, seed, device='cpu', domain=TaskDomain(), *, stage_weights=STAGE_WEIGHTS):
+    def __init__(self, seed, device='cpu', domain=TaskDomain(), *, stage_weights=STAGE_WEIGHTS,
+                 continuous=False):
         if type(seed) is not int or not 0 <= seed < 2**63 or not isinstance(domain, TaskDomain):
             raise ValueError('sampler requires a nonnegative seed and parsed task domain')
+        if type(continuous) is not bool:
+            raise ValueError('sampler continuous mode must be explicit bool')
         self.device, self.domain = torch.device(device), domain
         self.stage_weights = tuple(tuple(row) for row in stage_weights)
+        self.continuous = continuous
         self.generator = torch.Generator(device=self.device).manual_seed(seed)
         self._families = [_FairQuota(weights) for weights in self.stage_weights]
         self._strata = [[_FairQuota((0.70, 0.15, 0.15)) for _ in TaskFamily] for _ in self.stage_weights]
+        self._dynamic_family = _FairQuota(self.stage_weights[0])
+        self._dynamic_strata = [_FairQuota((0.70, 0.15, 0.15)) for _ in TaskFamily]
 
     def _random(self, count):
         return torch.rand(count, device=self.device, generator=self.generator)
@@ -150,16 +202,32 @@ class ContinuousTaskSampler:
         near = torch.where(self._random(count) < 1 / 3, anchor, near)
         return torch.where(stratum == 1, boundary, torch.where(stratum == 2, near, interior))
 
-    def sample(self, count, stage):
+    def sample(self, count, stage, *, weights=None, domain=None):
         if type(count) is not int or count < 1 or type(stage) is not int or not 0 <= stage < len(self.stage_weights):
             raise ValueError('sampling requires positive row count and a valid curriculum stage')
-        allocation = self._families[stage].allocate(count)
+        if domain is not None and not isinstance(domain, TaskDomain):
+            raise ValueError('sampling domain must be a parsed TaskDomain')
+        d = self.domain if domain is None else domain
+        if weights is None:
+            family_quota = self._families[stage]
+            stratum_quotas = self._strata[stage]
+        else:
+            if not self.continuous:
+                raise ValueError('dynamic weights require a continuous sampler')
+            weights = tuple(weights)
+            if (len(weights) != len(TaskFamily) or abs(sum(weights) - 1) > 1e-9
+                    or any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+                           for value in weights)):
+                raise ValueError('dynamic curriculum weights must be finite, nonnegative and sum to one')
+            self._dynamic_family.set_weights(weights)
+            family_quota = self._dynamic_family
+            stratum_quotas = self._dynamic_strata
+        allocation = family_quota.allocate(count)
         blocks = []
-        d = self.domain
         for family, size in enumerate(allocation):
             if not size:
                 continue
-            strata = self._strata[stage][family].allocate(size)
+            strata = stratum_quotas[family].allocate(size)
             stratum = torch.cat([torch.full((n,), index, dtype=torch.long, device=self.device)
                                   for index, n in enumerate(strata)])
             stratum = stratum[torch.randperm(size, device=self.device, generator=self.generator)]
@@ -174,7 +242,16 @@ class ContinuousTaskSampler:
             elif family == TaskFamily.ROTATION:
                 forward = torch.where(self._random(size) < 0.35, 0, forward)
             command = torch.stack((forward, torch.zeros_like(forward), yaw, height), -1)
-            terrain = self._integer(len(TerrainKind) - 1, size) + 1 if family == TaskFamily.TERRAIN else torch.zeros_like(stratum)
+            if family == TaskFamily.TERRAIN:
+                terrain = self._integer(len(TerrainKind) - 1, size) + 1
+                if self.continuous:
+                    # Keep a flat-terrain rehearsal component in the terrain
+                    # family instead of making flat and non-flat mutually
+                    # exclusive curriculum phases.
+                    terrain = torch.where(self._random(size) < 0.20,
+                                          torch.zeros_like(terrain), terrain)
+            else:
+                terrain = torch.zeros_like(stratum)
             block = TaskDraw(
                 family=torch.full_like(stratum, family), stratum=stratum, requested_command=command,
                 jump_height_m=(self._scalar(size, stratum, d.jump_m, d.jump_m[0])
@@ -197,6 +274,13 @@ class ContinuousTaskSampler:
                 'stratum_credit': [[list(quota.credit) for quota in stage] for stage in self._strata]}
         if self.stage_weights != STAGE_WEIGHTS:
             result['stage_weights'] = self.stage_weights
+        if self.continuous:
+            result.update({
+                'continuous': True,
+                'dynamic_weights': list(self._dynamic_family.weights),
+                'dynamic_family_credit': list(self._dynamic_family.credit),
+                'dynamic_stratum_credit': [list(quota.credit) for quota in self._dynamic_strata],
+            })
         return result
 
     def load_state_dict(self, state):
@@ -212,9 +296,20 @@ class ContinuousTaskSampler:
             raise ValueError('sampler checkpoint has invalid stratum stages')
         for stage, credit in zip(prepared_strata, state['stratum_credit']):
             self._restore_credits(stage, credit)
+        dynamic_family = deepcopy(self._dynamic_family)
+        dynamic_strata = deepcopy(self._dynamic_strata)
+        if self.continuous:
+            dynamic_family.set_weights(state['dynamic_weights'])
+            self._restore_credits([dynamic_family], [state['dynamic_family_credit']])
+            if (not isinstance(state['dynamic_stratum_credit'], list)
+                    or len(state['dynamic_stratum_credit']) != len(dynamic_strata)):
+                raise ValueError('sampler checkpoint has invalid dynamic stratum stages')
+            for quota, credit in zip(dynamic_strata, state['dynamic_stratum_credit']):
+                self._restore_credits([quota], [credit])
         generator = torch.Generator(device=self.device)
         generator.set_state(state['rng'].detach().cpu().clone())
         self.generator, self._families, self._strata = generator, prepared_families, prepared_strata
+        self._dynamic_family, self._dynamic_strata = dynamic_family, dynamic_strata
 
     @staticmethod
     def _restore_credits(quotas, values):

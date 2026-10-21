@@ -59,9 +59,9 @@ def test_jump_stage_samples_full_confirmed_rise_range_without_changing_quota_or_
     draw = sampler.sample(10000, 3)
     assert torch.bincount(draw.family, minlength=6).tolist() == [2000, 1000, 1000, 1000, 5000, 0]
     rise = draw.jump_height_m[draw.family == TaskFamily.REQUEST]
-    torch.testing.assert_close(rise.min(), torch.tensor(.03))
-    torch.testing.assert_close(rise.max(), torch.tensor(.30))
-    assert (rise > .20).any()
+    torch.testing.assert_close(rise.min(), torch.tensor(.20))
+    torch.testing.assert_close(rise.max(), torch.tensor(.40))
+    assert (rise > .30).any()
     assert sum(COMPLETE_STAGE_BUDGETS) == 35000
     saved = sampler.state_dict()
     resumed = ContinuousTaskSampler(7, stage_weights=COMPLETE_STAGE_WEIGHTS)

@@ -31,7 +31,7 @@ class JumpReferenceConfig:
     support_height_min_m: float = .17
     support_height_max_m: float = .40
     jump_min_m: float = .03
-    jump_max_m: float = .30
+    jump_max_m: float = .40
     compression_depth_max_m: float = .04
     compression_duration_s: float = .20
     nominal_extension_duration_s: float = .10

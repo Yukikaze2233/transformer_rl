@@ -117,3 +117,30 @@ def test_request_course_is_separate_and_does_not_change_main_phase_weights():
     only_recovery = FormalCurriculumCapabilities(recovery=True)
     terrain = FormalTaskCurriculum(4, capabilities=only_recovery)
     assert terrain.missing_capabilities(1) == ("terrain",)
+
+
+def test_continuous_course_ramps_mixture_domain_and_flat_rehearsal():
+    curriculum = FormalTaskCurriculum(256, capabilities=all_capabilities(), seed=2102,
+                                      include_jump=True, continuous=True)
+    curriculum.budget.consumed = [COMPLETE_STAGE_BUDGETS[0], 0, 0, 0]
+    curriculum.budget.stage = 1
+    curriculum.budget.consumed[1] = 1
+    early = curriculum.weights
+    assert 0 < early[TaskFamily.TERRAIN] < STAGE_WEIGHTS[1][TaskFamily.TERRAIN]
+    assert early[TaskFamily.REQUEST] == 0
+    curriculum.budget.consumed[1] = COMPLETE_STAGE_BUDGETS[1]
+    torch.testing.assert_close(torch.tensor(curriculum.weights), torch.tensor(STAGE_WEIGHTS[1]))
+    domain = curriculum._effective_domain()
+    assert domain.jump_m[0] >= .20 and domain.jump_m[1] <= .40
+    draw = curriculum.sample(torch.arange(256))
+    terrain = draw.family == TaskFamily.TERRAIN
+    assert terrain.any()
+    assert 0 in set(draw.terrain_kind[terrain].tolist())
+
+    curriculum.budget.consumed = [5000, 20000, 5000, 1]
+    curriculum.budget.stage = 3
+    start = curriculum.weights[TaskFamily.REQUEST]
+    curriculum.budget.consumed[3] = COMPLETE_STAGE_BUDGETS[3]
+    end = curriculum.weights[TaskFamily.REQUEST]
+    assert start < end == JUMP_WEIGHTS[TaskFamily.REQUEST]
+    assert curriculum._effective_domain().jump_m == (0.20, 0.40)

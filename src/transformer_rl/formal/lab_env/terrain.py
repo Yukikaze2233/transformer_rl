@@ -49,6 +49,8 @@ class LabTerrainCourse:
         self._reset_clearance_m = float(env._recovery_reset.config.clearance_m)
         self._last_support_clearance = torch.full((env.num_envs,), float('nan'),
                                                   dtype=torch.float32, device=env._device)
+        self._last_support_clearance_lr = torch.full((env.num_envs, 2), float('nan'),
+                                                     dtype=torch.float32, device=env._device)
         self._ground_token = None
         # Match IsaacLab's default GridPatternCfg ordering: X changes fastest.
         x, y = torch.meshgrid(torch.linspace(-.5, .5, 11, device=env._device),
@@ -289,8 +291,12 @@ class LabTerrainCourse:
             pose[rows, 2] = adjusted[:, 0]
             gap = (pose[rows, 2, None] + wheel_offsets[..., 2]
                    - self._wheel_radius[None] - heights)
+            # Keep both wheels separately: the old minimum cannot establish
+            # that the second wheel was supported by authored terrain.
             self._last_support_clearance[ids[rows]] = gap.amin(-1)
+            self._last_support_clearance_lr[ids[rows]] = gap
         self._last_support_clearance[ids[~ordinary]] = float('nan')
+        self._last_support_clearance_lr[ids[~ordinary]] = float('nan')
         self._ground_token = None
 
     def reset_commands(self, ids, task):

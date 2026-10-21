@@ -53,7 +53,7 @@ def test_all_continuous_stage_draws_map_to_explicit_plans_without_becoming_a_sec
 
 def test_request_height_latch_and_reward_anchor_do_not_follow_later_height_targets():
     p, _, plan = fixture(count=2)
-    plan = replace(plan, jump_height_m=torch.full((2,), .1))
+    plan = replace(plan, jump_height_m=torch.full((2,), .2))
     p.reset(torch.ones(2, dtype=torch.bool), plan, torch.zeros(2, dtype=torch.float64))
     for i in range(1, 10):
         boundary(p, i * .01)
@@ -67,7 +67,7 @@ def test_request_height_latch_and_reward_anchor_do_not_follow_later_height_targe
         torch.testing.assert_close(cmd.admitted_body_command[:, 3], before)
     curve = p.curve(cmd, torch.full((2,), .145, dtype=torch.float64),
                       reward_ground_anchor_world_z_m=torch.full((2,), 2.))
-    torch.testing.assert_close(curve.target_apex_world_z_m, before + 2. + .1, atol=3e-7, rtol=0)
+    torch.testing.assert_close(curve.target_apex_world_z_m, before + 2. + .2, atol=3e-7, rtol=0)
 
 
 def test_deployable_commands_do_not_store_or_require_a_privileged_ground_reference():
@@ -86,7 +86,7 @@ def test_manual_preparation_request_is_consumed_without_delayed_automatic_replay
     plan = replace(plan, jump_height_m=torch.zeros(2))
     p.reset(torch.ones(2, dtype=torch.bool), plan, torch.zeros(2, dtype=torch.float64))
     incoming = replace(RequestInputs.empty(2, p.device), request_id=torch.tensor([8, 9]),
-                        requested_height_m=torch.full((2,), .1), allow_new=torch.zeros(2, dtype=torch.bool))
+                        requested_height_m=torch.full((2,), .2), allow_new=torch.zeros(2, dtype=torch.bool))
     result, _ = boundary(p, .01, incoming)
     assert result.response.eq(int(RequestResponse.NOT_READY)).all()
     again = replace(incoming, allow_new=torch.ones(2, dtype=torch.bool))
@@ -99,7 +99,7 @@ def test_bad_plan_is_rejected_before_mutating_command_or_protocol_state(bad):
     p, _, plan = fixture(count=2)
     if bad == 'jump_mode':plan = replace(plan, base_mode=torch.full((2,), int(CommandMode.JUMP)))
     elif bad == 'partial_horizon':plan = replace(plan, task_horizon_s=torch.full((2,), .015, dtype=torch.float64))
-    elif bad == 'rise':plan = replace(plan, jump_height_m=torch.full((2,), .31))
+    elif bad == 'rise':plan = replace(plan, jump_height_m=torch.full((2,), .41))
     else:plan = replace(plan, task_horizon_s=torch.ones(2))
     before = p.stream.current.clone()
     with pytest.raises(ValueError):

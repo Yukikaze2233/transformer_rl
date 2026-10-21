@@ -21,6 +21,9 @@ class SpringPressureForces(NamedTuple):
     compression_m: torch.Tensor
     pressure_force_n: torch.Tensor
     valid: torch.Tensor
+    normalized_compression: torch.Tensor
+    within_mechanical_stroke: torch.Tensor
+    within_fitted_domain: torch.Tensor
 
 
 class SpringForceElement:
@@ -29,9 +32,11 @@ class SpringForceElement:
     Output body order is upper-left, lower-left, upper-right, lower-right.
     Inputs use body-link poses with xyzw quaternions and actual body COM positions.
     ``valid`` describes finite force geometry, not closure or travel qualification.
-    Invalid lanes yield NaN wrenches; they are never replaced by nominal geometry.
-    No motor-angle branch is inferred or clipped here. The existing cubic's
-    normalized compression clamp is retained, including its endpoint extension.
+    ``within_mechanical_stroke`` and ``within_fitted_domain`` are separate
+    diagnostics for the *mount-point* compression. Invalid lanes yield NaN
+    wrenches; they are never replaced by nominal geometry. No motor-angle
+    branch is inferred or clipped here. The existing cubic's normalized
+    compression clamp is retained, including its endpoint extension.
     """
 
     def __init__(self, spec, manifest, fit, body_names, device, dtype=torch.float32):
@@ -43,10 +48,15 @@ class SpringForceElement:
                 or manifest["spring_joint_names"] != ["L_spring_slide", "R_spring_slide"]):
             raise ValueError("Spring force element requires the bound full two-sided topology")
         coefficients = fit["monomial_coefficients_n"]
+        domain = fit.get("normalized_fit_domain")
         if (fit["pressure_mpa"] != 10. or len(coefficients) != 4
                 or any(not math.isfinite(value) for value in coefficients)
-                or not math.isfinite(fit["stroke_m"]) or fit["stroke_m"] <= 0):
-            raise ValueError("Spring force element requires the existing finite 10MPa cubic")
+                or not math.isfinite(fit["stroke_m"]) or fit["stroke_m"] <= 0
+                or not isinstance(domain, (list, tuple)) or len(domain) != 2
+                or any(type(value) not in (int, float) or not math.isfinite(value)
+                       for value in domain)
+                or not 0 <= domain[0] < domain[1] <= 1):
+            raise ValueError("Spring force element requires the existing finite 10MPa cubic and fit domain")
         by_name = {joint["name"]: joint for joint in spec["joints"]}
         constraints = {constraint["name"]: constraint for constraint in spec["constraints"]}
         bodies, points, full_lengths, strokes = [], [], [], []
@@ -78,8 +88,10 @@ class SpringForceElement:
         self._points = torch.tensor(points, dtype=dtype, device=self.device)
         self._full_lengths = torch.tensor(full_lengths, dtype=dtype, device=self.device)
         self._strokes = torch.tensor(strokes, dtype=dtype, device=self.device)
+        self._fit_domain = torch.tensor(domain, dtype=dtype, device=self.device)
         self._coefficients = tuple(float(value) for value in coefficients)
-        if not bool(torch.isfinite(self._points).all() & torch.isfinite(self._full_lengths).all()):
+        if not bool(torch.isfinite(self._points).all() & torch.isfinite(self._full_lengths).all()
+                   & torch.isfinite(self._strokes).all() & torch.isfinite(self._fit_domain).all()):
             raise ValueError("Spring mounting points and length datums must be finite")
 
     def evaluate(self, body_link_pose_world, body_com_position_world, spring_strength):
@@ -109,7 +121,8 @@ class SpringForceElement:
         separation = pairs[:, :, 0]-pairs[:, :, 1]
         length = separation.norm(dim=-1)
         compression = self._full_lengths-length
-        u = (compression/self._strokes).clamp(0., 1.)
+        normalized_compression = compression/self._strokes
+        u = normalized_compression.clamp(0., 1.)
         a, b, c, d = self._coefficients
         magnitude = (a+u*(b+u*(c+u*d)))*spring_strength
         upper_force = magnitude[..., None]*(separation/length[..., None])
@@ -123,7 +136,15 @@ class SpringForceElement:
             & torch.isfinite(length).all(-1) & torch.isfinite(compression).all(-1)
             & (quaternion_norm.squeeze(-1) > 0).all(-1) & (length > 0).all(-1)
             & torch.isfinite(forces).flatten(1).all(-1) & torch.isfinite(torques).flatten(1).all(-1))
+        within_mechanical_stroke = (valid[:, None] & (compression >= 0.)
+            & (compression <= self._strokes))
+        within_fitted_domain = (valid[:, None]
+            & (normalized_compression >= self._fit_domain[0])
+            & (normalized_compression <= self._fit_domain[1]))
         forces = torch.where(valid[:, None, None], forces, torch.nan)
         torques = torch.where(valid[:, None, None], torques, torch.nan)
         magnitude = torch.where(valid[:, None], magnitude, torch.nan)
-        return SpringPressureForces(forces, torques, mounts, length, compression, magnitude, valid)
+        return SpringPressureForces(
+            forces, torques, mounts, length, compression, magnitude, valid,
+            normalized_compression, within_mechanical_stroke, within_fitted_domain,
+        )

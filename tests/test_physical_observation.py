@@ -138,7 +138,7 @@ def test_actor_encodes_exactly35_fields_without_privileged_inputs_or_wheel_angle
 
 def test_full_requested_jump_rise_survives_actor_encoding_with_unchanged_layout():
     _, _, assembler, sample, command = fixture(4)
-    requested = torch.tensor([.03, .205, .25, .30])
+    requested = torch.tensor([.20, .205, .25, .40])
     command = replace(command, mode=torch.full((4,), int(CommandMode.JUMP), dtype=torch.long),
                       request_height_m=requested)
     state = assembler.measure(sample)
@@ -148,7 +148,7 @@ def test_full_requested_jump_rise_survives_actor_encoding_with_unchanged_layout(
     torch.testing.assert_close(frame[:, 28:33], torch.tensor([[0., 0., 0., 0., 1.]]).repeat(4, 1))
 
 
-@pytest.mark.parametrize('rise', (.029, .3001, float('nan')))
+@pytest.mark.parametrize('rise', (.029, .4001, float('nan')))
 def test_jump_encoding_rejects_values_outside_the_confirmed_request_contract(rise):
     _, _, assembler, sample, command = fixture()
     command = replace(command, mode=torch.full((2,), int(CommandMode.JUMP), dtype=torch.long),
@@ -245,7 +245,7 @@ def test_actor_rejects_invalid_values_before_scaling_and_clipping(change):
     elif change == 'issued_action':
         command.previous_issued_action[0, 0] = 3.01
     elif change == 'jump_height':
-        command.request_height_m[0] = .1
+        command.request_height_m[0] = .2
     elif change == 'lateral':
         command.admitted_body_command[0, 1] = .2
     else:

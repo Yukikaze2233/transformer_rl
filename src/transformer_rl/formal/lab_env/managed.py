@@ -32,7 +32,10 @@ class ManagedCurriculum(FormalTaskCurriculum):
             raise ValueError('managed course differs from the learner curriculum or sampler')
         super().__init__(recipe.num_envs, device=recipe.device, seed=recipe.training_seed,
                          promotion=recipe.curriculum_promotion, capabilities=capabilities,
-                         domain=recipe.domain, include_jump=len(names) == 4)
+                         domain=recipe.domain, include_jump=len(names) == 4,
+                         continuous=len(names) == 4)
+        if components.sampler.continuous != self.continuous:
+            raise ValueError('managed course sampler continuous mode differs from its recipe')
         self.budget, self.sampler = components.curriculum, components.sampler
         for stage in range(len(names)):
             self.require_supported(stage)

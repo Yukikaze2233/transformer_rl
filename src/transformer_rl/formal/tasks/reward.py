@@ -449,7 +449,7 @@ class PhysicalRewardComposer:
                               | ~evidence.supported_start | ~evidence.flight_seen
                               | ~torch.isfinite(evidence.apex_rise_m) | ~torch.isfinite(evidence.requested_rise_m)
                               | ~torch.isfinite(evidence.height_tolerance_m) | ~torch.isfinite(evidence.stable_landing_s)
-                              | (evidence.requested_rise_m < .03) | (evidence.requested_rise_m > .30)
+                              | (evidence.requested_rise_m < .03) | (evidence.requested_rise_m > .40)
                               | (evidence.height_tolerance_m <= 0) | (evidence.height_tolerance_m > .03 + 1e-6)
                               | (evidence.height_tolerance_m > .5 * evidence.requested_rise_m + 1e-6)
                               | ((evidence.apex_rise_m - evidence.requested_rise_m).abs()
