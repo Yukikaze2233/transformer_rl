@@ -373,3 +373,60 @@ def test_next_policy_cache_never_crosses_an_optimizer_boundary():
         indices = torch.arange(step * 2, (step + 1) * 2)
         mean = model.actor.policy(batch.windows.gather(indices))
         torch.testing.assert_close(mean, batch.old_mean[indices], atol=0, rtol=0)
+
+
+def test_reused_and_uncached_rollouts_have_identical_ppo_gradients_adam_and_rng():
+    from copy import deepcopy
+    from dataclasses import fields, is_dataclass, replace
+    import inspect
+    import textwrap
+    import transformer_rl.formal.lab_env.collector as module
+    from transformer_rl.formal.learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
+    from test_policy_optimization import assert_identical
+
+    # Execute the same collector with only reuse disabled, avoiding a second
+    # maintained implementation of reset/GAE/ownership semantics in the test.
+    source = textwrap.dedent(inspect.getsource(LabCollector.collect))
+    predicate = 'if next_outputs is None else next_outputs'
+    assert source.count(predicate) == 1
+    namespace = vars(module).copy()
+    exec(source.replace(predicate, 'if True else next_outputs'), namespace)
+
+    class UncachedCollector(LabCollector):
+        collect = namespace['collect']
+
+    network = StructuredActorCritic(StructuredPolicyConfig())
+    reference = deepcopy(network)
+    cached, uncached = LabCollector(_PartialResetEnv(), network), UncachedCollector(_PartialResetEnv(), reference)
+    for collector in (cached, uncached):
+        collector.reset()
+    rng = torch.get_rng_state().clone()
+    actual = cached.collect(steps=48)
+    after = torch.get_rng_state().clone()
+    torch.set_rng_state(rng)
+    expected = uncached.collect(steps=48)
+    assert torch.equal(after, torch.get_rng_state())
+
+    def tensors(value):
+        if isinstance(value, module.ObservationWindows):
+            return vars(value)
+        if is_dataclass(value):
+            return {field.name: tensors(getattr(value, field.name)) for field in fields(value)}
+        return value
+
+    assert_identical(tensors(actual), tensors(expected))
+    config = replace(StructuredPPOConfig(), probe_endpoints=96, evaluation_chunk=96)
+    trainers = [StructuredPPOTrainer(model, config) for model in (network, reference)]
+    rng = torch.get_rng_state().clone()
+    trainers[0].update(actual)
+    after = torch.get_rng_state().clone()
+    torch.set_rng_state(rng)
+    trainers[1].update(expected)
+    assert torch.equal(after, torch.get_rng_state())
+    assert_identical(network.state_dict(), reference.state_dict())
+    for left, right in zip(network.parameters(), reference.parameters()):
+        assert_identical(left.grad, right.grad)
+    for name in ('actor_optimizer', 'critic_optimizer'):
+        assert_identical(getattr(trainers[0], name).state_dict(), getattr(trainers[1], name).state_dict())
+    assert trainers[0].consumed == trainers[1].consumed
+    assert trainers[0].update_index == trainers[1].update_index == 1
