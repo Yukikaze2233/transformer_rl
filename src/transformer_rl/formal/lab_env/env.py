@@ -758,6 +758,9 @@ class WheeledLabEnv(DirectRLEnv):
         self._last_effort.copy_(effort)
 
     def _observe_substep(self) -> None:
+        self._loop_telemetry.observe_physics(
+            self._as_torch(self.robot.data.body_link_pose_w),
+            self._as_torch(self.robot.data.joint_vel))
         sample = self._sample()
         state = self._observations.assembler.measure(sample)
         if self._sensor_model is not None:
@@ -860,9 +863,6 @@ class WheeledLabEnv(DirectRLEnv):
                 self.sim.render(skip_app_pumping=not self.render_enabled)
             self.scene.update(dt=self.physics_dt)
             self._physical_tick += 1
-            self._loop_telemetry.observe_physics(
-                self._as_torch(self.robot.data.body_link_pose_w),
-                self._as_torch(self.robot.data.joint_vel))
             self._observe_substep()
         self.episode_length_buf += 1
         self.common_step_counter += 1

@@ -139,19 +139,30 @@ def test_complete_course_reaches_jump_without_reinitializing_sampler():
 
 def test_course_spawn_is_on_declared_approach_not_inside_first_rise(atlas):
     from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
-    from transformer_rl.formal.lab_env.course_tasks import StairRequestProtocol
+    from transformer_rl.formal.control.observation import CommandMode
+    from transformer_rl.formal.tasks.terrain_query import StaticTerrainQuery
     course = LabTerrainCourse.__new__(LabTerrainCourse)
     course.router = TerrainCourseRouter(atlas, 2)
     course.nominal_spawn_height_m = .32
     origins = torch.tensor([[3., 4, 0], [7., 8, 0]])
     course.env = SimpleNamespace(scene=SimpleNamespace(env_origins=origins),
+                                 _device=torch.device('cpu'),
                                  _task_sampler=SimpleNamespace(stage=2), _as_torch=lambda value: value)
-    task = SimpleNamespace(terrain_kind=torch.tensor([3, 0]), command=torch.zeros(2, 4))
+    # Synthetic wheel geometry keeps this routing test independent of the
+    # robot asset; support heights still come from the actual triangle atlas.
+    course.query = StaticTerrainQuery(atlas.parent / 'geometry.npz', atlas.parent / 'query_index.npz')
+    course._wheel_centres_root = torch.tensor([[0., .1, -.25], [0., -.1, -.25]])
+    course._wheel_radius = torch.tensor([.06, .06])
+    course._reset_clearance_m = .002
+    course._last_support_clearance = torch.full((2,), float('nan'))
+    course._spawn_y_offset = course._measure_spawn_y_offsets()
+    task = SimpleNamespace(terrain_kind=torch.tensor([3, 0]), command=torch.zeros(2, 4),
+                           mode=torch.full((2,), int(CommandMode.NORMAL), dtype=torch.long))
     pose = torch.tensor([[3., 4, .32, 0, 0, 0, 1], [7., 8, .32, 0, 0, 0, 1]])
     course.place_reset(torch.arange(2), task, pose)
     local = pose[:, :3] - course.router.origins
     torch.testing.assert_close(local[:, 0], torch.tensor([-1., 0.]))
-    assert local[:, 1].eq(0).all()
+    torch.testing.assert_close(local[:, 1], torch.zeros(2), atol=2e-7, rtol=0)
     torch.testing.assert_close(local[:, 2], course.router.spawn_z[course.router.tile] + .32)
 
 
