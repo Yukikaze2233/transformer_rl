@@ -21,10 +21,12 @@ class LabStartupDynamics:
 
     @torch.no_grad()
     def __init__(self, robot, binding, num_envs, nominal_mass_kg, seed, config, *,
-                 device, native_to_tensor=None, tensor_to_native=None):
+                 device, native_to_tensor=None, tensor_to_native=None,
+                 use_public_setters=False):
         if (type(num_envs) is not int or num_envs < 1 or type(seed) is not int or not 0 <= seed < 2**63
                 or tuple(robot.body_names) != tuple(binding.native_body_names)
                 or robot.root_view.count != num_envs
+                or type(use_public_setters) is not bool
                 or config is not None and not isinstance(config, StartupDynamicsConfig)):
             raise ValueError('Lab startup parameters require the exact fresh native mechanical rows')
         if native_to_tensor is None or tensor_to_native is None:
@@ -53,10 +55,27 @@ class LabStartupDynamics:
             masses, coms, inertias, binding.native_body_names,
             config if config is not None else StartupDynamicsConfig(nominal_fraction=1.), seed)
         if config is not None:
-            indices = tensor_to_native(torch.arange(num_envs, dtype=torch.int32))
-            view.set_masses(tensor_to_native(target_mass), indices)
-            view.set_coms(tensor_to_native(target_com), indices)
-            view.set_inertias(tensor_to_native(target_inertia), indices)
+            if use_public_setters:
+                names = ('set_masses_index', 'set_coms_index', 'set_inertias_index')
+                if any(not callable(getattr(robot, name, None)) for name in names):
+                    raise ValueError('cache-coherent startup writes require all public articulation setters')
+                backend_names = getattr(robot, 'backend_body_names', binding.native_body_names)
+                if tuple(backend_names) != tuple(binding.native_body_names):
+                    raise ValueError('startup native readback and public body ordering must match')
+                # GA COM offsets are cached until explicitly invalidated; a raw
+                # tensor-view write leaves derived link/COM states stale.
+                # All-row public setters update those caches without new draws.
+                robot.set_masses_index(masses=target_mass.to(device).contiguous(),
+                                       env_ids=None, body_ids=None, full_data=True)
+                robot.set_coms_index(coms=target_com.to(device).contiguous(),
+                                     env_ids=None, body_ids=None, full_data=True)
+                robot.set_inertias_index(inertias=target_inertia.to(device).contiguous(),
+                                         env_ids=None, body_ids=None, full_data=True)
+            else:
+                indices = tensor_to_native(torch.arange(num_envs, dtype=torch.int32))
+                view.set_masses(tensor_to_native(target_mass), indices)
+                view.set_coms(tensor_to_native(target_com), indices)
+                view.set_inertias(tensor_to_native(target_inertia), indices)
         actual_mass = read('get_masses', masses.shape)
         actual_com = read('get_coms', coms.shape)
         actual_inertia = read('get_inertias', inertias.shape)
@@ -65,6 +84,9 @@ class LabStartupDynamics:
                 or not torch.allclose(actual_inertia, target_inertia, rtol=1e-4, atol=1e-7)
                 or not torch.allclose(actual_com[..., 3:].norm(dim=-1), torch.ones(num_envs, 19), atol=1e-4, rtol=0)):
             raise RuntimeError('Lab native startup parameters failed their actual post-write readback')
+        if use_public_setters and not torch.allclose(actual_com[..., 3:], target_com[..., 3:],
+                                                    rtol=0, atol=1e-6):
+            raise RuntimeError('Lab public COM setter changed the selected xyzw orientation')
         self.mass_kg_by_environment = actual_mass.sum(-1).to(device)
         self.mass_scale = (actual_mass.sum(-1) / nominal).to(device)[:, None]
         self.base_com_local_m = actual_com[:, 0, :3].to(device)
@@ -81,6 +103,8 @@ class LabStartupDynamics:
             'distribution_evidence': 'engineering prior; not a measured probability distribution',
             'before_first_task_reset': True, 'SDK_solver_warmup_already_occurred': True,
             'physical_qualification': False}
+        if use_public_setters:
+            self._receipt['property_write_api'] = 'articulation_public_index_setters'
         self._receipt['configuration_sha256'] = hashlib.sha256(json.dumps(configuration, sort_keys=True,
             separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
