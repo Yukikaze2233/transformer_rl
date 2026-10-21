@@ -46,9 +46,10 @@ class LabLabeledEnv:
 
     def _policy_allowed(self):
         recovery = getattr(self.env, '_recover_task', None)
-        if recovery is not None:
-            return ~recovery.hold_mask
-        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        allowed = (torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+                   if recovery is None else ~recovery.hold_mask)
+        preparation = getattr(self.env, '_recovery_preparation', None)
+        return allowed if preparation is None else allowed & ~preparation.active
 
     def _labels(self, state, timestamp, *, episode_id=None, control_epoch=None):
         force = state.wheel_ground_force_n

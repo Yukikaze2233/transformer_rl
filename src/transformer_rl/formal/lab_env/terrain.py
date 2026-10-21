@@ -344,6 +344,7 @@ class LabTerrainCourse:
         env._formal_reward.observe(
             sample, state, effort_nm=env._last_effort, episode_id=env._episode_id,
             control_epoch=env._control_epoch, command=env._command, mode=env._command_mode,
+            policy_owned=getattr(env, '_interval_policy_owned', None),
             phase=self.tasks.phase, jump_height_world_z_m=target, jump_velocity_world_z_m_s=speed,
             joint_boundary_shortfall_rad=boundary, body_contact_allowed=self.body_contact_allowed)
 

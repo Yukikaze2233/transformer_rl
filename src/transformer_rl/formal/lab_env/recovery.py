@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import math
@@ -15,6 +15,7 @@ from pathlib import Path
 import torch
 
 from ..control.actuation import OutputFeedbackController
+from ..control.ownership import ControlSource
 from ..control.observation import MechanicalBinding
 from ..tasks.geometry import TerrainKind
 from ..tasks.recovery import RecoveryPoseCompiler, RecoveryTuning
@@ -69,6 +70,83 @@ class RecoveryResetPose:
     joint_velocity: torch.Tensor
     posture_id: torch.Tensor
     geometry_ready: torch.Tensor
+
+
+class _RecoveryPreparation:
+    """Move only unrepresentable recovery starts into the existing action box.
+
+    Each explicit waypoint is a script-owned preparation hold for one policy
+    interval. It never expands policy targets or supplies PPO/auxiliary credit.
+    The 1rad/s reference rate is independent of the unchanged 200Hz motor PD.
+    """
+
+    def __init__(self, controller, *, policy_dt_s, timeout_s):
+        if (not isinstance(controller, OutputFeedbackController) or policy_dt_s != .01
+                or not math.isfinite(timeout_s) or timeout_s <= 0):
+            raise ValueError('recovery preparation requires the original controller and explicit clock/timeout')
+        self.controller, self.dt, self.timeout_s = controller, policy_dt_s, timeout_s
+        count, device = controller.num_envs, controller.device
+        self.active = torch.zeros(count, dtype=torch.bool, device=device)
+        self.elapsed = torch.zeros(count, dtype=torch.float64, device=device)
+        self.frames = torch.zeros(count, dtype=torch.long, device=device)
+        self._start = torch.zeros(count, 6, device=device)
+        self._delta = torch.zeros(count, 4, device=device)
+        self._duration = torch.zeros(count, dtype=torch.float64, device=device)
+        self._has_active = False
+
+    @torch.no_grad()
+    def reset_rows(self, ids, feedback, eligible, now_s):
+        hold = self.controller.reset_hold_action(feedback, position_tolerance_rad=1e-6)
+        target = self.controller.decode(torch.zeros_like(feedback), feedback, now_s)
+        self.active[ids] = eligible[ids] & ~hold.admitted[ids]
+        self.elapsed[ids], self.frames[ids] = 0., 0
+        self._start[ids] = feedback[ids]
+        self._delta[ids] = target.admitted_leg_position_rad[ids] - feedback[ids, :4]
+        # One shared interpolation fraction preserves each coaxial pair's
+        # relative target between its two admitted endpoint configurations.
+        self._duration[ids] = self._delta[ids].abs().amax(-1).double()
+        self._has_active = bool(self.active.any())
+
+    @torch.no_grad()
+    def targets(self, policy_targets, now_s):
+        if not self._has_active:
+            return policy_targets
+        self.elapsed.add_(self.active.double() * self.dt)
+        fraction = (self.elapsed / self._duration.clamp_min(self.dt)).clamp_max(1.)
+        reference = self._start.clone()
+        reference[:, :4] += fraction[:, None].float() * self._delta
+        # Encode a commanded waypoint, not a fabricated feedback measurement.
+        hold = self.controller.preparation_hold(reference, position_tolerance_rad=1e-6)
+        if not bool(hold.admitted[self.active].all()):
+            raise ValueError('recovery preparation waypoint violates the original coupled target domain')
+        selected = self.active[:, None]
+        raw = self.controller.nominal[:4] + .25 * hold.requested_action[:, :4]
+        return replace(
+            policy_targets,
+            issued_action=torch.where(selected, hold.requested_action, policy_targets.issued_action),
+            raw_leg_position_rad=torch.where(selected, raw, policy_targets.raw_leg_position_rad),
+            admitted_leg_position_rad=torch.where(selected, hold.leg_position_rad,
+                                                  policy_targets.admitted_leg_position_rad),
+            wheel_velocity_rad_s=torch.where(selected, 0., policy_targets.wheel_velocity_rad_s),
+            pair_projected=torch.where(selected, False, policy_targets.pair_projected),
+            common_turns=torch.where(selected, hold.common_turns, policy_targets.common_turns),
+            controller_issued_at_s=torch.where(self.active, now_s, policy_targets.controller_issued_at_s),
+            control_source=torch.where(self.active, int(ControlSource.PREPARATION_HOLD),
+                                       policy_targets.control_source),
+        )
+
+    @torch.no_grad()
+    def finish_interval(self, feedback):
+        handoff = torch.zeros_like(self.active)
+        timeout = torch.zeros_like(self.active)
+        if self._has_active:
+            self.frames.add_(self.active.long())
+            hold = self.controller.reset_hold_action(feedback, position_tolerance_rad=1e-6)
+            handoff = self.active & hold.admitted & (self.frames >= 5)
+            timeout = self.active & ~handoff & (self.elapsed >= self.timeout_s - 1e-9)
+            self.active &= ~handoff
+            self._has_active = bool(self.active.any())
+        return handoff, timeout
 
 
 class LabRecoveryReset:

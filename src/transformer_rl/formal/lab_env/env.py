@@ -22,6 +22,7 @@ import isaaclab.sim as sim_utils
 from ..control.joints import LegBoundaryGeometry
 from ..control.observation import CommandFeatures, CommandMode, MechanicalBinding, NativePhysicalSample
 from ..control.pressure import NativeSliderPressure, PressureParameters
+from ..control.ownership import ControlSource
 from .actuator import WheeledControlCore
 from .cfg import WheeledLabEnvCfg
 from .contact_mapping import contact_body_mapping
@@ -36,7 +37,7 @@ from .skill_fsm import JumpState, SkillFSM
 from ..tasks.reward import RewardPhase
 from ..tasks.termination import NativeTaskLimits, PhysicalFailureLatch
 from .recover import LabRecoverTask, RecoverTaskSpec
-from .recovery import LabRecoveryReset
+from .recovery import LabRecoveryReset, _RecoveryPreparation
 from .materials import WheelMaterialReader
 from .isolation import author_shared_ground_groups, isolate_scene
 from .observations import LabObservationBuilder
@@ -191,6 +192,8 @@ class WheeledLabEnv(DirectRLEnv):
         self._command_sampler = None
         self._task_sampler = None
         self._recovery_reset = None
+        self._recovery_preparation = None
+        self._preparation_handoff = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
         recover_spec = getattr(cfg, "recover_spec", None)
         self._recover_task = None
         self._recover_initial_leg = None
@@ -206,6 +209,7 @@ class WheeledLabEnv(DirectRLEnv):
         self._issued_action = torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32,
                                           device=self._device)
         self._previous_action = torch.zeros_like(self._issued_action)
+        self._previous_control_source = torch.zeros(self.num_envs, dtype=torch.long, device=self._device)
         self._before_action = torch.zeros_like(self._issued_action)
         self._last_effort = torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32,
                                         device=self._device)
@@ -239,9 +243,13 @@ class WheeledLabEnv(DirectRLEnv):
             raise TypeError("task sampler 必须可调用")
         self._task_sampler = sampler
         self._recovery_reset = None
+        self._recovery_preparation = None
         if sampler is not None:
             # 资产/碰撞源只读一次；8192 行共享同一 flat source。
             self._recovery_reset = LabRecoveryReset(self._asset, self.num_envs, device=str(self._device))
+            self._recovery_preparation = _RecoveryPreparation(
+                self._control.controller, policy_dt_s=float(self.step_dt),
+                timeout_s=self._failure_latch.limits.preparation_timeout_s)
             if getattr(self.cfg, 'course_manifest', None):
                 from .terrain import LabTerrainCourse
                 self._terrain_course = LabTerrainCourse(self, self.cfg.course_manifest)
@@ -586,6 +594,7 @@ class WheeledLabEnv(DirectRLEnv):
             command_clock_s=(self._terrain_course.tasks.request_clock.clone()
                              if self._terrain_course is not None else self._clock().to(torch.float32)),
             previous_issued_action=self._previous_action,
+            previous_control_source=self._previous_control_source,
         )
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
@@ -617,10 +626,15 @@ class WheeledLabEnv(DirectRLEnv):
                 )
         if self._formal_reward is not None:
             dq = self._as_torch(self.robot.data.joint_vel).index_select(1, self._active_indices)
-            self._formal_reward.begin(
+            if self._recovery_preparation is not None:
+                self._targets = self._recovery_preparation.targets(self._targets, self._clock())
+                self._issued_action.copy_(self._targets.issued_action)
+            self._interval_policy_owned = self._targets.control_source == int(ControlSource.POLICY)
+            self._formal_reward.composer.begin(
                 self._issued_action, dq, now_s=self._clock(), episode_id=self._episode_id,
-                control_epoch=self._control_epoch, command=self._command,
-                mode=self._command_mode,
+                control_epoch=self._control_epoch, admitted_body_command=self._command,
+                command_mode=self._command_mode, policy_owned=self._interval_policy_owned,
+                control_source=self._targets.control_source,
             )
 
     def _apply_action(self) -> None:
@@ -701,6 +715,7 @@ class WheeledLabEnv(DirectRLEnv):
                     sample, state, effort_nm=self._last_effort, episode_id=self._episode_id,
                     control_epoch=self._control_epoch, command=self._command,
                     mode=self._command_mode, phase=self._reward_phase,
+                    policy_owned=self._interval_policy_owned,
                     jump_height_world_z_m=torch.where(jump, jump_height_world, zero),
                     jump_velocity_world_z_m_s=zero,
                     joint_boundary_shortfall_rad=boundary,
@@ -750,6 +765,13 @@ class WheeledLabEnv(DirectRLEnv):
             self._observe_substep()
         self.episode_length_buf += 1
         self.common_step_counter += 1
+        preparation = getattr(self, '_recovery_preparation', None)
+        if preparation is not None:
+            q = self._joint_positions().index_select(1, self._active_indices)
+            handoff, preparation_timeout = preparation.finish_interval(q)
+            self._terminated |= preparation_timeout
+            self._preparation_handoff.copy_(handoff & ~self._terminated)
+            self.extras['recovery_preparation_timeouts'] = preparation_timeout.sum()
         time_limit = self.episode_length_buf >= self.max_episode_length - 1
         spatial_exit = torch.zeros_like(time_limit)
         if self._terrain_course is not None:
@@ -787,12 +809,18 @@ class WheeledLabEnv(DirectRLEnv):
         terminated_out = self._last_terminated.clone()
         truncated_out = self._last_truncated.clone()
         self._previous_action.copy_(self._issued_action)
+        previous_source = getattr(self, '_previous_control_source', None)
+        if previous_source is not None:
+            previous_source.copy_(self._targets.control_source)
         reset_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1).int()
         self._update_skill()
         # Reward used this interval's command. Bootstrap describes the next
         # decision endpoint, including its newly advanced command, before any
         # physical row reset changes the terminal state or sensor packet.
         self._capture_terminal()
+        if preparation is not None:
+            self._preparation_handoff &= ~self.reset_buf
+            self._control_epoch.add_(self._preparation_handoff.long())
         if reset_ids.numel() > 0:
             self._reset_idx(reset_ids)
         self.obs_buf = self._get_observations()
@@ -914,6 +942,7 @@ class WheeledLabEnv(DirectRLEnv):
         self._last_policy_velocity[ids] = 0.0
         self._issued_action[ids] = 0.0
         self._previous_action[ids] = 0.0
+        self._previous_control_source[ids] = int(ControlSource.POLICY)
         self._before_action[ids] = 0.0
         self._reset_mask[ids] = True
         if self._terrain_course is not None:
@@ -938,6 +967,9 @@ class WheeledLabEnv(DirectRLEnv):
             torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32, device=self._device),
             q, self._clock(),
         )
+        if self._recovery_preparation is not None:
+            self._recovery_preparation.reset_rows(
+                ids, q, self._base_command_mode == int(CommandMode.RECOVERY), self._clock())
         if self._sensor_model is not None:
             mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
             mask[ids] = True
@@ -961,7 +993,7 @@ class WheeledLabEnv(DirectRLEnv):
         commands = self._commands()
         sensors = self._sensor_packet(state)
         actor, _ = self._observations.append(
-            sample, commands, sensors, self._reset_mask, measured=state,
+            sample, commands, sensors, self._reset_mask | self._preparation_handoff, measured=state,
         )
         if self._scan_debug:
             print("OBS after append", flush=True)
@@ -974,6 +1006,7 @@ class WheeledLabEnv(DirectRLEnv):
             self._last_wheel_velocity_body[reset] = 0.0
         critic = self._critic_182(state, sample, joint_acceleration=acceleration)
         self._reset_mask.zero_()
+        self._preparation_handoff.zero_()
         self.obs_buf = {"policy": actor.flatten(1).contiguous(),
                         "critic": critic.contiguous()}
         return self.obs_buf
