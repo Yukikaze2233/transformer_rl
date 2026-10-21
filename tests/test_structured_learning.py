@@ -145,7 +145,15 @@ def test_partial_collection_failure_remains_fully_charged_and_not_resumable(tmp_
             loop.journal.checkpoint_boundary()
         with pytest.raises(RuntimeError, match='faulted'):
             loop.run_update()
-        assert read_json(directory / 'control' / 'status.json')['phase'] == 'failed'
+        status = read_json(directory / 'control' / 'status.json')
+        assert status['phase'] == 'failed'
+        assert status['budget_update'] == status['reserved_updates'] == 1
+        assert status['reserved_transitions'] == 32
+        assert status['cumulative_transitions'] == 8
+        assert status['total_consumption'] == loop.journal.total_consumption()
+        assert status['total_consumption']['attempted_transitions'] == 10
+        assert status['update'] == 0
+        assert 'synthetic physical write failed' in status['error']
         assert not (directory / 'control' / 'result.json').exists()
         assert list(loop.store.directory.iterdir()) == []
 
@@ -164,6 +172,12 @@ def test_failed_ppo_retains_executed_work_without_publishing_a_resume_endpoint(t
         state = loop.journal.summary()
         assert state['failed'] and state['ppo_fresh_endpoints'] == 32
         assert state['actor_optimizer_steps'] == state['critic_optimizer_steps'] == 1
+        status = read_json(directory / 'control' / 'status.json')
+        assert status['phase'] == 'failed'
+        assert status['update'] == status['budget_update'] == 1
+        assert status['total_consumption'] == loop.journal.total_consumption()
+        assert status['cumulative_transitions'] == 32
+        assert 'synthetic post-update failure' in status['error']
         assert not (directory / 'control' / 'result.json').exists()
 
 

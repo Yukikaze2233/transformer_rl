@@ -139,7 +139,10 @@ class StructuredLearningLoop:
         except BaseException as accounting_error:
             error.add_note('Consumption remains uncertain: ' + repr(accounting_error))
         try:
-            self.control.fail(error)
+            # The last public update precedes collection and may omit the
+            # failed reservation. Publish the sealed journal counters with
+            # the error so a terminal status never appears to refund work.
+            self._publish('failed', error=f'{type(error).__name__}: {error}')
         except BaseException as control_error:
             error.add_note('Failure status publication also failed: ' + repr(control_error))
 
