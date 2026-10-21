@@ -74,6 +74,36 @@ def _require_resume_scope(payload):
             raise ValueError('Lab curriculum consumption differs from actual completed PPO updates')
 
 
+def _runtime_randomization(runtime, *, required):
+    """Use explicit runtime settings without drawing a new randomization state."""
+    from ..control.sensors import SensorModelConfig
+    from ..simulation.dynamics import StartupDynamicsConfig
+
+    if not isinstance(runtime, dict) or not isinstance(runtime.get('tuning', {}), dict):
+        raise ValueError('diagnostic runtime and tuning must be mappings')
+    tuning = runtime.get('tuning', {})
+    parsed = []
+    for name, config_type in (('sensors', SensorModelConfig), ('dynamics', StartupDynamicsConfig)):
+        if name in runtime and name in tuning and runtime[name] != tuning[name]:
+            raise ValueError(f'conflicting diagnostic {name} configurations')
+        raw = runtime[name] if name in runtime else tuning.get(name)
+        if raw is None:
+            if required:
+                raise ValueError(f'formal course diagnostic requires explicit {name}')
+            parsed.append(None)
+            continue
+        if not isinstance(raw, dict):
+            raise ValueError(f'diagnostic {name} must be a mapping')
+        try:
+            parsed.append(config_type(**raw))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f'invalid diagnostic {name} configuration') from error
+    sensors, dynamics = parsed
+    if sensors is not None and (sensors.physics_dt_s != .005 or sensors.policy_dt_s != .01):
+        raise ValueError('diagnostic sensors must share the 200Hz physical and 100Hz policy clock')
+    return sensors, dynamics
+
+
 def _parse_args(argv=None):
     parser = argparse.ArgumentParser(description="M1 LabEnv PPO")
     parser.add_argument("--runtime-json", type=Path, required=True)
@@ -152,6 +182,8 @@ def main(argv=None):
     if args.diagnostic_only and args.diagnostic_stage is None:
         raise ValueError('--diagnostic-only requires an explicit --diagnostic-stage')
 
+    runtime = json.loads(args.runtime_json.read_text())
+    sensors, dynamics = _runtime_randomization(runtime, required=args.formal_curriculum)
     from .sdk import LabSimulation
     launcher = LabSimulation(args.device, gui=args.gui)
     health = None
@@ -189,7 +221,6 @@ def main(argv=None):
             torch.cuda.init()
 
         torch.manual_seed(args.seed)
-        runtime = json.loads(args.runtime_json.read_text())
         response_path = verify_pin(runtime["response_source_pin"])
         response = ResponseParameters.from_recorded_response(
             json.loads(response_path.read_text())["actuator_response"])
@@ -258,6 +289,7 @@ def main(argv=None):
                             device=args.device, response=response, pair_domain=pair,
                             formal_reward=formal_reward, recover=recover_spec,
                             termination_limits=termination_limits,
+                            sensors=sensors, dynamics=dynamics,
                             height_scanner=args.height_scanner,
                             terrain_scan=(args.terrain_scan or policy.critic_input_dim == 185),
                             forward_scan=args.forward_scan,
