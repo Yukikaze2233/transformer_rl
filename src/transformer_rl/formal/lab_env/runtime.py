@@ -184,12 +184,21 @@ def runtime(recipe, components, configuration, *, control):
     except BaseException as error:
         # Preserve a real failure before Kit shutdown can obscure the exit code.
         failure = error
-        control.fail(error)
+        try:
+            control.fail(error)
+        except BaseException as publication_error:
+            error.add_note('Runtime failure publication raised: ' + repr(publication_error))
         raise
     finally:
         cleanup_failure = None
         for resource in (env, health, None if launcher is None else launcher.app):
             if resource is None:
+                continue
+            if (launcher is not None and resource is launcher.app
+                    and (failure is not None or cleanup_failure is not None)):
+                # Kit can terminate inside native close(), bypassing Python
+                # exception handlers entirely. The worker entrypoint must emit
+                # the traceback and exit nonzero before interpreter shutdown.
                 continue
             try:
                 resource.close()

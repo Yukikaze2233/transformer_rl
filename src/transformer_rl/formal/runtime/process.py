@@ -10,10 +10,13 @@ import argparse
 from contextlib import ExitStack
 import importlib
 import json
+import os
 from pathlib import Path
 import random
 import re
 import time
+import sys
+import traceback
 
 import numpy as np
 import torch
@@ -143,7 +146,10 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
                         metrics_log.flush()
                 return dict(loop._report)
     except BaseException as error:
-        control.fail(error)
+        try:
+            control.fail(error)
+        except BaseException as publication_error:
+            error.add_note('Worker failure publication raised: ' + repr(publication_error))
         raise
 
 
@@ -159,11 +165,21 @@ def main(argv=None):
     if not re.fullmatch(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*', args.runtime_factory):
         raise ValueError('runtime factory must be module:factory')
     module, name = args.runtime_factory.split(':')
-    report = run_worker(
-        LearningRecipe.from_dict(read_json(args.recipe)), args.control_dir,
-        getattr(importlib.import_module(module), name), read_json(args.runtime_config),
-        resume_attempt=args.resume_attempt,
-        parent_exit_pin=read_json(args.parent_exit_pin) if args.parent_exit_pin else None)
+    try:
+        report = run_worker(
+            LearningRecipe.from_dict(read_json(args.recipe)), args.control_dir,
+            getattr(importlib.import_module(module), name), read_json(args.runtime_config),
+            resume_attempt=args.resume_attempt,
+            parent_exit_pin=read_json(args.parent_exit_pin) if args.parent_exit_pin else None)
+    except BaseException as error:
+        # Failure receipts are fsynced by the learner. Avoid Kit's native or
+        # atexit shutdown paths, which can replace an unhandled error with exit0.
+        try:
+            traceback.print_exception(error, file=sys.stderr)
+            sys.stdout.flush()
+            sys.stderr.flush()
+        finally:
+            os._exit(1)
     print(json.dumps(report, allow_nan=False), flush=True)
     return 0
 

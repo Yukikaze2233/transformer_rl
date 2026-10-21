@@ -126,7 +126,7 @@ def test_sdk_open_failure_is_published_without_building_a_scene(tmp_path, monkey
 
 
 @pytest.mark.parametrize('cleanup_error', (SystemExit(0), RuntimeError('shutdown failure')))
-def test_sdk_cleanup_does_not_replace_the_original_failure(tmp_path, monkeypatch, cleanup_error):
+def test_fatal_failure_never_enters_sdk_shutdown_that_can_exit_zero(tmp_path, monkeypatch, cleanup_error):
     recipe, components, journal, config, _ = inputs(tmp_path, monkeypatch)
     monkeypatch.setattr(module, 'parse_configuration',
                         lambda *_: (None, None, None, None, None, {}, None, None, None))
@@ -146,8 +146,7 @@ def test_sdk_cleanup_does_not_replace_the_original_failure(tmp_path, monkeypatch
     with journal, pytest.raises(ModuleNotFoundError) as caught:
         with module.runtime(replace(recipe, device='cpu'), components, config, control=control):
             pytest.fail('runtime must not yield after failed SDK imports')
-    assert closed == [True] and failures == [caught.value]
-    assert any(type(cleanup_error).__name__ in note for note in caught.value.__notes__)
+    assert closed == [] and failures == [caught.value]
 
 
 def test_atlas_relative_payload_pins_survive_directory_relocation(tmp_path, monkeypatch):
