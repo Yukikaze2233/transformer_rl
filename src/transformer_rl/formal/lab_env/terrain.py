@@ -147,6 +147,22 @@ class LabTerrainCourse:
         points[..., 2] = self.query._ceiling_m
         return points
 
+    def _query_failure(self, message, details, points, tiles, valid, physical_points):
+        """Attach bounded source-geometry evidence without replacing the failure."""
+        error = RuntimeError(message + ': ' + json.dumps(
+            details, allow_nan=True, separators=(',', ':')))
+        diagnose = getattr(self.query, '_diagnose_misses', None)
+        if not callable(diagnose):
+            return error
+        try:
+            report = diagnose(points, tiles, valid, physical_points=physical_points)
+        except BaseException as secondary:
+            error.add_note('Terrain query diagnostics raised '
+                           f'{type(secondary).__name__}: {secondary}')
+            return error
+        return RuntimeError(message + ': ' + json.dumps(
+            {**details, 'query_diagnostics': report}, allow_nan=True, separators=(',', ':')))
+
     def ground(self):
         env = self.env
         if self._ground_token == env._physical_tick:
@@ -163,8 +179,10 @@ class LabTerrainCourse:
                        'tile': self.router.tile[ids].tolist(), 'ray_origins': points[ids].tolist(),
                        'valid_root_left_right': valid[ids].tolist(),
                        'root_local_m': (env._root_link_position() - self.router.origins)[ids].tolist()}
-            raise RuntimeError('course root/wheel query has no physical terrain support: '
-                               + json.dumps(details, allow_nan=True, separators=(',', ':')))
+            physical = torch.cat((env._root_link_position()[:, None], self._wheel_centres()), 1)
+            raise self._query_failure(
+                'course root/wheel query has no physical terrain support', details,
+                points, self.router.tile[:, None].expand(-1, 3), valid, physical)
         env._ground_at_root.copy_(heights[:, 0])
         self.wheel_ground.copy_(heights[:, 1:])
         self.wheel_material.copy_(friction[:, 1:])
@@ -173,11 +191,20 @@ class LabTerrainCourse:
 
     def scan_77(self):
         env = self.env
-        points = self._yaw_offsets(env._root_link_position(), self._grid_offsets)
-        heights, valid, _, _ = self.query(points, self.router.tile[:, None].expand(-1, 77))
+        root = env._root_link_position()
+        points = self._yaw_offsets(root, self._grid_offsets)
+        tiles = self.router.tile[:, None].expand(-1, 77)
+        heights, valid, _, _ = self.query(points, tiles)
+        valid = valid & torch.isfinite(root).all(-1, keepdim=True)
         if not valid.all():
-            raise RuntimeError('privileged terrain scan left the authored collision geometry')
-        relative = env._root_link_position()[:, 2, None] - heights - env._task.nominal_height_m
+            ids = (~valid.all(-1)).nonzero().flatten()[:8]
+            details = {'physical_tick': env._physical_tick, 'rows': ids.tolist(),
+                       'tile': self.router.tile[ids].tolist(),
+                       'root_local_m': (root - self.router.origins)[ids].tolist()}
+            raise self._query_failure(
+                'privileged terrain scan left the authored collision geometry',
+                details, points, tiles, valid, root[:, None].expand_as(points))
+        relative = root[:, 2, None] - heights - env._task.nominal_height_m
         return (5 * relative).clamp(-1, 1), heights[:, 38]
 
     def wheel_lookahead(self):
@@ -253,8 +280,18 @@ class LabTerrainCourse:
         if task is None:
             raise ValueError('terrain course requires the formal TaskDraw sampler')
         env = self.env
+        draw = getattr(task, 'draw', None)
+        requested = None
+        if draw is not None:
+            requested = {
+                'slope_rad': draw.slope_rad,
+                'roughness_m': draw.roughness_m,
+                'step_up_m': draw.step_up_m,
+                'step_down_m': draw.step_down_m,
+            }
         origins, ground = self.router.reset(ids, task.terrain_kind, stage=env._task_sampler.stage,
-                                             command_forward=task.command[:, 0])
+                                             command_forward=task.command[:, 0],
+                                             requested=requested)
         pose[:, :3] -= env._as_torch(env.scene.env_origins).index_select(0, ids)
         pose[:, :3] += origins
         # Spawn on the declared approach, rather than at the tile's first rise.
