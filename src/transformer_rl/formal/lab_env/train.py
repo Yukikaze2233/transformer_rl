@@ -144,6 +144,8 @@ def _parse_args(argv=None):
                         help='Open the Isaac Lab window instead of headless mode')
     parser.add_argument('--profile-collection', action='store_true',
                         help='Diagnostic GPU fences and per-stage collection logs; disabled by default')
+    parser.add_argument('--loop-telemetry', action='store_true',
+                        help='Record native loop residuals for independent diagnostics; disabled by default')
     parser.add_argument('--diagnostic-stage', type=int, choices=range(4),
                         help='Validation-only fresh stage override; requires --diagnostic-only')
     parser.add_argument('--diagnostic-only', action='store_true',
@@ -297,6 +299,7 @@ def main(argv=None):
                             terrain_atlas_manifest=(None if args.terrain_atlas is None else str(args.terrain_atlas)),
                             declarative_scene=launcher.declarative_scene,
                             expected_manifest_sha256=expected_asset)
+        cfg.loop_telemetry_enabled = args.loop_telemetry
         health = NativePhysicsHealth.for_native_process(args.output.parent)
         scene_queries = args.terrain_profile != 'course'
         cfg.sim.enable_scene_query_support = scene_queries

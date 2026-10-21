@@ -12,7 +12,10 @@ class NativeLoopTelemetry:
     or acceptance thresholds occur in the observation path.
     """
 
-    def __init__(self, constraints, body_names, num_envs, device):
+    def __init__(self, constraints, body_names, num_envs, device, *, enabled=True):
+        if type(enabled) is not bool:
+            raise TypeError('loop telemetry requires an explicit boolean switch')
+        self.enabled = enabled
         names = tuple(body_names)
         if (type(num_envs) is not int or num_envs < 1 or len(names) != 19
                 or len(set(names)) != len(names) or len(constraints) != 6
@@ -23,6 +26,8 @@ class NativeLoopTelemetry:
             raise ValueError('loop telemetry requires the six named selected-asset constraints')
         self.num_envs, self.device = num_envs, torch.device(device)
         self.names = tuple(c['name'] for c in constraints)
+        if not self.enabled:
+            return
         self._ids = torch.tensor([[names.index(c['body0']), names.index(c['body1'])]
                                   for c in constraints], device=self.device)
         self._local = torch.tensor([[c['local_pos0_m'], c['local_pos1_m']]
@@ -48,6 +53,8 @@ class NativeLoopTelemetry:
         self.clear_window()
 
     def clear_window(self):
+        if not self.enabled:
+            return
         for value in (self._environment_peak, self._loop_peak, self._reset_peak,
                       self._first_peak, self._invalid, self._velocity_peak,
                       self._velocity_invalid, self._sum, self._sum_sq,
@@ -81,6 +88,8 @@ class NativeLoopTelemetry:
 
     @torch.no_grad()
     def observe_reset(self, poses, ids):
+        if not self.enabled:
+            return
         if (poses.shape[0] != self.num_envs or ids.ndim != 1
                 or ids.device != self.device or ids.dtype != torch.long):
             raise ValueError('reset telemetry requires exact selected device row indices')
@@ -93,6 +102,8 @@ class NativeLoopTelemetry:
 
     @torch.no_grad()
     def observe_physics(self, poses, joint_velocity):
+        if not self.enabled:
+            return
         if (poses.shape[0] != self.num_envs
                 or joint_velocity.shape != (self.num_envs, 18)
                 or joint_velocity.device != self.device or joint_velocity.dtype != torch.float32):
@@ -123,6 +134,12 @@ class NativeLoopTelemetry:
         self._velocity_frames += 1
 
     def summary(self):
+        if not self.enabled:
+            return {
+                'six_loop_enabled': False,
+                'six_loop_scope': 'disabled; no native loop observations collected',
+                'physical_qualification': False,
+            }
         p95 = torch.quantile(self._environment_peak, .95)
         scalars = torch.stack((self._environment_peak.amax(), p95,
                                self._reset_peak.amax(), self._first_peak.amax(),
@@ -145,6 +162,7 @@ class NativeLoopTelemetry:
             for index, name in enumerate(self.names)
         }
         return {
+            'six_loop_enabled': True,
             'six_loop_scope': 'world anchor separation at every returned physical substep; reset observations use forward(dt=0)',
             'six_loop_physics_frames': self._frames,
             'six_loop_constraint_samples': self._frames * self.num_envs * 6,

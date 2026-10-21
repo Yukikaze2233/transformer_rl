@@ -246,6 +246,7 @@ class WheeledLabEnvCfg(DirectRLEnvCfg):
     history_length = HISTORY_LENGTH
     asset_directory: str = ""
     declarative_scene: bool = False
+    loop_telemetry_enabled: bool = False
 
     sim: SimulationCfg = SimulationCfg(
         dt=PHYSICS_DT_S,

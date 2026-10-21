@@ -85,7 +85,8 @@ class WheeledLabEnv(DirectRLEnv):
             self._asset.continuous_joint_names(), float(self.physics_dt))
         model_spec = json.loads(self._asset.bound_bytes('model_spec.json', maximum_bytes=256 * 1024))
         self._loop_telemetry = NativeLoopTelemetry(
-            model_spec['constraints'], self.robot.body_names, self.num_envs, self._device)
+            model_spec['constraints'], self.robot.body_names, self.num_envs, self._device,
+            enabled=getattr(cfg, 'loop_telemetry_enabled', False))
         self._terrain_course = None
         self._completed_estimate = None
         self._active_indices = torch.tensor(self._binding.policy_joint_indices,
@@ -924,9 +925,10 @@ class WheeledLabEnv(DirectRLEnv):
         return mount, slider
 
     def _observe_substep(self) -> None:
-        self._loop_telemetry.observe_physics(
-            self._as_torch(self.robot.data.body_link_pose_w),
-            self._as_torch(self.robot.data.joint_vel))
+        if self._loop_telemetry.enabled:
+            self._loop_telemetry.observe_physics(
+                self._as_torch(self.robot.data.body_link_pose_w),
+                self._as_torch(self.robot.data.joint_vel))
         sample = self._sample()
         state = self._observations.assembler.measure(sample)
         if self._sensor_model is not None:
@@ -1243,8 +1245,9 @@ class WheeledLabEnv(DirectRLEnv):
         self.scene.write_data_to_sim()
         self.sim.forward()
         self.scene.update(dt=0.0)
-        self._loop_telemetry.observe_reset(
-            self._as_torch(self.robot.data.body_link_pose_w), ids)
+        if self._loop_telemetry.enabled:
+            self._loop_telemetry.observe_reset(
+                self._as_torch(self.robot.data.body_link_pose_w), ids)
         if self._recovery_reset is not None:
             # Readback admission after the native write. The source residual
             # above is a solver claim; this is what PhysX actually accepted.
