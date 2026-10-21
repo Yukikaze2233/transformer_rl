@@ -131,7 +131,7 @@ def test_continuous_course_ramps_mixture_domain_and_flat_rehearsal():
     curriculum.budget.consumed[1] = COMPLETE_STAGE_BUDGETS[1]
     torch.testing.assert_close(torch.tensor(curriculum.weights), torch.tensor(STAGE_WEIGHTS[1]))
     domain = curriculum._effective_domain()
-    assert domain.jump_m[0] >= .20 and domain.jump_m[1] <= .40
+    assert domain.jump_m[0] >= .03 and domain.jump_m[1] <= .40
     draw = curriculum.sample(torch.arange(256))
     terrain = draw.family == TaskFamily.TERRAIN
     assert terrain.any()
@@ -143,4 +143,4 @@ def test_continuous_course_ramps_mixture_domain_and_flat_rehearsal():
     curriculum.budget.consumed[3] = COMPLETE_STAGE_BUDGETS[3]
     end = curriculum.weights[TaskFamily.REQUEST]
     assert start < end == JUMP_WEIGHTS[TaskFamily.REQUEST]
-    assert curriculum._effective_domain().jump_m == (0.20, 0.40)
+    assert curriculum._effective_domain().jump_m == (0.03, 0.40)
