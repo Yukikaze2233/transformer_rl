@@ -95,3 +95,16 @@ def test_source_anchor_rotation_and_translation_do_not_change_closure_or_inputs(
     poses[..., 6] = 2. ** -.5
     observer.observe_physics(poses, velocity)
     assert abs(observer.summary()['six_loop_closure_max_m'] - first) < 2e-7
+
+
+def test_physical_mean_and_rms_are_sample_moments_not_peak_means():
+    observer, poses, velocity = fixture()
+    poses[0, 1, 0] = .008
+    poses[1, 1, 0] = .002
+    observer.observe_physics(poses, velocity)
+    result = observer.summary()
+    assert result['six_loop_valid_constraint_samples'] == 12
+    assert abs(result['six_loop_mean_error_m'] - .010 / 12) < 1e-9
+    assert abs(result['six_loop_rms_error_m'] - ((.008**2 + .002**2) / 12) ** .5) < 1e-9
+    assert abs(result['six_loop_mean_by_constraint_m']['loop_0'] - .010 / 2) < 1e-9
+    assert result['six_loop_mean_by_constraint_m']['loop_1'] == 0

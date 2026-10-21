@@ -39,12 +39,19 @@ class NativeLoopTelemetry:
         self._invalid = torch.zeros((), dtype=torch.long, device=self.device)
         self._velocity_peak = torch.zeros((), device=self.device)
         self._velocity_invalid = torch.zeros((), dtype=torch.long, device=self.device)
+        self._sum = torch.zeros((), device=self.device)
+        self._sum_sq = torch.zeros((), device=self.device)
+        self._loop_sum = torch.zeros(6, device=self.device)
+        self._loop_sum_sq = torch.zeros(6, device=self.device)
+        self._loop_count = torch.zeros(6, dtype=torch.long, device=self.device)
+        self._count = torch.zeros((), dtype=torch.long, device=self.device)
         self.clear_window()
 
     def clear_window(self):
         for value in (self._environment_peak, self._loop_peak, self._reset_peak,
                       self._first_peak, self._invalid, self._velocity_peak,
-                      self._velocity_invalid):
+                      self._velocity_invalid, self._sum, self._sum_sq,
+                      self._loop_sum, self._loop_sum_sq, self._loop_count, self._count):
             value.zero_()
         self._frames = self._reset_rows = self._velocity_frames = 0
         self._first_rows = torch.zeros((), dtype=torch.long, device=self.device)
@@ -90,7 +97,17 @@ class NativeLoopTelemetry:
                 or joint_velocity.shape != (self.num_envs, 18)
                 or joint_velocity.device != self.device or joint_velocity.dtype != torch.float32):
             raise ValueError('physical telemetry requires complete native poses and joint velocities')
-        gaps = self._finite_reduction_values(self._gaps(poses))
+        raw = self._gaps(poses)
+        finite = torch.isfinite(raw)
+        gaps = self._finite_reduction_values(raw)
+        # Keep a true sample mean/RMS alongside the peaks. Invalid lanes are
+        # counted in the invalid counter and excluded from these moments.
+        self._sum.add_(gaps.sum())
+        self._sum_sq.add_(gaps.square().sum())
+        self._loop_sum.add_(gaps.sum(0))
+        self._loop_sum_sq.add_(gaps.square().sum(0))
+        self._loop_count.add_(finite.sum(0))
+        self._count.add_(finite.sum())
         self._environment_peak.copy_(torch.maximum(self._environment_peak, gaps.amax(-1)))
         self._loop_peak.copy_(torch.maximum(self._loop_peak, gaps.amax(0)))
         self._lifetime_peak.copy_(torch.maximum(self._lifetime_peak, gaps.amax()))
@@ -110,26 +127,41 @@ class NativeLoopTelemetry:
         scalars = torch.stack((self._environment_peak.amax(), p95,
                                self._reset_peak.amax(), self._first_peak.amax(),
                                self._lifetime_peak, self._invalid, self._lifetime_invalid,
-                               self._velocity_peak, self._velocity_invalid, self._first_rows))
+                               self._velocity_peak, self._velocity_invalid, self._first_rows,
+                               self._sum, self._sum_sq, self._count.to(torch.float64)))
         # One host transfer per summary, with no changes to observation state.
-        values = torch.cat((scalars, self._loop_peak)).detach().cpu().tolist()
+        values = torch.cat((scalars, self._loop_peak, self._loop_sum,
+                            self._loop_count.to(torch.float64)))
+        values = values.detach().cpu().tolist()
         bad, lifetime_bad = int(values[5]), int(values[6])
         observed = self._frames > 0
         valid = observed and bad == 0
+        count = int(values[12])
+        mean = values[10] / count if valid and count else None
+        rms = (values[11] / count) ** 0.5 if valid and count else None
+        mean_by_constraint = {
+            name: (values[19 + index] / values[25 + index]
+                   if valid and values[25 + index] else None)
+            for index, name in enumerate(self.names)
+        }
         return {
             'six_loop_scope': 'world anchor separation at every returned physical substep; reset observations use forward(dt=0)',
             'six_loop_physics_frames': self._frames,
             'six_loop_constraint_samples': self._frames * self.num_envs * 6,
+            'six_loop_valid_constraint_samples': count,
             'six_loop_reset_rows': self._reset_rows,
             'six_loop_first_physics_rows': int(values[9]),
             'six_loop_nonfinite_constraint_observations': bad,
+            'six_loop_mean_error_m': mean,
+            'six_loop_rms_error_m': rms,
+            'six_loop_mean_by_constraint_m': mean_by_constraint,
             'six_loop_closure_max_m': values[0] if valid else None,
             'six_loop_environment_peak_p95_m': values[1] if valid else None,
             'six_loop_reset_after_forward_max_m': values[2] if self._reset_rows and not bad else None,
             'six_loop_first_physics_max_m': values[3] if values[9] and not bad else None,
             'six_loop_lifetime_max_m': values[4] if observed and not lifetime_bad else None,
             'six_loop_max_by_constraint_m': dict(zip(
-                self.names, values[10:] if valid else [None] * 6)),
+                self.names, values[13:19] if valid else [None] * 6)),
             'joint_velocity_max_native_units_per_s': (
                 values[7] if self._velocity_frames and not values[8] else None),
             'joint_velocity_nonfinite_observations': int(values[8]),

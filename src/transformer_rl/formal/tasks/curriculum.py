@@ -344,15 +344,14 @@ class ContinuousTaskSampler:
         self._dynamic_family, self._dynamic_strata = dynamic_family, dynamic_strata
 
     @staticmethod
-    def _restore_credits(quotas, values, *, allow_inactive_credit=False):
+    def _restore_credits(quotas, values):
         if not isinstance(values, list) or len(values) != len(quotas):
             raise ValueError('sampler checkpoint quota dimensions differ')
         for quota, credit in zip(quotas, values):
             if (not isinstance(credit, list) or len(credit) != len(quota.credit)
                     or any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > 2 for v in credit)
                     or abs(sum(credit)) > 1e-6
-                    or (not allow_inactive_credit and any(
-                        weight == 0 and value != 0 for weight, value in zip(quota.weights, credit)))):
+                    or any(weight == 0 and value != 0 for weight, value in zip(quota.weights, credit))):
                 raise ValueError('sampler checkpoint quota credit is invalid')
             quota.credit = list(credit)
 
