@@ -300,6 +300,7 @@ def test_dynamic_disable_retires_fractional_credit_and_roundtrips():
     # family. Loading it must retire that credit rather than fail or carry it.
     old = deepcopy(state)
     old['dynamic_family_credit'][5] = .25
+    old['dynamic_family_credit'][0] -= .25
     restored.load_state_dict(old)
     assert restored._dynamic_family.credit[5] == 0
     assert abs(sum(restored._dynamic_family.credit)) < 1e-6

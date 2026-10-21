@@ -328,10 +328,13 @@ class ContinuousTaskSampler:
             raw = state['dynamic_family_credit']
             if (not isinstance(raw, list) or len(raw) != len(dynamic_family.credit)
                     or any(type(value) not in (int, float) or not math.isfinite(value)
-                           or abs(value) > 2 for value in raw)):
+                           or abs(value) > 2 for value in raw)
+                    or abs(sum(raw)) > 1e-6):
                 raise ValueError('sampler checkpoint dynamic credit differs')
             dynamic_family.credit = list(raw)
-            dynamic_family.set_weights(state['dynamic_weights'])
+            if any(weight == 0 and value != 0
+                   for weight, value in zip(dynamic_family.weights, raw)):
+                dynamic_family.set_weights(state['dynamic_weights'])
             self._restore_credits([dynamic_family], [dynamic_family.credit])
             if (not isinstance(state['dynamic_stratum_credit'], list)
                     or len(state['dynamic_stratum_credit']) != len(dynamic_strata)):
