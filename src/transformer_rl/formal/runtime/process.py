@@ -31,6 +31,7 @@ from ..tasks.protocol import RequestProtocol
 from ..tasks.terrain import ContinuousTerrainGenerator
 from ...common.termination import _StopBudget
 from ...common.training_control import TrainingControl, boot_id, read_json
+from .telemetry import TensorBoardTelemetry
 
 
 def fresh_components(recipe: LearningRecipe):
@@ -49,7 +50,8 @@ def fresh_components(recipe: LearningRecipe):
 
 
 def run_worker(recipe, control_directory, runtime_factory, runtime_configuration,
-               *, resume_attempt=None, parent_exit_pin=None, max_active_seconds=365 * 86400.):
+               *, resume_attempt=None, parent_exit_pin=None, max_active_seconds=365 * 86400.,
+               tensorboard=False, telemetry_scope='formal'):
     """Collect/update until the original budget or cooperative save-and-exit.
 
     Cold setup is intentionally outside the saved learning state: request
@@ -115,6 +117,10 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
                             solver_position_iterations=12, solver_velocity_iterations=6)
             runtime = stack.enter_context(runtime_factory(
                 recipe, components, runtime_configuration, control=control))
+            # Register after the SDK owner: Kit may exit the process while its
+            # context closes, so event buffers must flush before that boundary.
+            telemetry = stack.enter_context(TensorBoardTelemetry(
+                attempt / 'train/tensorboard', scope=telemetry_scope, enabled=tensorboard))
             environment = getattr(runtime, 'environment', runtime)
             create_collector = getattr(runtime, 'create_collector', None)
             if create_collector is not None and not callable(create_collector):
@@ -144,6 +150,7 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
                                'optimization': metrics}
                         metrics_log.write(json.dumps(row, allow_nan=False, separators=(',', ':')) + '\n')
                         metrics_log.flush()
+                        telemetry.record(row)
                 return dict(loop._report)
     except BaseException as error:
         try:
@@ -161,6 +168,7 @@ def main(argv=None):
     parser.add_argument('--runtime-config', type=Path, required=True)
     parser.add_argument('--resume-attempt', type=Path)
     parser.add_argument('--parent-exit-pin', type=Path)
+    parser.add_argument('--no-tensorboard', action='store_true')
     args = parser.parse_args(argv)
     if not re.fullmatch(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*', args.runtime_factory):
         raise ValueError('runtime factory must be module:factory')
@@ -170,7 +178,8 @@ def main(argv=None):
             LearningRecipe.from_dict(read_json(args.recipe)), args.control_dir,
             getattr(importlib.import_module(module), name), read_json(args.runtime_config),
             resume_attempt=args.resume_attempt,
-            parent_exit_pin=read_json(args.parent_exit_pin) if args.parent_exit_pin else None)
+            parent_exit_pin=read_json(args.parent_exit_pin) if args.parent_exit_pin else None,
+            tensorboard=not args.no_tensorboard, telemetry_scope='formal')
     except BaseException as error:
         # Failure receipts are fsynced by the learner. Avoid Kit's native or
         # atexit shutdown paths, which can replace an unhandled error with exit0.

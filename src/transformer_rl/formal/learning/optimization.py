@@ -122,6 +122,66 @@ class _ParameterTransaction:
         self.optimizer.zero_grad(set_to_none=True)
 
 
+class _LossTelemetry:
+    """Detached sufficient statistics; no state survives an update call."""
+
+    _ACTOR_NAMES = ('surrogate', 'entropy', 'velocity', 'contact', 'prediction', 'combined_objective')
+
+    def __init__(self, reference):
+        self.attempted = reference.new_zeros((len(self._ACTOR_NAMES), 2), dtype=torch.float64)
+        self.retained = torch.zeros_like(self.attempted)
+        self.minibatch = torch.zeros_like(self.attempted)
+        self.critic = reference.new_zeros((2, 2), dtype=torch.float64)
+
+    def begin_actor(self):
+        self.minibatch.zero_()
+
+    @torch.no_grad()
+    def observe_actor(self, terms, entropy, auxiliary, combined, state_valid, next_valid, normalization):
+        state_count, next_count = state_valid.sum(), next_valid.sum()
+        denominators = ((state_count, next_count) if normalization is None else normalization[1:])
+        actor_count = terms.numel()
+        sums = torch.stack((terms.detach().sum(), entropy.detach().sum(),
+                            auxiliary[0].detach() * denominators[0],
+                            auxiliary[1].detach() * denominators[0],
+                            auxiliary[2].detach() * denominators[1],
+                            combined.detach() * (actor_count if normalization is None else normalization[0])))
+        counts = torch.stack((state_count.new_tensor(actor_count), state_count.new_tensor(actor_count),
+                              state_count, state_count, next_count, state_count.new_tensor(actor_count)))
+        self.minibatch[:, 0].add_(sums)
+        self.minibatch[:, 1].add_(counts)
+
+    def finish_actor(self, *, retained):
+        self.attempted.add_(self.minibatch)
+        if retained:
+            self.retained.add_(self.minibatch)
+
+    def reject_actor_update(self):
+        self.retained.zero_()
+
+    @torch.no_grad()
+    def observe_critic(self, loss, count, value_coefficient):
+        self.critic[:, 0].add_(torch.stack((loss.detach(), loss.detach() * (.5 * value_coefficient))) * count)
+        self.critic[:, 1].add_(count)
+
+    def summary(self):
+        arrays = torch.cat((self.attempted, self.retained, self.critic)).detach().cpu().tolist()
+        width = len(self._ACTOR_NAMES)
+
+        def report(names, rows):
+            return {name: {'mean': total / count if count and math.isfinite(total) else None,
+                           'sample_uses': int(count)}
+                    for name, (total, count) in zip(names, rows)}
+
+        return {
+            'scope': 'pre-step losses weighted by repeated endpoint uses; auxiliary means use valid label rows',
+            'retained_scope': 'actor transactions surviving minibatch and full-rollout rollback; not a final-policy re-evaluation',
+            'actor_attempted': report(self._ACTOR_NAMES, arrays[:width]),
+            'actor_retained': report(self._ACTOR_NAMES, arrays[width:2 * width]),
+            'critic_attempted': report(('clipped_value_mse', 'weighted_objective'), arrays[2 * width:]),
+        }
+
+
 class StructuredPPOTrainer:
     """One actor backward/step per minibatch; the critic has its own optimizer.
 
@@ -130,8 +190,11 @@ class StructuredPPOTrainer:
     decisions. Probe and rollback time is included in optimization wall time.
     """
 
-    def __init__(self, model, config=StructuredPPOConfig()):
+    def __init__(self, model, config=StructuredPPOConfig(), *, loss_telemetry=True):
+        if type(loss_telemetry) is not bool:
+            raise TypeError('loss_telemetry must be an explicit bool')
         self.model, self.config = model, config
+        self._loss_telemetry = loss_telemetry
         self.actor_optimizer = torch.optim.Adam(model.actor.parameters(), lr=config.learning_rate)
         self.critic_optimizer = torch.optim.Adam(model.critic.parameters(), lr=config.learning_rate)
         self.update_index = 0
@@ -172,7 +235,7 @@ class StructuredPPOTrainer:
                 if not torch.allclose(actual, expected, atol=1e-5, rtol=1e-5):
                     raise ValueError(f'behavior {name} mismatch before any optimizer step')
 
-    def _losses(self, batch, endpoints, advantages, *, normalization=None):
+    def _losses(self, batch, endpoints, advantages, *, normalization=None, telemetry=None):
         actor = self.model.actor
         mean, raw_state, context = actor.policy.outputs(batch.windows.gather(endpoints))
         evaluation = actor._evaluation(mean, actor.log_std, batch.raw_action[endpoints])
@@ -194,17 +257,21 @@ class StructuredPPOTrainer:
         loss = (objective + self.config.velocity_coefficient * auxiliary[0]
                 + self.config.contact_coefficient * auxiliary[1]
                 + self.config.prediction_coefficient * auxiliary[2])
+        if telemetry is not None:
+            telemetry.observe_actor(terms, evaluation.entropy, auxiliary, loss,
+                                    batch.masks.state_auxiliary[endpoints],
+                                    batch.masks.next_auxiliary[endpoints], normalization)
         return loss, components
 
-    def _actor_backward(self, batch, endpoints, advantages):
+    def _actor_backward(self, batch, endpoints, advantages, *, telemetry=None):
         """分块累积同一 minibatch 的梯度；每项仍按整批有效样本数归一化。"""
         if endpoints.numel() <= self.config.training_chunk:
-            self._losses(batch, endpoints, advantages)[0].backward()
+            self._losses(batch, endpoints, advantages, telemetry=telemetry)[0].backward()
             return
         normalization = (endpoints.numel(), batch.masks.state_auxiliary[endpoints].sum(),
                          batch.masks.next_auxiliary[endpoints].sum())
         for part in endpoints.split(self.config.training_chunk):
-            self._losses(batch, part, advantages, normalization=normalization)[0].backward()
+            self._losses(batch, part, advantages, normalization=normalization, telemetry=telemetry)[0].backward()
 
     def _gradient_diagnostics(self, batch, endpoints, advantages):
         _, components = self._losses(batch, endpoints, advantages)
@@ -251,6 +318,7 @@ class StructuredPPOTrainer:
                        actor_endpoint_uses=0, critic_endpoint_uses=0, retained_actor_steps=0,
                        rolled_back_actor_steps=0, actor_stop_reason=None, whole_actor_update_rolled_back=False)
         tensors = {}
+        loss_telemetry = _LossTelemetry(batch.old_log_prob) if self._loss_telemetry else None
         norms = []
         critic_norms = []
         timing = {'batch_validation_copy_s': validated_at - started,
@@ -273,7 +341,9 @@ class StructuredPPOTrainer:
                     backward_at = time.perf_counter()
                     timing['minibatch_snapshot_s'] += backward_at - snapshot_at
                     self.actor_optimizer.zero_grad(set_to_none=True)
-                    self._actor_backward(batch, endpoints, advantages)
+                    if loss_telemetry is not None:
+                        loss_telemetry.begin_actor()
+                    self._actor_backward(batch, endpoints, advantages, telemetry=loss_telemetry)
                     norm = nn.utils.clip_grad_norm_(self.model.actor.parameters(), self.config.max_gradient_norm)
                     self.actor_optimizer.step()
                     metrics['actor_optimizer_steps'] += 1
@@ -295,6 +365,8 @@ class StructuredPPOTrainer:
                         metrics['actor_stop_reason'] = 'rejected_actor_and_auxiliary_transaction'
                     else:
                         metrics['retained_actor_steps'] += 1
+                    if loss_telemetry is not None:
+                        loss_telemetry.finish_actor(retained=status != 2)
                     timing['probe_guard_s'] += time.perf_counter() - guard_at
                     if status:
                         actor_finished = True
@@ -310,6 +382,8 @@ class StructuredPPOTrainer:
                 metrics['retained_actor_steps'] = 0
                 metrics['whole_actor_update_rolled_back'] = True
                 metrics['actor_stop_reason'] = 'rejected_full_rollout_kl'
+                if loss_telemetry is not None:
+                    loss_telemetry.reject_actor_update()
                 full_kl = self._kl(batch, actor_endpoints)
             tensors['full_rollout_kl_after_guard'] = full_kl
             actor_finished_at = time.perf_counter()
@@ -324,6 +398,8 @@ class StructuredPPOTrainer:
                         -self.config.value_clip, self.config.value_clip)
                     loss = torch.maximum((value - batch.returns[endpoints]).square(),
                                          (clipped - batch.returns[endpoints]).square()).mean()
+                    if loss_telemetry is not None:
+                        loss_telemetry.observe_critic(loss, endpoints.numel(), self.config.value_coefficient)
                     self.critic_optimizer.zero_grad(set_to_none=True)
                     (0.5 * self.config.value_coefficient * loss).backward()
                     critic_norms.append(nn.utils.clip_grad_norm_(
@@ -342,6 +418,10 @@ class StructuredPPOTrainer:
                 tensors['critic_gradient_norm_mean'] = all_critic_norms.mean()
             metrics.update({name: (value if math.isfinite(value) else None)
                             for name, value in ((name, float(value.detach())) for name, value in tensors.items())})
+            if loss_telemetry is not None:
+                summary_started = time.perf_counter()
+                metrics['loss_statistics'] = loss_telemetry.summary()
+                metrics['loss_telemetry_summary_elapsed_s'] = time.perf_counter() - summary_started
             metrics['actor_and_guard_elapsed_s'] = actor_finished_at - started
             metrics['critic_elapsed_s'] = time.perf_counter() - actor_finished_at
             metrics['total_optimization_elapsed_s'] = time.perf_counter() - started

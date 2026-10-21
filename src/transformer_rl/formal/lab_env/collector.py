@@ -17,6 +17,7 @@ from ..contracts import StructuredCollectionConfig
 from ..learning.contracts import (AuxiliaryLabels, BoundaryMasks, ObservationWindows,
                                   masked_gae)
 from ..learning.optimization import StructuredBatch
+from ..runtime.telemetry import RolloutTelemetry
 from .adapter import LabLabeledEnv
 from .course_tasks import completed_policy_estimate
 
@@ -89,6 +90,11 @@ class LabCollector:
         cause_names = ('true_failure', 'time_limit', 'spatial_exit', 'simultaneous_truncations')
         cause_counts = torch.zeros(len(cause_names), dtype=torch.long, device=self.device)
         environment_timing: dict[str, float] = {}
+        raw_env = getattr(self.env, 'env', None)
+        formal_reward = getattr(raw_env, '_formal_reward', None)
+        telemetry = RolloutTelemetry(self.num_envs, self.device,
+                                     missing_terms=getattr(formal_reward, 'missing_term_reasons', {}))
+        telemetry_error = None
         # Weights are fixed throughout this rollout. The next endpoint's
         # post-reset history is exactly the following action's input. Keep this
         # cache local: PPO may change weights before the next collect() call.
@@ -96,6 +102,13 @@ class LabCollector:
 
         for step in range(steps):
             current = self._current
+            if telemetry_error is None:
+                try:
+                    tasks = getattr(getattr(raw_env, '_terrain_course', None), 'tasks', None)
+                    telemetry.observe_occupancy(getattr(tasks, 'family', None),
+                                                getattr(raw_env, '_command_mode', None))
+                except Exception as error:
+                    telemetry_error = f'{type(error).__name__}: {error}'
             mean, raw_state, _ = (self.model.actor.policy.outputs(self._history)
                                   if next_outputs is None else next_outputs)
             log_std = self.model.actor.log_std.clamp(-4.0, 1.0).expand_as(mean)
@@ -109,6 +122,20 @@ class LabCollector:
             estimate = (completed_policy_estimate(current.frame, raw_state, current.timestamp_s)
                         if getattr(getattr(self.env, 'env', None), '_terrain_course', None) is not None else None)
             returned = self.env.step(issued, estimate)
+            if telemetry_error is None:
+                try:
+                    reward_result = getattr(raw_env, '_formal_result', None)
+                    series = ({
+                        'raw_positive_density_per_s': reward_result.raw_positive_densities,
+                        'raw_cost_density_per_s': reward_result.raw_cost_densities,
+                        'event_step_reward': reward_result.event_rewards,
+                        'gate_fraction': reward_result.gate_fractions,
+                        'tracking_error_mean': reward_result.raw_error_means,
+                        'tracking_error_mean_square': reward_result.raw_error_mean_squares,
+                    } if reward_result is not None else None)
+                    telemetry.observe_rewards(getattr(raw_env, 'extras', {}).get('reward_terms'), series=series)
+                except Exception as error:
+                    telemetry_error = f'{type(error).__name__}: {error}'
             self._profile_boundary('environment', step + 1)
             self.returned_vector_steps += 1
             for name, elapsed in self.env.last_timing.items():
@@ -215,6 +242,11 @@ class LabCollector:
         self._profile_boundary('batch_validated', steps)
         if self.device.type == "cuda":
             torch.cuda.synchronize(self.device)
+        try:
+            telemetry_metrics = (telemetry.summary() if telemetry_error is None
+                                 else {'observer_error': telemetry_error})
+        except Exception as error:
+            telemetry_metrics = {'observer_error': f'{type(error).__name__}: {error}'}
         elapsed = time.perf_counter() - started
         self.last_timing = environment_timing
         self.last_metrics = {
@@ -232,6 +264,7 @@ class LabCollector:
             "reward_mean": float(records["reward"].mean()),
             "return_mean": float(returns.mean()),
             "advantage_std": float(advantage.std(unbiased=False)),
+            "telemetry": telemetry_metrics,
         }
         if environment_timing:
             self.last_metrics["environment_host_wall_s"] = environment_timing
