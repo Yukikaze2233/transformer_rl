@@ -24,6 +24,21 @@ class PhysxReplicateContext:
 
 class PhysxManager:
     clone_context_type = PhysxReplicateContext
+    backend = None
+
+    @classmethod
+    def initialize(cls, backend):
+        cls.backend = backend
+
+    @classmethod
+    def get_physics_sim_view(cls):
+        return cls.backend
+
+
+class AssetCfg:
+    prim_path = '/World/envs/env_.*/Robot'
+    cloning_contexts = None
+    spawn = object()
 
 
 class PlanPaths:
@@ -79,7 +94,17 @@ class Replicator:
 def configure(monkeypatch):
     monkeypatch.setattr(ga_isolation, '_physx_types',
                         lambda: (PhysxCfg, PhysxManager, PhysxReplicateContext, PlanPaths()))
-    return ga_isolation.configure_ga_isolation
+    def setup(cfg, num_envs, device):
+        asset = getattr(cfg, '_test_robot', None)
+        if asset is None:
+            asset = cfg._test_robot = AssetCfg()
+        return ga_isolation.configure_ga_isolation(cfg, asset, num_envs, device)
+
+    return setup
+
+
+def clone_context(cfg):
+    return cfg._test_robot.cloning_contexts[0]
 
 
 def bind_native(monkeypatch, binding, native):
@@ -100,28 +125,85 @@ def group_receipt(num_envs):
                 global_paths=['/World/ground'], inverted_filter=True)
 
 
-def test_only_the_owned_config_gets_a_new_manager_and_context(configure):
+def test_only_the_owned_robot_gets_a_new_context(configure):
     first, second = PhysxCfg(), PhysxCfg()
     binding = configure(first, 8192, 'cuda:0')
-    assert first.class_type is not PhysxManager
-    assert issubclass(first.class_type, PhysxManager)
-    assert first.class_type.__name__.lower().startswith('physx')
-    assert first.class_type.collision_isolation is binding
-    assert issubclass(first.class_type.clone_context_type, PhysxReplicateContext)
-    assert first.class_type.clone_context_type.replicate_priority == 0
+    assert first.class_type == '{DIR}.physx_manager:PhysxManager'
+    assert issubclass(clone_context(first), PhysxReplicateContext)
+    assert clone_context(first).replicate_priority == 0
     assert second.class_type == '{DIR}.physx_manager:PhysxManager'
+    assert AssetCfg.cloning_contexts is None
     assert PhysxManager.clone_context_type is PhysxReplicateContext
-    with pytest.raises(ValueError, match='another custom'):
+    assert binding.receipt['clone_plan_api'] == 'isaaclab_asset_cloning_contexts'
+    with pytest.raises(ValueError, match='another clone context'):
         configure(first, 8192, 'cuda:0')
 
 
 def test_two_configurations_never_share_a_plan_or_receipt(configure):
     first, second = PhysxCfg(), PhysxCfg()
     a, b = configure(first, 4, 'cuda:0'), configure(second, 8, 'cuda:0')
-    assert first.class_type is not second.class_type
-    assert first.class_type.clone_context_type is not second.class_type.clone_context_type
+    assert clone_context(first) is not clone_context(second)
+    assert first._test_robot is not second._test_robot
     a.confirm_shared_ground_groups(group_receipt(4))
     assert not b.receipt['shared_ground_verified']
+
+
+def test_explicit_asset_route_keeps_the_original_manager_singleton(configure, monkeypatch):
+    cfg, native = PhysxCfg(), Replicator()
+    cfg.class_type = PhysxManager
+    binding = configure(cfg, 4, 'cuda:0')
+    calls = bind_native(monkeypatch, binding, native)
+    # Follow GA replicate_session's explicit-override rule. USD authoring is
+    # supplied by the spawner separately; the default PhysX context is excluded.
+    references = vars(cfg._test_robot).get('cloning_contexts', ())
+    contexts = ((cfg.class_type.clone_context_type,) if references is None
+                else tuple(references))
+    assert contexts == (clone_context(cfg),)
+    assert PhysxReplicateContext not in contexts
+    for context_type in contexts:
+        context_type(SimpleNamespace(stage=37)).replicate(plan(shared=False), (1,))
+    assert len(calls) == 1
+    marker = object()
+    monkeypatch.setattr(PhysxManager, 'backend', None)
+    cfg.class_type.initialize(marker)
+    assert cfg.class_type is PhysxManager
+    assert cfg.class_type.get_physics_sim_view() is marker
+    # The native articulation imports this hard-coded SDK class.
+    assert PhysxManager.get_physics_sim_view() is marker
+    assert PhysxManager.clone_context_type is PhysxReplicateContext
+
+
+def test_shared_ground_routes_to_default_context_and_only_robot_to_owned_context(configure, monkeypatch):
+    cfg, native = PhysxCfg(), Replicator()
+    cfg.class_type = PhysxManager
+    binding = configure(cfg, 4, 'cuda:0')
+    calls = bind_native(monkeypatch, binding, native)
+    item = plan()
+    item.asset_cfgs = (SimpleNamespace(cloning_contexts=None), cfg._test_robot, object())
+    physics_context = cfg.class_type.clone_context_type
+    shared, routing = {0}, {}
+    # GA replicate_session routes explicit declarations first, then includes
+    # shared sources in the default physics context. Sets deduplicate routes.
+    for index in (0, 1):
+        references = vars(item.asset_cfgs[index]).get('cloning_contexts', ())
+        contexts = (physics_context,) if references is None else tuple(references)
+        if index in shared:
+            contexts += (physics_context,)
+        for context in contexts:
+            routing.setdefault(context, set()).add(index)
+    assert routing == {PhysxReplicateContext: {0}, clone_context(cfg): {1}}
+    default_routes = []
+    monkeypatch.setattr(PhysxReplicateContext, 'replicate',
+                        lambda self, plan, ids: default_routes.append(ids))
+    for context_type, ids in routing.items():
+        context_type(SimpleNamespace(stage=37)).replicate(item, tuple(sorted(ids)))
+    assert default_routes == [(0,)]
+    assert len(calls) == 1 and calls[0][1] == ['/World/envs/env_0/Robot']
+    native.attach(37)
+    binding.confirm_shared_ground_groups(group_receipt(4))
+    binding.finish_warmup()
+    assert binding.receipt['physics_asset_prototype_ids'] == [1]
+    assert binding.receipt['shared_source_paths'] == ['/World/ground']
 
 
 @pytest.mark.parametrize('device', ['cpu', 'meta'])
@@ -139,17 +221,31 @@ def test_wrong_physics_configuration_is_rejected(configure):
     assert cfg.class_type is PhysxManager
 
 
+@pytest.mark.parametrize('change', ['subtree', 'spawn', 'explicit_context'])
+def test_only_a_fresh_complete_robot_declaration_can_be_routed(configure, change):
+    cfg, robot = PhysxCfg(), AssetCfg()
+    if change == 'subtree':
+        robot.prim_path = '/World/envs/env_.*/Robot/base_link'
+    elif change == 'spawn':
+        robot.spawn = None
+    else:
+        robot.cloning_contexts = ()
+    with pytest.raises(ValueError, match='complete Robot|another clone context'):
+        ga_isolation.configure_ga_isolation(cfg, robot, 4, 'cuda:0')
+    assert cfg.class_type == '{DIR}.physx_manager:PhysxManager'
+
+
 def test_complete_8192_plan_uses_existing_native_env_id_registration(configure, monkeypatch):
     cfg, native = PhysxCfg(), Replicator()
     binding = configure(cfg, 8192, 'cuda:0')
     captured = bind_native(monkeypatch, binding, native)
-    context = cfg.class_type.clone_context_type(SimpleNamespace(stage=37))
+    context = clone_context(cfg)(SimpleNamespace(stage=37))
     item = plan(8192)
     before = [value.copy() for value in (
         item.topology.world_prototypes, item.topology.world_prototype_starts,
         item.topology.world_prototype_layout, item.positions)]
     rng = torch.get_rng_state().clone()
-    context.replicate(item, (np.int32(0), np.int32(1)))
+    context.replicate(item, (np.int32(1),))
     assert torch.equal(torch.get_rng_state(), rng)
     assert all(np.array_equal(previous, current) for previous, current in zip(before, (
         item.topology.world_prototypes, item.topology.world_prototype_starts,
@@ -192,7 +288,7 @@ def test_robot_only_plan_preserves_manual_shared_ground(configure, monkeypatch):
     cfg, native = PhysxCfg(), Replicator()
     binding = configure(cfg, 4, 'cuda:0')
     bind_native(monkeypatch, binding, native)
-    cfg.class_type.clone_context_type(SimpleNamespace(stage=37)).replicate(
+    clone_context(cfg)(SimpleNamespace(stage=37)).replicate(
         plan(shared=False), (np.int32(1),))
     native.attach(37)
     binding.confirm_shared_ground_groups(group_receipt(4))
@@ -207,7 +303,7 @@ def test_single_world_requires_plan_and_group_proof_without_zero_replication(con
     calls = bind_native(monkeypatch, binding, native)
     with pytest.raises(RuntimeError, match='robot plan'):
         binding.finish_warmup()
-    cfg.class_type.clone_context_type(SimpleNamespace(stage=37)).replicate(plan(1), (0, 1))
+    clone_context(cfg)(SimpleNamespace(stage=37)).replicate(plan(1), (1,))
     binding.confirm_shared_ground_groups(group_receipt(1))
     binding.finish_warmup()
     assert len(calls) == 1 and native.calls == [] and native.removed == []
@@ -223,7 +319,7 @@ def test_ambiguous_ga_plan_never_registers_native(configure, monkeypatch, change
     cfg, native = PhysxCfg(), Replicator()
     binding = configure(cfg, 4, 'cuda:0')
     calls = bind_native(monkeypatch, binding, native)
-    item, ids = plan(), (0, 1)
+    item, ids = plan(), (1,)
     if change == 'heterogeneous':
         item.topology.world_prototype_starts = np.array([0, 1, 2, 3])
     elif change == 'two_robots':
@@ -254,7 +350,7 @@ def test_ambiguous_ga_plan_never_registers_native(configure, monkeypatch, change
     else:
         item.positions[0, 2] = np.nan
     with pytest.raises(ValueError, match='GA isolation'):
-        cfg.class_type.clone_context_type(SimpleNamespace(stage=37)).replicate(item, ids)
+        clone_context(cfg)(SimpleNamespace(stage=37)).replicate(item, ids)
     assert calls == [] and native.calls == [] and not binding.receipt['registered']
 
 
@@ -262,10 +358,10 @@ def test_a_bound_context_cannot_register_twice(configure, monkeypatch):
     cfg, native = PhysxCfg(), Replicator()
     binding = configure(cfg, 4, 'cuda:0')
     bind_native(monkeypatch, binding, native)
-    context = cfg.class_type.clone_context_type(SimpleNamespace(stage=37))
-    context.replicate(plan(), (0, 1))
+    context = clone_context(cfg)(SimpleNamespace(stage=37))
+    context.replicate(plan(), (1,))
     with pytest.raises(RuntimeError, match='already registered'):
-        context.replicate(plan(), (0, 1))
+        context.replicate(plan(), (1,))
 
 
 @pytest.mark.parametrize('change', ['count', 'global', 'inverted'])

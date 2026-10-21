@@ -46,7 +46,7 @@ transformer_rl/
 
 ### Isaac Lab 接入
 
-`lab_env/sdk.py`集中处理应用寿命与设置接口。GA使用公开的`launch_simulation`，明确选择Kit PhysX；beta保留自己的启动路径。GA在`cfg.scene`声明机器人，共享地形和接触视图由环境接线。`ga_isolation.py`通过场景专属PhysX manager/context登记同构Env ID，保留共享地面的碰撞组回读，不修改安装的SDK或全局回调。
+`lab_env/sdk.py`集中处理应用寿命与设置接口。GA使用公开的`launch_simulation`，明确选择Kit PhysX；beta保留自己的启动路径。GA在`cfg.scene`声明机器人，共享地形和接触视图由环境接线。`ga_isolation.py`通过机器人资产的公开`cloning_contexts`登记同构Env ID，保留共享地面的碰撞组回读与原PhysX manager，不修改安装的SDK或全局回调。
 
 物理边界统一使用`xyzw`四元数、世界系COM线/角速度；观测组装器再换算link原点速度与机体系分量。reset仍执行写后FK刷新；需要跨越reset的终态必须持有副本。GA的质量、COM和惯量随机化使用公开setter同步缓存，保留原采样参数与RNG。我们的200Hz控制器继续独立计算电机力矩，显式关闭GA新增的host actuator执行路径。
 

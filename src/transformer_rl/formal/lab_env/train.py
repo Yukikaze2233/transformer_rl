@@ -284,7 +284,7 @@ def main(argv=None):
             from .ga_isolation import configure_ga_isolation
 
             object.__setattr__(cfg, '_native_clone_binding', configure_ga_isolation(
-                cfg.sim.physics, args.num_envs, args.device))
+                cfg.sim.physics, cfg.scene.robot, args.num_envs, args.device))
         if os.environ.get("LAB_SCAN_DEBUG") == "1":
             print("TRAIN before env construct", flush=True)
         env = WheeledLabEnv(cfg)

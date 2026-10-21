@@ -145,7 +145,7 @@ def runtime(recipe, components, configuration, *, control):
             from .ga_isolation import configure_ga_isolation
 
             object.__setattr__(cfg, '_native_clone_binding', configure_ga_isolation(
-                cfg.sim.physics, recipe.num_envs, recipe.device))
+                cfg.sim.physics, cfg.scene.robot, recipe.num_envs, recipe.device))
         env = WheeledLabEnv(cfg)
         health.check()
         value = ManagedLabRuntime(env, recipe, components, identity,

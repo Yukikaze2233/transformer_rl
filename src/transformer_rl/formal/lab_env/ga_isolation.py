@@ -1,7 +1,7 @@
 """Scene-local Env ID replication through the Isaac Lab 3 PhysX extension point.
 
-Only the passed physics configuration receives an application-owned manager.
-The SDK classes and installed clone callbacks remain unchanged.
+Only the passed Robot declaration receives an application-owned clone context.
+The SDK manager and its singleton lifecycle state remain unchanged.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class GaHomogeneousCloneIsolation(HomogeneousCloneIsolation):
         if torch.device(device).type != 'cuda':
             raise ValueError('GA Env ID isolation requires a CUDA PhysX scene')
         self._plan_registered = False
-        self._receipt.update(clone_plan_api='isaaclab_physx_context',
+        self._receipt.update(clone_plan_api='isaaclab_asset_cloning_contexts',
                              shared_ground_verified=False, warmup_finished=False)
 
     def register_plan(self, stage, plan, asset_prototype_ids, path_api):
@@ -59,8 +59,8 @@ class GaHomogeneousCloneIsolation(HomogeneousCloneIsolation):
         requested = tuple(map(int, requested_ids))
         if (tuple(sorted(set(requested))) != requested
                 or len(set(shared)) != len(shared) or robot in shared
-                or set(requested) != {*shared, robot}):
-            raise ValueError('GA isolation requires every active PhysX source exactly once')
+                or requested != (robot,)):
+            raise ValueError('GA isolation requires only the complete Robot source')
         positions = plan.positions
         if positions is not None and (
                 not isinstance(positions, np.ndarray)
@@ -126,11 +126,12 @@ def _physx_types():
     return PhysxCfg, PhysxManager, PhysxReplicateContext, cloner.path
 
 
-def configure_ga_isolation(physics_cfg, num_envs: int, device: str):
-    """Select a scene-owned manager before constructing SimulationContext.
+def configure_ga_isolation(physics_cfg, asset_cfg, num_envs: int, device: str):
+    """Route the complete Robot to an owned native clone context.
 
-    Keep the returned binding on the environment configuration. After cloning,
-    pass it ``author_shared_ground_groups(scene)`` via
+    Call after Kit launch and before constructing SimulationContext. Keep the
+    returned binding on the environment configuration. After cloning, pass it
+    ``author_shared_ground_groups(scene)`` via
     ``confirm_shared_ground_groups``. After the initial reset/physics warmup,
     call ``finish_warmup`` and publish its receipt with the scene readback.
     """
@@ -141,16 +142,19 @@ def configure_ga_isolation(physics_cfg, num_envs: int, device: str):
     if physics_cfg.class_type not in (
             manager_type, '{DIR}.physx_manager:PhysxManager',
             'isaaclab_physx.physics.physx_manager:PhysxManager'):
-        raise ValueError('GA collision isolation cannot replace another custom physics manager')
+        raise ValueError('GA collision isolation requires the original PhysX manager')
+    if (getattr(asset_cfg, 'prim_path', None) not in (
+            '/World/envs/env_.*/Robot', '{ENV_REGEX_NS}/Robot')
+            or getattr(asset_cfg, 'spawn', None) is None):
+        raise ValueError('GA collision isolation requires a complete Robot declaration')
+    if getattr(asset_cfg, 'cloning_contexts', ()) is not None:
+        raise ValueError('GA collision isolation cannot replace another clone context')
 
     class IsolatedPhysxReplicateContext(context_type):
         def replicate(self, plan, asset_prototype_ids):
             binding.register_plan(self.stage, plan, asset_prototype_ids, path_api)
 
-    # GA AssetBase gates its PhysX prim-deletion callback by this prefix.
-    class PhysxIsolatedManager(manager_type):
-        clone_context_type = IsolatedPhysxReplicateContext
-        collision_isolation = binding
-
-    physics_cfg.class_type = PhysxIsolatedManager
+    # A manager subclass would split class state: native assets still import
+    # the original PhysxManager. Explicit asset routing avoids that split.
+    asset_cfg.cloning_contexts = (IsolatedPhysxReplicateContext,)
     return binding
