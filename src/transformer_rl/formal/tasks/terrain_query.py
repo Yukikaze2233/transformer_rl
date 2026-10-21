@@ -146,6 +146,7 @@ class StaticTerrainQuery:
             vertices = source['vertices_m'].copy()
             faces = source['triangles'].astype(np.int32)
             friction = source['material_coefficients'][source['face_material']].astype(np.float32)
+            self._source_face_tiles = source['face_tile'].copy() if 'face_tile' in source else None
         # Privileged ground columns start above the immutable collision mesh,
         # not above the robot. A fallen link can be below the surface; using
         # its altitude would turn a normal failure into an artificial ray miss.
@@ -161,6 +162,80 @@ class StaticTerrainQuery:
         self._query = _kernel()
         self.queries = 0
         self.misses = torch.zeros((), dtype=torch.long, device=self.device)
+
+    @torch.no_grad()
+    def _diagnose_misses(self, points, tiles, valid, *, physical_points=None, limit=8):
+        """Inspect failed columns without changing the query or supplying heights.
+
+        Only the exceptional path copies geometry to the CPU. An independent
+        triangle intersection distinguishes a physical hole from a broken
+        index; the index's padded cell bounds are not physical terrain bounds.
+        """
+        physical_points = points if physical_points is None else physical_points
+        if (points.shape[-1] != 3 or physical_points.shape != points.shape
+                or tiles.shape != points.shape[:-1] or valid.shape != tiles.shape
+                or type(limit) is not int or not 1 <= limit <= 64):
+            raise ValueError('query diagnostics require matching columns and a bounded sample')
+        failed = (~valid).reshape(-1).nonzero().flatten()
+        indices = failed[:limit].cpu().tolist()
+        report = {'failed_columns': int(failed.numel()), 'samples': [],
+                  'sample_limit': limit, 'diagnostic_only': True}
+        if not indices:
+            return report
+        origins = points.reshape(-1, 3)[indices].cpu().numpy()
+        physical = physical_points.reshape(-1, 3)[indices].cpu().numpy()
+        assigned = tiles.reshape(-1)[indices].cpu().tolist()
+        geometry = None
+        tile_triangles = {}
+        for flat_index, origin, state, tile in zip(indices, origins, physical, assigned):
+            item = {'flat_index': flat_index, 'tile': tile}
+            if not np.isfinite(state).all() or not np.isfinite(origin).all():
+                item['reason'] = 'nonfinite_state'
+            elif not 0 <= tile < self.tile_count:
+                item['reason'] = 'invalid_tile'
+            else:
+                if geometry is None:
+                    geometry = {name: self._buffers[name].cpu().numpy() for name in (
+                        'vertices', 'faces')}
+                if tile not in tile_triangles:
+                    if self._source_face_tiles is None and self.tile_count != 1:
+                        item['reason'] = 'source_tile_provenance_unavailable'
+                        report['samples'].append(item)
+                        continue
+                    selected = (geometry['faces'] if self._source_face_tiles is None else
+                                geometry['faces'][self._source_face_tiles == tile])
+                    triangles = geometry['vertices'][selected]
+                    u, v = triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+                    projected_area = u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0]
+                    tile_triangles[tile] = triangles[np.abs(projected_area) > 1e-14]
+                triangles = tile_triangles[tile]
+                if not len(triangles):
+                    item['reason'] = 'source_tile_has_no_ground_surface'
+                    report['samples'].append(item)
+                    continue
+                xy = triangles[..., :2]
+                low, high = xy.min((0, 1)), xy.max((0, 1))
+                item['physical_xy_bounds_m'] = [low.tolist(), high.tolist()]
+                if ((origin[:2] < low - 1e-5) | (origin[:2] > high + 1e-5)).any():
+                    item['reason'] = 'spatial_outside'
+                else:
+                    a = triangles[:, 0]
+                    u, v = triangles[:, 1] - a, triangles[:, 2] - a
+                    denominator = u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0]
+                    s = ((origin[0] - a[:, 0]) * v[:, 1]
+                         - (origin[1] - a[:, 1]) * v[:, 0]) / denominator
+                    q = (u[:, 0] * (origin[1] - a[:, 1])
+                         - u[:, 1] * (origin[0] - a[:, 0])) / denominator
+                    inside = (s >= -1e-5) & (q >= -1e-5) & (s + q <= 1.00001)
+                    z = a[:, 2] + s * u[:, 2] + q * v[:, 2]
+                    if (inside & (z <= origin[2])).any():
+                        item['reason'] = 'index_miss'
+                    elif inside.any():
+                        item['reason'] = 'ray_origin_below_surface'
+                    else:
+                        item['reason'] = 'geometry_gap'
+            report['samples'].append(item)
+        return report
 
     @torch.no_grad()
     def __call__(self, points, tiles):
