@@ -155,13 +155,25 @@ class TensorBoardTelemetry:
             except Exception:
                 pass
 
-    def __exit__(self, *_args):
+    def __exit__(self, _exc_type=None, failure=None, _traceback=None):
         if self.writer is not None:
             try:
                 self.writer.flush()
                 self.writer.close()
-            except Exception as error:
-                self._failure(error)
+            except BaseException as error:
+                # Writer cleanup is secondary to an existing learning failure.
+                # With no primary failure, preserve explicit interrupts.
+                if failure is None and not isinstance(error, Exception):
+                    raise
+                if failure is not None:
+                    failure.add_note(f'TensorBoard cleanup raised {type(error).__name__}: {error}')
+                try:
+                    self._failure(error)
+                except BaseException as cleanup_error:
+                    if failure is None:
+                        raise
+                    failure.add_note('TensorBoard failure cleanup raised '
+                                     f'{type(cleanup_error).__name__}: {cleanup_error}')
 
     def _write(self, name, value, step):
         if isinstance(value, Mapping):
