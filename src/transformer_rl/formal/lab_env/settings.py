@@ -23,8 +23,7 @@ class AssetDescription:
     nominal_height_m: float
     manifest_sha256: str
 
-    def joint_velocity_limits(self) -> dict[str, float]:
-        """Read source-defined solver limits in rad/s or m/s, not hardware certification."""
+    def _source_joints(self):
         path = self.directory / "model_spec.json"
         if path.is_symlink() or not path.is_file():
             raise ValueError("joint velocity limits require the selected regular model source")
@@ -37,12 +36,23 @@ class AssetDescription:
         names = self.manifest["tree_joint_names"]
         if (not isinstance(joints, list) or len(joints) != len(names)
                 or any(not isinstance(joint, dict) or not isinstance(joint.get("name"), str)
+                       or joint.get('type') not in ('continuous', 'revolute', 'prismatic')
                        for joint in joints)
                 or len({joint.get("name") for joint in joints}) != len(names)
                 or {joint.get("name") for joint in joints} != set(names)):
             raise ValueError("joint velocity limits require every selected named tree joint")
+        return joints
+
+    def continuous_joint_names(self) -> tuple[str, ...]:
+        """Identify periodic coordinates from the selected mechanical source."""
+        continuous = {joint['name'] for joint in self._source_joints()
+                      if joint['type'] == 'continuous'}
+        return tuple(name for name in self.manifest['tree_joint_names'] if name in continuous)
+
+    def joint_velocity_limits(self) -> dict[str, float]:
+        """Read source-defined solver limits in rad/s or m/s, not hardware certification."""
         limits = {}
-        for joint in joints:
+        for joint in self._source_joints():
             limit = joint.get("limit")
             value = limit.get("velocity") if isinstance(limit, dict) else None
             if (joint.get("type") not in ("continuous", "revolute", "prismatic")
@@ -56,7 +66,7 @@ class AssetDescription:
             if not math.isfinite(value) or value <= 0:
                 raise ValueError("joint velocity limits require explicit positive native-unit speeds")
             limits[joint["name"]] = value
-        return {name: limits[name] for name in names}
+        return {name: limits[name] for name in self.manifest['tree_joint_names']}
 
 
 @dataclass(frozen=True)

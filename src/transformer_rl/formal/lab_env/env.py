@@ -44,6 +44,7 @@ from .settings import LabEnvSettings, load_asset_description
 from .terrain_collision import partition_static_collision
 from .dynamics import LabStartupDynamics
 from .sensors import LabSensorModel
+from .joint_coordinates import ContinuousJointCoordinates
 
 
 class WheeledLabEnv(DirectRLEnv):
@@ -75,6 +76,9 @@ class WheeledLabEnv(DirectRLEnv):
             task=self._task,
         )
         self._device = torch.device(self.device)
+        self._joint_coordinates = ContinuousJointCoordinates(
+            self._as_torch(self.robot.data.joint_pos), self._binding.native_joint_names,
+            self._asset.continuous_joint_names(), float(self.physics_dt))
         self._terrain_course = None
         self._completed_estimate = None
         self._active_indices = torch.tensor(self._binding.policy_joint_indices,
@@ -520,6 +524,11 @@ class WheeledLabEnv(DirectRLEnv):
         # beta2 与 GA 均为 xyzw；不能再按旧 wxyz 约定二次重排。
         return self._as_torch(self.robot.data.root_link_quat_w)
 
+    def _joint_positions(self):
+        return self._joint_coordinates.read(
+            self._as_torch(self.robot.data.joint_pos),
+            self._as_torch(self.robot.data.joint_vel), self._physical_tick)
+
     def _sample(self) -> NativePhysicalSample:
         data = self.robot.data
         net = None
@@ -548,7 +557,7 @@ class WheeledLabEnv(DirectRLEnv):
             ground, wheels_ground = self._terrain_course.ground()
             origins = self._terrain_course.router.origins
         result = NativePhysicalSample(
-            self._as_torch(data.joint_pos),
+            self._joint_positions(),
             self._as_torch(data.joint_vel),
             position,
             quaternion_xyzw,
@@ -585,7 +594,7 @@ class WheeledLabEnv(DirectRLEnv):
             raise ValueError("actions 需要有限 [N,6] 张量")
         self._before_action.copy_(self._previous_action)
         self._issued_action.copy_(actions.clamp(-self._action_bounds, self._action_bounds))
-        q = self._as_torch(self.robot.data.joint_pos).index_select(1, self._active_indices)
+        q = self._joint_positions().index_select(1, self._active_indices)
         self._targets = self._control.decode(self._issued_action, q, self._clock())
         if self._recover_task is not None:
             hold = self._recover_task.hold_mask
@@ -617,7 +626,7 @@ class WheeledLabEnv(DirectRLEnv):
     def _apply_action(self) -> None:
         if self._targets is None:
             raise RuntimeError("必须先由 _pre_physics_step 生成输出目标")
-        q = self._as_torch(self.robot.data.joint_pos).index_select(1, self._active_indices)
+        q = self._joint_positions().index_select(1, self._active_indices)
         dq = self._as_torch(self.robot.data.joint_vel).index_select(1, self._active_indices)
         now = self._clock()
         feedback = self._control.controller.effort(self._targets, q, dq, now)
@@ -878,6 +887,7 @@ class WheeledLabEnv(DirectRLEnv):
         self.robot.write_root_com_velocity_to_sim_index(root_velocity=root_velocity, env_ids=ids)
         self.robot.write_joint_position_to_sim_index(position=joint_position, env_ids=ids)
         self.robot.write_joint_velocity_to_sim_index(velocity=joint_velocity, env_ids=ids)
+        self._joint_coordinates.reset_rows(ids, joint_position)
         self.scene.write_data_to_sim()
         self.sim.forward()
         self.scene.update(dt=0.0)
@@ -923,7 +933,7 @@ class WheeledLabEnv(DirectRLEnv):
         if self._recover_task is not None and recover_plan is not None:
             self._recover_initial_leg[ids] = joint_position[
                 :, self._active_indices[:4]]
-        q = self._as_torch(self.robot.data.joint_pos).index_select(1, self._active_indices)
+        q = self._joint_positions().index_select(1, self._active_indices)
         self._targets = self._control.decode(
             torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32, device=self._device),
             q, self._clock(),

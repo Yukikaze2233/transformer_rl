@@ -51,6 +51,7 @@ _GA_REVIEWABLE = {
     'formal/lab_env/env.py', 'formal/lab_env/dynamics.py',
     'formal/lab_env/sdk.py', 'formal/lab_env/ga_isolation.py',
     'formal/lab_env/contact_measurement.py',
+    'formal/lab_env/joint_coordinates.py',
 }
 _TELEMETRY_REVIEWABLE = {'formal/runtime/telemetry.py', 'formal/learning/optimization.py'}
 
