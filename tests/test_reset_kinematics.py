@@ -158,6 +158,42 @@ def test_per_row_solver_budget_does_not_spend_updates_for_an_already_closed_row(
     assert torch.equal(result.prescribed_hip_positions, hips)
 
 
+@pytest.mark.parametrize('field', ['jacobian', 'residual'])
+@pytest.mark.parametrize('invalid', [float('nan'), float('inf')], ids=['nan', 'inf'])
+def test_nonfinite_closure_lane_cannot_abort_or_move_another_reset(field, invalid):
+    geometry, *_ = fixture(closed_nominal=True)
+    seed = geometry.nominal_tree_position[None].repeat(2, 1)
+    seed[:, geometry.passive_tree_indices] = .02
+    output = seed[:, geometry.policy_tree_indices].clone()
+    options = dict(closure_tolerance_m=1e-7, maximum_iterations=80)
+    expected = geometry.solve_passive(seed, output, **options)
+    original_closure = geometry.closure
+
+    def faulty_closure(q, *, jacobian=False):
+        value = original_closure(q, jacobian=jacobian)
+        if jacobian:
+            residual, derivative = value
+            if field == 'jacobian':
+                derivative[1, 0, geometry.passive_tree_indices[0]] = invalid
+            else:
+                residual[1, 0, 0] = invalid
+            return residual, derivative
+        if field == 'residual':
+            value[1, 0, 0] = invalid
+        return value
+
+    geometry.closure = faulty_closure
+    rng = torch.get_rng_state().clone()
+    result = geometry.solve_passive(seed, output, **options)
+    assert result.converged.tolist() == [True, False]
+    torch.testing.assert_close(result.tree_position[0], expected.tree_position[0], atol=1e-12, rtol=0)
+    # The bad row stays unaccepted; a finite internal algebra placeholder
+    # cannot become a fabricated closed pose or change prescribed outputs.
+    torch.testing.assert_close(result.tree_position[1], seed[1], atol=0, rtol=0)
+    assert torch.equal(result.tree_position[:, geometry.policy_tree_indices], output)
+    assert torch.equal(torch.get_rng_state(), rng)
+
+
 def test_continuation_refuses_an_unclosed_seed_or_excess_segments_without_changing_requests_or_RNG():
     geometry, *_ = fixture(closed_nominal=True)
     seed = geometry.nominal_tree_position[None].clone()

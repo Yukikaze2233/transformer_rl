@@ -329,10 +329,9 @@ class AssetResetKinematics:
         q[:, passive] = q[:, passive].clamp(low, high)
         scale = torch.where(self._prismatic[passive], q.new_tensor(slider_scale_m), q.new_tensor(1.))
         step_bound = torch.where(self._prismatic[passive], q.new_tensor(slider_step_m), q.new_tensor(angular_step_rad))
-        # The passive closure uses the same reduced-QR fixed-iteration kernel
-        # as the source reset mapper. A damped normal-equation solve changes
-        # the descent direction and hides rank deficiency; neither is suitable
-        # for a reset admitted to native physics.
+        # Reduced QR solves the full-rank passive system. Rank-deficient
+        # closure uses the explicit regularized fallback below; this is not
+        # the virtual-leg length/angle birth-mapping problem.
         iterations = 0
         rounds = torch.zeros(count, dtype=torch.long, device=self.device)
         damping = torch.full((count,), initial_damping_m2, dtype=torch.float64, device=self.device)
@@ -346,15 +345,19 @@ class AssetResetKinematics:
             matrix = jac[:, :, passive] * scale[None, None]
             rhs = -residual.flatten(1)
             finite = torch.isfinite(matrix).all(dim=(-2, -1)) & torch.isfinite(rhs).all(-1)
-            singular = torch.linalg.svdvals(matrix)
+            eye = torch.eye(matrix.shape[-2], matrix.shape[-1], dtype=torch.float64,
+                            device=self.device).expand(count, -1, -1)
+            # Decompositions reject NaN before a later mask can take effect.
+            # Only internal algebra sees this placeholder; finite=False keeps
+            # the invalid lane's update zero and its unresolved pose rejected.
+            safe_matrix = torch.where(finite[:, None, None], matrix, eye)
+            singular = torch.linalg.svdvals(safe_matrix)
             full_rank = finite & (singular[:, -1] > self._rank_rtol * singular[:, 0])
             # A spring slide can be a null direction of the six loop
             # constraints. It remains at its seed coordinate instead of making
             # the whole row fail or receiving an arbitrary damped displacement.
             # Full-rank rows use reduced QR; rank-deficient rows use the
             # explicit Levenberg fallback with the same QR-space scaling.
-            eye = torch.eye(matrix.shape[-2], matrix.shape[-1], dtype=torch.float64,
-                            device=self.device).expand(count, -1, -1)
             qr_matrix = torch.where(full_rank[:, None, None], matrix, eye)
             qr_rhs = torch.where(full_rank[:, None], rhs, 0.)
             orthogonal, triangular = torch.linalg.qr(qr_matrix, mode='reduced')
@@ -367,7 +370,6 @@ class AssetResetKinematics:
             # changing the direction used by the full-rank QR path.
             eye_k = torch.eye(matrix.shape[-1], dtype=torch.float64,
                               device=self.device).expand(count, -1, -1)
-            safe_matrix = torch.where(finite[:, None, None], matrix, eye)
             safe_rhs = torch.where(finite[:, None], rhs, 0.)
             normal = safe_matrix.transpose(-1, -2) @ safe_matrix
             normal += eye_k * damping[:, None, None]
