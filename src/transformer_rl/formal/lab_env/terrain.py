@@ -87,11 +87,14 @@ class LabTerrainCourse:
         if self._ground_token == env._physical_tick:
             return env._ground_at_root, self.wheel_ground
         points = torch.cat((env._root_link_position()[:, None], self._wheel_centres()), 1)
+        finite_state = torch.isfinite(points).all(-1)
         points[..., 2] = self.query._ceiling_m
         heights, valid, _, friction = self.query(points, self.router.tile[:, None].expand(-1, 3))
+        valid = valid & finite_state
         if not valid.all():
             ids = (~valid.all(-1)).nonzero().flatten()[:8]
-            details = {'physical_tick': env._physical_tick, 'rows': ids.tolist(),
+            details = {'reason': 'nonfinite_state' if not finite_state[ids].all() else 'no_terrain_hit',
+                       'physical_tick': env._physical_tick, 'rows': ids.tolist(),
                        'tile': self.router.tile[ids].tolist(), 'ray_origins': points[ids].tolist(),
                        'valid_root_left_right': valid[ids].tolist(),
                        'root_local_m': (env._root_link_position() - self.router.origins)[ids].tolist()}

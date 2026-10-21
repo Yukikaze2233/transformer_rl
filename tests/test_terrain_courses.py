@@ -40,6 +40,25 @@ def test_ground_miss_reports_actual_rows_without_mutating_cached_ground():
     assert course._ground_token is None
 
 
+def test_nonfinite_physical_height_cannot_be_hidden_by_a_valid_ceiling_ray():
+    from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+
+    course = LabTerrainCourse.__new__(LabTerrainCourse)
+    position = torch.tensor([[1., 2., float('nan')]])
+    course.env = SimpleNamespace(_physical_tick=7, _root_link_position=lambda: position,
+                                 _ground_at_root=torch.full((1,), 9.))
+    course.router = SimpleNamespace(tile=torch.tensor([0]), origins=torch.zeros(1, 3))
+    course._ground_token = None
+    course._wheel_centres = lambda: torch.zeros(1, 2, 3)
+    course.wheel_ground, course.wheel_material = torch.full((1, 2), 8.), torch.ones(1, 2)
+    course.query = lambda points, tile: (torch.zeros(1, 3), torch.ones(1, 3, dtype=torch.bool),
+                                        None, torch.zeros(1, 3))
+    course.query._ceiling_m = 1.25
+    with pytest.raises(RuntimeError, match='nonfinite_state'):
+        course.ground()
+    assert course.env._ground_at_root.eq(9).all() and course.wheel_ground.eq(8).all()
+
+
 @pytest.fixture(scope='module')
 def atlas(real_assets, tmp_path_factory):
     _, assets, _ = real_assets
