@@ -183,6 +183,40 @@ def test_authored_assets_remain_available_below_their_atlas_level(atlas):
         assert (router.kinds[selected] == kind).all()
 
 
+@pytest.mark.parametrize('forward', [1., -1.])
+def test_reset_support_query_uses_the_final_forward_or_reverse_wheel_stance(forward):
+    from transformer_rl.formal.control.observation import CommandMode
+    from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+
+    course = LabTerrainCourse.__new__(LabTerrainCourse)
+    course.env = SimpleNamespace(scene=SimpleNamespace(env_origins=torch.zeros(1, 3)),
+                                 _task_sampler=SimpleNamespace(stage=1), _as_torch=lambda x: x)
+    course.router = SimpleNamespace(
+        reset=lambda *args, **kwargs: (torch.zeros(1, 3), torch.zeros(1)),
+        tile=torch.zeros(1, dtype=torch.long), starts=torch.tensor([-1.5]))
+    course.nominal_spawn_height_m = .32
+    course._spawn_y_offset = torch.zeros(1)
+    course._wheel_centres_root = torch.tensor([[.2, .1, -.3], [.2, -.1, -.3]])
+    course._wheel_radius = torch.full((2,), .05)
+    course._reset_clearance_m = .002
+    course._last_support_clearance = torch.full((1,), float('nan'))
+    queried = []
+
+    def sloping_support(points, tiles):
+        queried.append(points.clone())
+        return .2 + .1 * (points[..., 0] + 1), torch.ones_like(tiles, dtype=torch.bool), None, None
+
+    course.query = sloping_support
+    course.query._ceiling_m = 3.
+    task = SimpleNamespace(terrain_kind=torch.tensor([3]), command=torch.tensor([[forward, 0., 0., 0.]]),
+                           mode=torch.tensor([int(CommandMode.NORMAL)]))
+    pose = torch.tensor([[0., 0., .32, 0., 0., 0., 1.]])
+    course.place_reset(torch.tensor([0]), task, pose)
+    torch.testing.assert_close(queried[0][..., 0], torch.full((1, 2), -1 + forward * .2))
+    torch.testing.assert_close(pose[:, 2], torch.tensor([.2 + forward * .02 + .3 + .05 + .002]))
+    torch.testing.assert_close(course._last_support_clearance, torch.tensor([.002]), atol=1e-7, rtol=0)
+
+
 def test_body_bump_clears_only_allowed_contact_not_other_failures():
     from types import SimpleNamespace
     from transformer_rl.formal.lab_env.terrain import LabTerrainCourse

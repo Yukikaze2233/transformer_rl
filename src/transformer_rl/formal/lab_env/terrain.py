@@ -262,14 +262,20 @@ class LabTerrainCourse:
         pose[:, 0] += torch.where(nonflat, approach_x, 0.)
         pose[:, 1] += torch.where(nonflat, self._spawn_y_offset[tile], 0.)
         pose[:, 2] = origins[:, 2] + ground + self.nominal_spawn_height_m
+        # Query the wheel locations in the orientation actually written to
+        # physics. Rotating after this query certifies the opposite stance.
+        reverse = (task.command[:, 0] < 0) & nonflat
+        pose[reverse, 5] = 1
+        pose[reverse, 6] = 0
         # The authored approach can contain a lower side platform. Correct the
         # root height from the selected wheel colliders before writing it; a
         # nominal flat spawn height alone would insert one wheel into geometry.
         ordinary = task.mode != int(CommandMode.RECOVERY)
         if ordinary.any():
             rows = ordinary.nonzero(as_tuple=False).flatten()
-            wheel_points = pose[rows, :3][:, None, :] + self._rotate_xyzw(
+            wheel_offsets = self._rotate_xyzw(
                 pose[rows, 3:7][:, None, :], self._wheel_centres_root[None].to(pose.dtype))
+            wheel_points = pose[rows, :3][:, None, :] + wheel_offsets
             wheel_points = wheel_points.to(torch.float32)
             wheel_points[..., 2] = self.query._ceiling_m
             query_tiles = tile.index_select(0, rows)[:, None].expand(-1, 2).contiguous()
@@ -277,17 +283,14 @@ class LabTerrainCourse:
             if not valid.all():
                 raise RuntimeError('reset approach has no authored support under both wheel colliders')
             # wheel bottom = root_z + local_z - radius. Raise only; never sink.
-            required = heights - self._wheel_centres_root[None, :, 2] + self._wheel_radius[None]
+            required = heights - wheel_offsets[..., 2] + self._wheel_radius[None]
             required = required + self._reset_clearance_m
             adjusted = torch.maximum(pose[rows, 2:3], required.amax(-1, keepdim=True))
             pose[rows, 2] = adjusted[:, 0]
-            gap = (pose[rows, 2, None] + self._wheel_centres_root[None, :, 2]
+            gap = (pose[rows, 2, None] + wheel_offsets[..., 2]
                    - self._wheel_radius[None] - heights)
             self._last_support_clearance[ids[rows]] = gap.amin(-1)
         self._last_support_clearance[ids[~ordinary]] = float('nan')
-        reverse = (task.command[:, 0] < 0) & (task.terrain_kind != 0)
-        pose[reverse, 5] = 1
-        pose[reverse, 6] = 0
         self._ground_token = None
 
     def reset_commands(self, ids, task):
