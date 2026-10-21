@@ -7,8 +7,8 @@ import pytest
 import torch
 
 from transformer_rl.formal.tasks.curriculum import (
-    AuditedStageDecision, ContinuousTaskSampler, CurriculumBudget, STAGE_BUDGETS,
-    STAGE_NAMES, STAGE_WEIGHTS, TaskDomain, TaskDraw, TaskFamily,
+    AuditedStageDecision, ContinuousTaskSampler, CurriculumBudget, ROTATION_NORMAL_YAW_RAD_S,
+    STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS, TaskDomain, TaskDraw, TaskFamily, RotationMode,
 )
 
 
@@ -40,10 +40,26 @@ def test_final_mixture_contains_full_continuous_domains_and_both_endpoints():
     motion = draw.requested_command[draw.family == TaskFamily.MOTION]
     assert motion[:, 0].min() == -2.7 and motion[:, 0].max() == 2.7
     assert torch.count_nonzero(motion[:, 2]) == 0
-    rotation = draw.requested_command[draw.family == TaskFamily.ROTATION]
-    torch.testing.assert_close(rotation[:, 2].min(), torch.tensor(-6 * torch.pi))
-    torch.testing.assert_close(rotation[:, 2].max(), torch.tensor(6 * torch.pi))
+    rotation_mask = draw.family == TaskFamily.ROTATION
+    rotation = draw.requested_command[rotation_mask]
+    assert rotation[:, 2].abs().max() <= 6 * torch.pi + 1e-5
+    assert (rotation[:, 2].abs() >= 5.9 * torch.pi).any()
     assert (rotation[:, 0] == 0).sum() > 400
+    modes = draw.rotation_mode[rotation_mask]
+    assert set(modes.tolist()) == set(RotationMode)
+    normal = modes == int(RotationMode.NORMAL)
+    spin_low = modes == int(RotationMode.SPIN_LOW)
+    spin_mid = modes == int(RotationMode.SPIN_MID)
+    dash = modes == int(RotationMode.DASH)
+    assert (rotation[normal, 2].abs() <= ROTATION_NORMAL_YAW_RAD_S + 1e-5).all()
+    assert (rotation[spin_low | spin_mid, 0].abs() <= 1e-6).all()
+    assert rotation[spin_low, 2].abs().min() >= 2 * torch.pi - 1e-5
+    assert rotation[spin_low, 2].abs().max() <= 3.25 * torch.pi + 1e-5
+    assert rotation[spin_mid, 2].abs().min() >= 3.25 * torch.pi - 1e-5
+    assert rotation[spin_mid, 2].abs().max() <= 6 * torch.pi + 1e-5
+    assert (rotation[dash, 0].abs() >= 2.0 - 1e-5).all()
+    assert (rotation[dash, 0].abs() <= 2.7 + 1e-5).all()
+    assert (draw.trajectory_kind[rotation_mask][~normal] == 0).all()
     assert set(draw.terrain_kind[draw.family == TaskFamily.TERRAIN].tolist()) == set(range(1, 8))
     assert set(draw.recovery_posture[draw.family == TaskFamily.RECOVERY].tolist()) == set(range(16))
     assert set(draw.trajectory_kind.tolist()) == set(range(7))

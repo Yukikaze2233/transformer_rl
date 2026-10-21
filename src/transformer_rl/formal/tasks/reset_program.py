@@ -193,7 +193,7 @@ class TaskResetPreparer:
                 or draw.family.ndim != 1 or draw.family.numel() < 1):
             raise ValueError('reset preparation requires nonempty original continuous task rows')
         n = len(draw.family)
-        integer = {'family', 'stratum', 'terrain_kind', 'recovery_posture', 'trajectory_kind'}
+        integer = {'family', 'stratum', 'terrain_kind', 'recovery_posture', 'trajectory_kind', 'rotation_mode'}
         for f in fields(draw):
             value = getattr(draw, f.name)
             dtype = torch.long if f.name in integer else torch.bool if f.name == 'nominal' else torch.float32
@@ -202,7 +202,7 @@ class TaskResetPreparer:
                     or value.dtype != dtype or dtype == torch.float32 and not torch.isfinite(value).all()):
                 raise ValueError('continuous task draw layout, dtype or finite source rows differ')
         bounds = {'family': len(TaskFamily), 'stratum': 3, 'terrain_kind': 8,
-                  'recovery_posture': 16, 'trajectory_kind': 7}
+                  'recovery_posture': 16, 'trajectory_kind': 7, 'rotation_mode': 4}
         if any(((getattr(draw, k) < 0) | (getattr(draw, k) >= high)).any() for k, high in bounds.items()):
             raise ValueError('continuous task draw contains an undeclared task or recovery identity')
         d, command = self.tasks.domain, draw.requested_command

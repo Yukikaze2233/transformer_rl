@@ -55,7 +55,8 @@ def draw(family, *, posture=None, nominal=None, terrain=None):
     return TaskDraw(long(family), torch.zeros(n, dtype=torch.long), command, scalar(.1), scalar(.1), scalar(.012),
                     scalar(.12), scalar(.1), long([0] * n if terrain is None else terrain),
                     long([0] * n if posture is None else posture), torch.zeros(n, dtype=torch.long),
-                    torch.tensor([False] * n if nominal is None else nominal))
+                    torch.tensor([False] * n if nominal is None else nominal),
+                    torch.zeros(n, dtype=torch.long))
 
 
 def test_six_families_keep_full_requested_draw_and_complete_courses_without_failed_pose_replacement():

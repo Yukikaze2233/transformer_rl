@@ -25,6 +25,21 @@ class TaskFamily(IntEnum):
     RECOVERY = 5
 
 
+class RotationMode(IntEnum):
+    """Separate rotation buckets so the full command box is not one bucket."""
+
+    NORMAL = 0
+    SPIN_LOW = 1
+    SPIN_MID = 2
+    DASH = 3
+
+
+ROTATION_NORMAL_YAW_RAD_S = 2 * math.pi
+ROTATION_SPIN_LOW_RAD_S = (2 * math.pi, 3.25 * math.pi)
+ROTATION_SPIN_MID_RAD_S = (3.25 * math.pi, 6 * math.pi)
+ROTATION_DASH_FORWARD_M_S = (2.0, 2.7)
+
+
 STAGE_NAMES = ('warmup', 'rough', 'hard')
 STAGE_BUDGETS = (5000, 20000, 5000)
 STAGE_WEIGHTS = (
@@ -179,6 +194,7 @@ class TaskDraw:
     recovery_posture: torch.Tensor   # references the frozen 16-case posture catalogue
     trajectory_kind: torch.Tensor    # hold, ramp, sine, chirp, smoothstep, start/stop, bounded step
     nominal: torch.Tensor
+    rotation_mode: torch.Tensor      # RotationMode; separate normal/spin/dash buckets
 
 
 class ContinuousTaskSampler:
@@ -252,15 +268,66 @@ class ContinuousTaskSampler:
                                   for index, n in enumerate(strata)])
             stratum = stratum[torch.randperm(size, device=self.device, generator=self.generator)]
             forward = self._scalar(size, stratum, d.forward_m_s, 0.0)
-            yaw = self._scalar(size, stratum, d.yaw_rad_s, 0.0)
+            normal_yaw_limit = min(ROTATION_NORMAL_YAW_RAD_S,
+                                   -d.yaw_rad_s[0], d.yaw_rad_s[1])
+            yaw = self._scalar(size, stratum, (-normal_yaw_limit, normal_yaw_limit), 0.0)
             height = self._scalar(size, stratum, d.height_m, d.nominal_height_m)
+            rotation_mode = torch.zeros(size, dtype=torch.long, device=self.device)
+            trajectory_kind = self._integer(7, size)
+            nominal = self._random(size) < d.nominal_fraction
             if family in (TaskFamily.HEIGHT, TaskFamily.RECOVERY):
                 forward.zero_()
                 yaw.zero_()
             elif family == TaskFamily.MOTION:
                 yaw.zero_()
             elif family == TaskFamily.ROTATION:
-                forward = torch.where(self._random(size) < 0.35, 0, forward)
+                # Normal rotation stays inside the wheel-envelope-friendly
+                # +/-2pi bucket. High-rate spin and high-speed dash are separate
+                # modes introduced later by the sampled domain and use immediate
+                # hold commands, matching the reference implementation's split.
+                draw = self._random(size)
+                rotation_mode.copy_(torch.where(
+                    draw < .70, torch.full_like(rotation_mode, int(RotationMode.NORMAL)),
+                    torch.where(draw < .85, torch.full_like(rotation_mode, int(RotationMode.SPIN_LOW)),
+                                torch.where(draw < .95, torch.full_like(rotation_mode, int(RotationMode.SPIN_MID)),
+                                            torch.full_like(rotation_mode, int(RotationMode.DASH))))))
+                # Do not introduce a bucket before its command range exists.
+                max_yaw = min(-d.yaw_rad_s[0], d.yaw_rad_s[1])
+                max_forward = min(-d.forward_m_s[0], d.forward_m_s[1])
+                rotation_mode.masked_fill_(
+                    ((rotation_mode == int(RotationMode.SPIN_LOW))
+                       & (max_yaw <= ROTATION_SPIN_LOW_RAD_S[0]))
+                    | ((rotation_mode == int(RotationMode.SPIN_MID))
+                       & (max_yaw <= ROTATION_SPIN_MID_RAD_S[0]))
+                    | ((rotation_mode == int(RotationMode.DASH))
+                       & (max_forward < ROTATION_DASH_FORWARD_M_S[0])),
+                    int(RotationMode.NORMAL))
+                normal = rotation_mode == int(RotationMode.NORMAL)
+                sign = torch.where(self._random(size) < .5, -1., 1.)
+                low = torch.full_like(yaw, ROTATION_SPIN_LOW_RAD_S[0])
+                high = torch.full_like(yaw, min(ROTATION_SPIN_LOW_RAD_S[1], max_yaw))
+                spin = sign * (low + (high - low) * self._random(size))
+                low.fill_(ROTATION_SPIN_MID_RAD_S[0])
+                high.fill_(min(ROTATION_SPIN_MID_RAD_S[1], max_yaw))
+                mid = sign * (low + (high - low) * self._random(size))
+                yaw = torch.where(normal, yaw, torch.where(
+                    rotation_mode == int(RotationMode.SPIN_LOW), spin,
+                    torch.where(rotation_mode == int(RotationMode.SPIN_MID), mid, yaw)))
+                dash_limit = max(ROTATION_DASH_FORWARD_M_S[0],
+                                 min(ROTATION_DASH_FORWARD_M_S[1], max_forward))
+                forward = torch.where(
+                    rotation_mode == int(RotationMode.DASH),
+                    sign * (ROTATION_DASH_FORWARD_M_S[0]
+                            + (dash_limit - ROTATION_DASH_FORWARD_M_S[0])
+                            * self._random(size)),
+                    torch.where(normal, torch.where(self._random(size) < .35,
+                                                    torch.zeros_like(forward), forward),
+                                torch.zeros_like(forward)))
+                # Hold preserves the high-rate request across the episode.
+                # It does not claim an instantaneous physical response.
+                trajectory_kind = torch.where(normal, trajectory_kind,
+                                              torch.zeros_like(trajectory_kind))
+                nominal &= normal
             command = torch.stack((forward, torch.zeros_like(forward), yaw, height), -1)
             if family == TaskFamily.TERRAIN:
                 terrain = self._integer(len(TerrainKind) - 1, size) + 1
@@ -281,7 +348,8 @@ class ContinuousTaskSampler:
                 step_up_m=self._scalar(size, stratum, d.step_up_m, 0),
                 step_down_m=self._scalar(size, stratum, d.step_down_m, 0),
                 terrain_kind=terrain, recovery_posture=self._integer(16, size),
-                trajectory_kind=self._integer(7, size), nominal=self._random(size) < d.nominal_fraction,
+                trajectory_kind=trajectory_kind, nominal=nominal,
+                rotation_mode=rotation_mode,
             )
             blocks.append(block)
         order = torch.randperm(count, device=self.device, generator=self.generator)
