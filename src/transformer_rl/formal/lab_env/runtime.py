@@ -105,6 +105,7 @@ def runtime(recipe, components, configuration, *, control):
     # Check every stage before scene setup or any reserved production rollout.
     ManagedCurriculum(recipe, components, FormalCurriculumCapabilities(True, True, True))
     launcher = env = health = None
+    failure = None
     try:
         from isaaclab.app import AppLauncher
 
@@ -179,17 +180,27 @@ def runtime(recipe, components, configuration, *, control):
         health.check()
     except BaseException as error:
         # Preserve a real failure before Kit shutdown can obscure the exit code.
+        failure = error
         control.fail(error)
         raise
     finally:
-        try:
-            if env is not None:
-                env.close()
-        except BaseException as error:
-            control.fail(error)
-            raise
-        finally:
-            if health is not None:
-                health.close()
-            if launcher is not None:
-                launcher.app.close()
+        cleanup_failure = None
+        for resource in (env, health, None if launcher is None else launcher.app):
+            if resource is None:
+                continue
+            try:
+                resource.close()
+            except BaseException as error:
+                # Kit may raise SystemExit(0) while another error is unwinding.
+                # A successful shutdown must not turn failed learning into exit0.
+                if failure is not None:
+                    failure.add_note(f'Runtime cleanup raised {type(error).__name__}: {error}')
+                elif isinstance(error, SystemExit) and error.code in (None, 0):
+                    continue
+                elif cleanup_failure is None:
+                    cleanup_failure = error
+                else:
+                    cleanup_failure.add_note(f'Additional cleanup raised {type(error).__name__}: {error}')
+        if failure is None and cleanup_failure is not None:
+            control.fail(cleanup_failure)
+            raise cleanup_failure

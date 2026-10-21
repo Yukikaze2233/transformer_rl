@@ -125,6 +125,31 @@ def test_sdk_open_failure_is_published_without_building_a_scene(tmp_path, monkey
     assert len(failures) == 1 and str(failures[0]) == 'owned SDK startup failure'
 
 
+@pytest.mark.parametrize('cleanup_error', (SystemExit(0), RuntimeError('shutdown failure')))
+def test_sdk_cleanup_does_not_replace_the_original_failure(tmp_path, monkeypatch, cleanup_error):
+    recipe, components, journal, config, _ = inputs(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, 'parse_configuration',
+                        lambda *_: (None, None, None, None, None, {}, None, None, None))
+    failures, closed = [], []
+    control = SimpleNamespace(binding={'boot_id': boot_id()}, fail=failures.append)
+    fake_app = ModuleType('isaaclab.app')
+
+    def close():
+        closed.append(True)
+        raise cleanup_error
+
+    fake_app.AppLauncher = lambda **_: SimpleNamespace(app=SimpleNamespace(close=close))
+    monkeypatch.setitem(sys.modules, 'isaaclab', ModuleType('isaaclab'))
+    monkeypatch.setitem(sys.modules, 'isaaclab.app', fake_app)
+    # Fail immediately after AppLauncher exists, without importing a simulator.
+    monkeypatch.setitem(sys.modules, 'omni', None)
+    with journal, pytest.raises(ModuleNotFoundError) as caught:
+        with module.runtime(replace(recipe, device='cpu'), components, config, control=control):
+            pytest.fail('runtime must not yield after failed SDK imports')
+    assert closed == [True] and failures == [caught.value]
+    assert any(type(cleanup_error).__name__ in note for note in caught.value.__notes__)
+
+
 def test_atlas_relative_payload_pins_survive_directory_relocation(tmp_path, monkeypatch):
     import shutil
 
