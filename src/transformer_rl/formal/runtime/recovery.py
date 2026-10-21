@@ -23,6 +23,10 @@ import torch
 
 from ..learning.accounting import LearningJournal
 from ..learning.checkpoint import LearningRecipe, StructuredCheckpointStore
+from ..lab_env.sdk import (
+    _SDK_CONTINUATION_FIELDS, _SDK_CONTINUATION_FORMAT, _has_inherited_sdk_gate,
+    _sdk_evidence_identity,
+)
 from ...common.training_control import boot_id, file_pin, read_json, verify_pin, write_json
 from .transition import _AcceptedSourceStore, _hold_resources, learning_state_sha256, source_table
 
@@ -47,13 +51,22 @@ _GA_REVIEWABLE = {
     'formal/lab_env/sdk.py', 'formal/lab_env/ga_isolation.py',
     'formal/lab_env/contact_measurement.py',
 }
+_TELEMETRY_REVIEWABLE = {'formal/runtime/telemetry.py', 'formal/learning/optimization.py'}
 
 
-def _review_sources(previous, candidate, review, *, sdk_transition=False):
+def _review_sources(previous, candidate, review, *, sdk_transition=False, same_sdk=False,
+                    telemetry_review=None):
     before, after = source_table(previous), source_table(candidate)
     actual = {name: {'before': before.get(name), 'after': after.get(name)}
               for name in sorted(before.keys() | after.keys()) if before.get(name) != after.get(name)}
-    allowed = _REVIEWABLE | _GA_REVIEWABLE if sdk_transition else _REVIEWABLE
+    allowed = _REVIEWABLE | _GA_REVIEWABLE if sdk_transition or same_sdk else _REVIEWABLE
+    telemetry = {name: item for name, item in actual.items() if name in _TELEMETRY_REVIEWABLE}
+    if telemetry:
+        if not isinstance(telemetry_review, dict) or telemetry_review != telemetry:
+            raise ValueError('telemetry source differs from its exact reviewed and separately authorized changes')
+        allowed = allowed | set(telemetry)
+    elif telemetry_review not in (None, {}):
+        raise ValueError('telemetry source authorization differs from the actual changes')
     if (not actual or actual != review or not set(actual).issubset(allowed)
             or any(item['after'] is None for item in actual.values())):
         raise ValueError('failed recovery source differs from the exact reviewed support/performance changes')
@@ -189,6 +202,58 @@ def _require_preserved_learning(inherited, original, original_sha256, sdk_eviden
         raise ValueError('failed recovery changed model, Adam, RNG, request or source state')
 
 
+def _inherited_sdk_anchor(payload, recipe, *, authorized_boot):
+    """Find the current gate in the already validated CP journal, not CP metadata."""
+    boundary = payload['boundary']
+    recovery = boundary.get('recovery')
+    source = recovery.get('provenance') if isinstance(recovery, dict) else None
+    fields = ('sdk_transition_pin', 'sdk_transition', 'sdk_continuation_pin', 'sdk_continuation')
+    if not isinstance(source, dict) or not any(key in source for key in fields):
+        if _has_inherited_sdk_gate(boundary):
+            raise ValueError('checkpoint recovery discarded its inherited SDK gate')
+        return None
+    continuation = source.get('sdk_continuation')
+    summary = source.get('sdk_transition') if continuation is None else continuation
+    if not isinstance(summary, dict):
+        raise ValueError('checkpoint SDK provenance lacks its verified summary')
+    marker = {'source': source, 'boundary': boundary, 'authorized_boot': authorized_boot,
+              'learning_state_sha256': summary.get('inherited_learning_state_sha256')}
+    _require_sdk_metadata(marker, recipe)
+    identity = _sdk_evidence_identity(summary['evidence_pin'], authorized_boot=authorized_boot)
+    task_source = payload['collection'].get('task_source')
+    startup = (None if not isinstance(task_source, dict)
+               else task_source.get('startup_parameters_sha256'))
+    summary_startup = summary.get('startup_parameters_sha256' if continuation is not None
+                                  else 'target_startup_parameters_sha256')
+    if (identity['target_learner_source_sha256'] != recipe.learner_source_sha256
+            or identity['startup_parameters_sha256'] != startup or summary_startup != startup
+            or identity['num_envs'] != recipe.num_envs
+            or identity['target_sdk_pin'] != summary.get('target_sdk_pin')):
+        raise ValueError('checkpoint SDK provenance differs from its source or native mechanics')
+    return identity
+
+
+def _publish_sdk_continuation(root, anchor, *, authorized_boot, checkpoint_sha256,
+                              recipe, target_source_sha256, original_sha256, inherited_sha256):
+    document = {
+        'format': _SDK_CONTINUATION_FORMAT, 'authorized_boot': authorized_boot,
+        'source_checkpoint_sha256': checkpoint_sha256, 'source_recipe_sha256': recipe.sha256,
+        'source_learner_source_sha256': recipe.learner_source_sha256,
+        'target_learner_source_sha256': target_source_sha256,
+        'prior_sdk_evidence_pin': deepcopy(anchor['evidence_pin']),
+        'target_sdk_pin': deepcopy(anchor['target_sdk_pin']),
+        'startup_parameters_sha256': anchor['startup_parameters_sha256'],
+    }
+    directory = Path(root) / 'recovery'
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / 'sdk_continuation.json'
+    write_json(path, document)
+    pin = file_pin(path)
+    _sdk_evidence_identity(pin, authorized_boot=authorized_boot)
+    return dict(document, evidence_pin=pin, checkpoint_learning_state_sha256=original_sha256,
+                inherited_learning_state_sha256=inherited_sha256)
+
+
 def prepare_failed_recovery(target_root, *, cache_review_pin, previous_recipe, previous_source,
                             learner_source, reviewed_changes, authorization_pin, authorized_boot,
                             runtime_factory, runtime_configuration, resources, python, name=None,
@@ -226,8 +291,6 @@ def prepare_failed_recovery(target_root, *, cache_review_pin, previous_recipe, p
         if not path.is_relative_to(cache) or path.is_symlink():
             raise ValueError('recovery input escapes the immutable evidence cache')
         verify_pin({'path': str(path), 'bytes': record['bytes'], 'sha256': record['sha256']})
-    changes = _review_sources(previous_source, learner_source, reviewed_changes,
-                              sdk_transition=sdk_transition_pin is not None)
     old = LearningJournal(cache / 'journal')
     if old.spec != recipe.journal_spec() or old.summary() != review['final_journal']:
         raise ValueError('failed recovery journal differs from its pinned final chain')
@@ -251,6 +314,11 @@ def prepare_failed_recovery(target_root, *, cache_review_pin, previous_recipe, p
         store = _AcceptedSourceStore(cache, recipe, prefix_journal)
         store.load('checkpoint.pt')  # All original strict checkpoint predicates.
         payload = store.accepted_payload
+        anchor = _inherited_sdk_anchor(payload, recipe, authorized_boot=authorized_boot)
+        changes = _review_sources(previous_source, learner_source, reviewed_changes,
+                                  sdk_transition=sdk_transition_pin is not None,
+                                  same_sdk=anchor is not None and sdk_transition_pin is None,
+                                  telemetry_review=approval.get('telemetry_reviewed_changes'))
         before_hash = learning_state_sha256(payload)
         budget = recipe.make_curriculum()
         for _ in range(old.summary()['rollouts_reserved']):
@@ -285,6 +353,15 @@ def prepare_failed_recovery(target_root, *, cache_review_pin, previous_recipe, p
             provenance['sdk_transition'] = dict(sdk_evidence,
                 checkpoint_learning_state_sha256=before_hash,
                 inherited_learning_state_sha256=fork_hash)
+        elif anchor is not None:
+            continuation = _publish_sdk_continuation(target.root, anchor,
+                authorized_boot=authorized_boot, checkpoint_sha256=approval['checkpoint_sha256'],
+                recipe=recipe, target_source_sha256=candidate_recipe.learner_source_sha256,
+                original_sha256=before_hash, inherited_sha256=fork_hash)
+            provenance['sdk_continuation_pin'] = deepcopy(continuation['evidence_pin'])
+            provenance['sdk_continuation'] = continuation
+        if approval.get('telemetry_reviewed_changes'):
+            provenance['telemetry_reviewed_changes'] = deepcopy(approval['telemetry_reviewed_changes'])
         with LearningJournal.create(target.root / 'journal', candidate_recipe.journal_spec(),
                                     authorized_boot=authorized_boot) as journal:
             journal.import_failed_consumption(checkpoint, old.summary(), provenance=provenance)
@@ -314,10 +391,39 @@ def prepare_failed_recovery(target_root, *, cache_review_pin, previous_recipe, p
 
 
 def _require_sdk_metadata(marker, recipe, *, verify_mechanics=False):
+    continuation_pin = marker['source'].get('sdk_continuation_pin')
+    continuation = marker['source'].get('sdk_continuation')
+    if continuation_pin is not None or continuation is not None:
+        expected = _SDK_CONTINUATION_FIELDS | {
+            'evidence_pin', 'checkpoint_learning_state_sha256', 'inherited_learning_state_sha256'}
+        if (marker['source'].get('sdk_transition_pin') is not None
+                or marker['source'].get('sdk_transition') is not None
+                or not isinstance(continuation, dict) or set(continuation) != expected
+                or continuation.get('evidence_pin') != continuation_pin):
+            raise ValueError('failed recovery SDK continuation metadata differs')
+        identity = _sdk_evidence_identity(continuation_pin, authorized_boot=marker['authorized_boot'])
+        sealed = identity['document']
+        approval = _pinned_document(marker['source']['authorization_pin'])
+        source_recipe = replace(recipe, learner_source_sha256=sealed['source_learner_source_sha256'])
+        if (sealed['format'] != _SDK_CONTINUATION_FORMAT
+                or sealed != {key: continuation[key] for key in _SDK_CONTINUATION_FIELDS}
+                or sealed['source_recipe_sha256'] != source_recipe.sha256
+                or sealed['target_learner_source_sha256'] != recipe.learner_source_sha256
+                or approval.get('authorization') != 'failed_checkpoint_fork_preserving_all_consumption'
+                or approval.get('boot') != marker['authorized_boot']
+                or approval.get('sdk_transition_pin') is not None
+                or approval.get('checkpoint_sha256') != sealed['source_checkpoint_sha256']
+                or continuation['checkpoint_learning_state_sha256']
+                != marker['source']['checkpoint_learning_state_sha256']
+                or continuation['inherited_learning_state_sha256'] != marker['learning_state_sha256']):
+            raise ValueError('failed recovery SDK continuation is not bound to its source and target')
+        return
     evidence = marker['source'].get('sdk_transition')
     if evidence is None:
         if marker['source'].get('sdk_transition_pin') is not None:
             raise ValueError('failed recovery SDK transition has no verified summary')
+        if _has_inherited_sdk_gate(marker.get('boundary')):
+            raise ValueError('failed recovery discarded its inherited SDK identity gate')
         return
     expected = _SDK_BINDING_FIELDS | {
         'evidence_pin', 'source_startup_parameters_sha256', 'target_startup_parameters_sha256',
@@ -389,6 +495,12 @@ def load_recovery(root, recipe, journal, binding):
             or learning_state_sha256(store.accepted_payload) != marker['learning_state_sha256']):
         raise ValueError('failed recovery full learning-state proof differs')
     evidence = marker['source'].get('sdk_transition')
+    continuation = marker['source'].get('sdk_continuation')
+    if continuation is not None:
+        task_source = store.accepted_payload['collection'].get('task_source')
+        if (not isinstance(task_source, dict) or task_source.get('startup_parameters_sha256')
+                != continuation['startup_parameters_sha256']):
+            raise ValueError('failed recovery continuation changed native mechanical identity')
     if evidence is not None:
         task_source = store.accepted_payload['collection'].get('task_source')
         if (not isinstance(task_source, dict)
