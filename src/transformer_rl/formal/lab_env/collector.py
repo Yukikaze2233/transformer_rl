@@ -89,10 +89,15 @@ class LabCollector:
         cause_names = ('true_failure', 'time_limit', 'spatial_exit', 'simultaneous_truncations')
         cause_counts = torch.zeros(len(cause_names), dtype=torch.long, device=self.device)
         environment_timing: dict[str, float] = {}
+        # Weights are fixed throughout this rollout. The next endpoint's
+        # post-reset history is exactly the following action's input. Keep this
+        # cache local: PPO may change weights before the next collect() call.
+        next_outputs = None
 
         for step in range(steps):
             current = self._current
-            mean, raw_state, _ = self.model.actor.policy.outputs(self._history)
+            mean, raw_state, _ = (self.model.actor.policy.outputs(self._history)
+                                  if next_outputs is None else next_outputs)
             log_std = self.model.actor.log_std.clamp(-4.0, 1.0).expand_as(mean)
             raw_action = Normal(mean, log_std.exp(), validate_args=False).sample()
             evaluation = self.model.actor._evaluation(mean, self.model.actor.log_std, raw_action)
@@ -124,7 +129,8 @@ class LabCollector:
                                       next_observation.frame[:, None]), 1)
             next_history[reset_after] = next_observation.frame[reset_after, None].expand(
                 -1, self.history_length, -1)
-            _, next_raw_state, _ = self.model.actor.policy.outputs(next_history)
+            next_outputs = self.model.actor.policy.outputs(next_history)
+            _, next_raw_state, _ = next_outputs
             self._profile_boundary('next_policy', step + 1)
             same_final_epoch = ((final.episode_id == current.episode_id)
                                 & (final.control_epoch == current.control_epoch))

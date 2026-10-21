@@ -94,6 +94,16 @@ class LabRecoveryReset:
         self.compiler = RecoveryPoseCompiler(self.kinematics, config.recovery_tuning())
         self._flat_courses = self._build_flat_courses()
         self._local_patch = self._build_local_patch()
+        self._zero_yaw_pose = None
+        if num_envs >= 16:
+            # Formal resets reuse these same 16 requests on translated flat
+            # patches. Solve and certify them once, keeping continuous-yaw or
+            # elevated-origin requests on the original geometric path.
+            table = self.pose(torch.arange(16), torch.arange(16),
+                              torch.zeros(16, dtype=torch.float64),
+                              torch.zeros(16, 3, dtype=torch.float64))
+            if table.root_pose_xyzw[:, :2].eq(0).all():
+                self._zero_yaw_pose = table
 
     def _build_flat_courses(self):
         # 每个环境都需要独立、可验证的 flat course；几何只读且不含随机起伏。
@@ -132,6 +142,16 @@ class LabRecoveryReset:
                 or ids.unique().numel() != n or (ids < 0).any() or (ids >= self.num_envs).any()
                 or not torch.isfinite(yaw_rad).all() or not torch.isfinite(origins).all()):
             raise ValueError("recovery reset 的 ids/posture/yaw/origin 布局不一致")
+        cached = getattr(self, '_zero_yaw_pose', None)
+        if cached is not None and yaw_rad.eq(0).all() and origins[:, 2].eq(0).all():
+            indices = posture_id.to(self.device)
+            root = cached.root_pose_xyzw.index_select(0, indices)
+            root[:, :2] = origins[:, :2].to(device=self.device, dtype=torch.float32)
+            return RecoveryResetPose(
+                root, cached.joint_position.index_select(0, indices),
+                cached.root_com_velocity.index_select(0, indices),
+                cached.joint_velocity.index_select(0, indices), indices.clone(),
+                cached.geometry_ready.index_select(0, indices))
         controller = OutputFeedbackController(
             self.kinematics.binding.nominal_policy_position_rad, n, pair_domain=None, device="cpu")
         candidate = self.compiler.compile(posture_id, yaw_rad, controller)

@@ -145,9 +145,12 @@ def runtime(recipe, components, configuration, *, control):
             terrain_scan=True, forward_scan=True, terrain_profile='course',
             terrain_atlas_manifest=str(atlas), expected_manifest_sha256=asset.manifest_sha256)
         cfg.seed = recipe.training_seed
-        cfg.sim.enable_scene_query_support = True
+        # The course queries its immutable triangles on Warp's Torch stream.
+        # Updating a second PhysX raycast/overlap BVH for every robot shape is
+        # unused work; contact reporting and collision solving stay enabled.
+        cfg.sim.enable_scene_query_support = False
         cfg.sim.physics = PhysxCfg(enable_external_forces_every_iteration=True,
-                                  enable_scene_query_support=True, **configuration['physics'])
+                                  enable_scene_query_support=False, **configuration['physics'])
         env = WheeledLabEnv(cfg)
         health.check()
         value = ManagedLabRuntime(env, recipe, components, identity,

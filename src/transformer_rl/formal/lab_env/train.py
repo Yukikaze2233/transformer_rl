@@ -266,10 +266,11 @@ def main(argv=None):
                             terrain_atlas_manifest=(None if args.terrain_atlas is None else str(args.terrain_atlas)),
                             expected_manifest_sha256=expected_asset)
         health = NativePhysicsHealth.for_native_process(args.output.parent)
-        cfg.sim.enable_scene_query_support = True
+        scene_queries = args.terrain_profile != 'course'
+        cfg.sim.enable_scene_query_support = scene_queries
         cfg.sim.physics = PhysxCfg(
             enable_external_forces_every_iteration=True,
-            enable_scene_query_support=True,
+            enable_scene_query_support=scene_queries,
             gpu_found_lost_pairs_capacity=2**22,
             gpu_found_lost_aggregate_pairs_capacity=2**25,
             gpu_total_aggregate_pairs_capacity=2**22,

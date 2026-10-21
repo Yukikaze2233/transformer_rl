@@ -60,3 +60,41 @@ def test_nonrelease_poses_keep_zero_initial_velocity_and_continuous_yaw():
     assert result.geometry_ready.all()
     assert not result.root_com_velocity.any()
     assert not torch.equal(result.root_pose_xyzw[0, 3:], result.root_pose_xyzw[1, 3:])
+
+
+def test_certified_zero_yaw_lookup_is_exact_and_returns_owned_translated_rows():
+    from dataclasses import fields
+
+    value = source_reset()
+    # This synthetic asset certifies upright/release only. The native asset
+    # exercise separately certifies the full 16-posture table.
+    posture = torch.zeros(16, dtype=torch.long)
+    posture[2] = 2
+    table = value.pose(torch.arange(16), posture, torch.zeros(16, dtype=torch.float64),
+                       torch.zeros(16, 3, dtype=torch.float64))
+    ids, selected = torch.tensor([7, 3, 10]), torch.tensor([2, 0, 2])
+    origins = torch.tensor([[-200., 0., 0.], [1.25, -3.5, 0.], [10., 2., 0.]], dtype=torch.float64)
+    expected = value.pose(ids, selected, torch.zeros(3, dtype=torch.float64), origins)
+    rng = torch.get_rng_state().clone()
+    value._zero_yaw_pose = table
+    actual = value.pose(ids, selected, torch.zeros(3, dtype=torch.float64), origins)
+    for field in fields(actual):
+        torch.testing.assert_close(getattr(actual, field.name), getattr(expected, field.name), atol=0, rtol=0)
+    assert torch.equal(torch.get_rng_state(), rng)
+    actual.root_pose_xyzw.zero_()
+    actual.joint_position.zero_()
+    again = value.pose(ids, selected, torch.zeros(3, dtype=torch.float64), origins)
+    torch.testing.assert_close(again.root_pose_xyzw, expected.root_pose_xyzw, atol=0, rtol=0)
+    torch.testing.assert_close(again.joint_position, expected.joint_position, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize('yaw,height', ((.317, 0.), (0., 2.)))
+def test_noncanonical_requests_keep_the_continuous_geometric_path(yaw, height):
+    value = source_reset()
+    args = (torch.tensor([0]), torch.tensor([0]), torch.tensor([yaw], dtype=torch.float64),
+            torch.tensor([[0., 0., height]], dtype=torch.float64))
+    expected = value.pose(*args)
+    # An unusable sentinel proves that these requests do not select the table.
+    value._zero_yaw_pose = object()
+    actual = value.pose(*args)
+    torch.testing.assert_close(actual.root_pose_xyzw, expected.root_pose_xyzw, atol=0, rtol=0)

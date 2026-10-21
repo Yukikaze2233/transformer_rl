@@ -329,3 +329,47 @@ def test_lab_collector_cross_rollout_reset_starts_a_fresh_window():
     assert second.episode_id.tolist() == [1, 1]
     assert batch1.windows.gather(torch.tensor([0]))[0, :, 0].tolist() == [0.] * 5
     assert batch2.windows.gather(torch.tensor([0]))[0, :, 0].tolist() == [0.] * 5
+
+
+def test_next_policy_reuse_preserves_partial_reset_behavior_and_action_rng():
+    model = StructuredActorCritic(StructuredPolicyConfig())
+    original = model.actor.policy.outputs
+    sizes = []
+
+    def outputs(history):
+        sizes.append(len(history))
+        return original(history)
+
+    model.actor.policy.outputs = outputs
+    collector = LabCollector(_PartialResetEnv(), model)
+    collector.reset()
+    rng = torch.get_rng_state().clone()
+    batch = collector.collect(steps=4)
+    after = torch.get_rng_state().clone()
+    # One initial forward and one next-endpoint forward per step. Timeout
+    # histories are separate, PRE-reset inputs and must still be evaluated.
+    assert sizes.count(2) == 5
+    assert sizes.count(1) > 0
+    torch.set_rng_state(rng)
+    for step in range(4):
+        indices = torch.arange(step * 2, (step + 1) * 2)
+        mean, _, _ = original(batch.windows.gather(indices))
+        torch.testing.assert_close(mean, batch.old_mean[indices], atol=0, rtol=0)
+        raw = torch.distributions.Normal(mean, batch.old_log_std[indices].exp()).sample()
+        torch.testing.assert_close(raw, batch.raw_action[indices], atol=0, rtol=0)
+    assert torch.equal(torch.get_rng_state(), after)
+
+
+def test_next_policy_cache_never_crosses_an_optimizer_boundary():
+    model = StructuredActorCritic(StructuredPolicyConfig())
+    collector = LabCollector(_PartialResetEnv(), model)
+    collector.reset()
+    collector.collect(steps=2)
+    with torch.no_grad():
+        for parameter in model.actor.policy.parameters():
+            parameter.add_(.001)
+    batch = collector.collect(steps=2)
+    for step in range(2):
+        indices = torch.arange(step * 2, (step + 1) * 2)
+        mean = model.actor.policy(batch.windows.gather(indices))
+        torch.testing.assert_close(mean, batch.old_mean[indices], atol=0, rtol=0)
