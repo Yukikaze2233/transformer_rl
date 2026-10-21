@@ -139,7 +139,48 @@ class LearningJournal:
         payload, kind = event['payload'], event['kind']
         if not isinstance(payload, dict):
             raise ValueError('journal event payload must be an object')
-        if kind == 'reserve':
+        if kind == 'recovery':
+            # A new journal may inherit spent budget without inventing lost
+            # weights. Existing failed journals remain permanently failed.
+            if self._sequence != 0 or self._head is not None or set(payload) != {
+                    'checkpoint', 'failed', 'provenance'}:
+                raise ValueError('recovery must be the first explicit event of a new journal')
+            checkpoint, failed = payload['checkpoint'], payload['failed']
+            fields = set(state) | {'identity_sha256', 'head'}
+            if (not isinstance(checkpoint, dict) or not isinstance(failed, dict)
+                    or set(checkpoint) != fields or set(failed) != fields
+                    or checkpoint['pending'] is not None or checkpoint['failed'] is not False
+                    or failed['pending'] is not None or failed['failed'] is not True
+                    or checkpoint['identity_sha256'] != failed['identity_sha256']
+                    or not isinstance(payload['provenance'], dict) or not payload['provenance']
+                    or not isinstance(checkpoint['head'], dict) or not isinstance(failed['head'], dict)
+                    or checkpoint['head']['sequence'] >= failed['head']['sequence']
+                    or not 0 < checkpoint['ppo_updates'] <= checkpoint['rollouts_reserved']
+                    < failed['rollouts_reserved'] <= self.spec.target_rollouts
+                    or not checkpoint['active_elapsed_s'] <= failed['active_elapsed_s'] == event['active_elapsed_s']):
+                raise ValueError('recovery needs a nonzero clean checkpoint and its later failed consumption')
+            size = self.spec.num_envs * self.spec.rollout_steps
+            for boundary in (checkpoint, failed):
+                if (any(type(boundary[k]) is not int or boundary[k] < 0 for k in self._ACTUAL)
+                        or type(boundary['rollouts_reserved']) is not int
+                        or boundary['reserved_transitions'] != boundary['rollouts_reserved'] * size
+                        or len(boundary['reserved_by_stage']) != self._stage_count
+                        or any(type(v) is not int or v < 0 for v in boundary['reserved_by_stage'])
+                        or sum(boundary['reserved_by_stage']) != boundary['rollouts_reserved']
+                        or not boundary['ppo_fresh_endpoints'] <= boundary['returned_transitions']
+                        <= boundary['attempted_transitions'] <= boundary['reserved_transitions']
+                        or boundary['ppo_fresh_endpoints'] != boundary['ppo_updates'] * size):
+                    raise ValueError('recovery budget or executed counters are inconsistent')
+            retired = {k: failed[k] - checkpoint[k] for k in self._ACTUAL}
+            if (any(v < 0 for v in retired.values())
+                    or any(b < a for a, b in zip(checkpoint['reserved_by_stage'], failed['reserved_by_stage']))):
+                raise ValueError('recovery cannot refund historical consumption')
+            prepared.update({k: checkpoint[k] for k in self._ACTUAL})
+            prepared.update({k: deepcopy(failed[k]) for k in
+                             ('rollouts_reserved', 'reserved_transitions', 'reserved_by_stage')})
+            prepared['recovery'] = deepcopy(payload)
+            prepared['retired_consumption'] = retired
+        elif kind == 'reserve':
             if (set(payload) != {'index', 'stage'} or type(payload['index']) is not int
                     or payload['index'] != state['rollouts_reserved'] + 1 or type(payload['stage']) is not int
                     or not 0 <= payload['stage'] < self._stage_count or state['pending'] is not None or state['failed']
@@ -200,6 +241,18 @@ class LearningJournal:
 
     def reserve(self, stage, *, active_elapsed_s):
         return self._append('reserve', {'index': self._state['rollouts_reserved'] + 1, 'stage': stage}, active_elapsed_s)
+
+    def import_failed_consumption(self, checkpoint, failed, *, provenance):
+        """New private fork only; the caller verifies the immutable source chain."""
+        if self._sequence != 0:
+            raise ValueError('recovery must be the first explicit event of a new journal')
+        return self._append('recovery', {'checkpoint': checkpoint, 'failed': failed,
+                                        'provenance': provenance}, failed['active_elapsed_s'])
+
+    def total_consumption(self):
+        """Executed work includes retired updates; live Adam counters do not."""
+        return {key: self._state[key] + self._state.get('retired_consumption', {}).get(key, 0)
+                for key in self._ACTUAL}
 
     def finish(self, actual, *, failed=False, active_elapsed_s):
         if self._state['pending'] is None:

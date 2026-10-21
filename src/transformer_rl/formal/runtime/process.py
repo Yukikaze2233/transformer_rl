@@ -71,7 +71,14 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
         with ExitStack() as stack:
             if resume_attempt is None:
                 specification = read_json(root / 'structured.json') or {}
-                if specification.get('source_transition_required'):
+                if specification.get('failed_recovery_required'):
+                    from .recovery import load_recovery
+
+                    journal = stack.enter_context(LearningJournal(
+                        root / 'journal', writable=True, authorized_boot=binding['boot_id']))
+                    restored = load_recovery(root, recipe, journal, binding)
+                    components = restored.components
+                elif specification.get('source_transition_required'):
                     from .transition import load_transition
 
                     journal = stack.enter_context(LearningJournal(
@@ -124,6 +131,8 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
                     metrics = loop.run_update()
                     if metrics is not None:
                         row = {'update': components.trainer.update_index,
+                               'budget_update': journal.summary()['rollouts_reserved'],
+                               'total_consumption': journal.total_consumption(),
                                'curriculum_stage': components.curriculum.stage,
                                'elapsed_s': time.perf_counter() - started,
                                'collection': collector.last_metrics,

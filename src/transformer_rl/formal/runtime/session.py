@@ -90,11 +90,14 @@ class StructuredTrainingSession(ManagedSession):
 
     @classmethod
     def create(cls, root, recipe, *, runtime_factory, runtime_configuration, resources,
-               python=sys.executable, learner_source=None, name=None, source_transition_required=False):
+               python=sys.executable, learner_source=None, name=None, source_transition_required=False,
+               failed_recovery_required=False):
         from ..learning.checkpoint import LearningRecipe
 
         if (not isinstance(recipe, LearningRecipe) or recipe.curriculum_promotion != 'exposure'
                 or type(source_transition_required) is not bool
+                or type(failed_recovery_required) is not bool
+                or source_transition_required and failed_recovery_required
                 or not re.fullmatch(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*', runtime_factory)):
             raise ValueError('structured session requires the complete exposure recipe and runtime factory')
         executable = Path(python).expanduser().absolute()
@@ -119,7 +122,8 @@ class StructuredTrainingSession(ManagedSession):
             'num_envs': recipe.num_envs, 'rollout_steps': recipe.rollout_steps, 'device': recipe.device,
             'recipe_sha256': recipe.sha256, 'runtime_factory': runtime_factory,
             'resources': resources, 'pins': pins, 'automatic_evaluation': False,
-            **({'source_transition_required': True} if source_transition_required else {})})
+            **({'source_transition_required': True} if source_transition_required else {}),
+            **({'failed_recovery_required': True} if failed_recovery_required else {})})
         write_json(root / 'structured.pin.json', file_pin(root.resolve() / 'structured.json'))
         return cls(root)
 
@@ -206,6 +210,12 @@ class StructuredTrainingSession(ManagedSession):
                 from .transition import transition_metadata
 
                 inherited = transition_metadata(self.root)
+                start, spent, transitions = (inherited[key] for key in
+                                             ('update', 'active_elapsed_s', 'returned_transitions'))
+            elif self.spec.get('failed_recovery_required'):
+                from .recovery import recovery_metadata
+
+                inherited = recovery_metadata(self.root)
                 start, spent, transitions = (inherited[key] for key in
                                              ('update', 'active_elapsed_s', 'returned_transitions'))
             descriptor = _lease(self.root)

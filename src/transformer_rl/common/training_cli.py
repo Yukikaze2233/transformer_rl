@@ -64,13 +64,17 @@ def render(state, *, width=84, color=False, message=""):
         intent = {"pause": "等待更新边界暂停", "resume": "等待继续确认", "stop": "等待保存退出"}
         label += " · " + intent.get(state.get("requested"), "等待确认")
     update, target = state.get("update", 0), state["target_update"]
-    ratio = min(1., max(0., update / target))
+    budget_update = state.get("budget_update", update)
+    ratio = min(1., max(0., budget_update / target))
     bar_width = max(10, inner - 23)
     filled = int(bar_width * ratio)
     bar = "━" * filled + "─" * (bar_width - filled)
     lines = ["TRAINING / 训练控制", "", f"{state['name']}   ·   {label}",
              f"{state['architecture']}    seed {state['seed']}    {state['device']}", "",
              f"{bar}  {ratio:6.1%}", f"更新  {update:,} / {target:,}"]
+    if state.get("retired_consumption"):
+        lines[6] = f"预算  {budget_update:,} / {target:,} · 保留模型更新  {update:,}"
+        lines.append(f"历史丢失更新仍计费  {state['retired_consumption']['ppo_updates']:,}")
     if state.get('structured'):
         lines += [f"{state['num_envs']} 环境 · {state['history_length']} 帧含当前 · 策略 100Hz / 物理 200Hz",
                   "闭链 12 / 6 · 按冻结配置保存 · 评估由人手动发起"]
@@ -81,7 +85,7 @@ def render(state, *, width=84, color=False, message=""):
                   str(state.get("active_cell") or "待调度")]
         if state.get("evaluation_seed") is not None:
             lines.append(f"开发评估 seed {state['evaluation_seed']} · 四 seed × 50 场景")
-    transitions = state.get("cumulative_transitions")
+    transitions = state.get("total_consumption", {}).get("returned_transitions", state.get("cumulative_transitions"))
     if transitions is not None:
         lines.append(f"累计采样  {transitions:,} transitions")
     lines.append("活动时间  " + _duration(state.get("session_active_elapsed_s", 0))

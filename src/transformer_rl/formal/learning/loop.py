@@ -63,6 +63,9 @@ class StructuredLearningLoop:
     def _publish(self, phase, **extra):
         state = self.journal.summary()
         self.control.publish(phase, update=self.components.trainer.update_index,
+                             budget_update=state['rollouts_reserved'],
+                             total_consumption=self.journal.total_consumption(),
+                             retired_consumption=state.get('retired_consumption', {}),
                              cumulative_transitions=state['returned_transitions'],
                              reserved_transitions=state['reserved_transitions'],
                              reserved_updates=state['rollouts_reserved'],
@@ -105,13 +108,19 @@ class StructuredLearningLoop:
     def _finish(self, status, reason):
         if self._report is not None:
             return self._report
-        if status == 'completed' and self.components.trainer.update_index != self.journal.spec.target_rollouts:
+        boundary = self.journal.checkpoint_boundary()
+        if status == 'completed' and (
+                boundary['rollouts_reserved'] != self.journal.spec.target_rollouts
+                or self.components.trainer.update_index != boundary['ppo_updates']
+                or not boundary.get('recovery') and boundary['ppo_updates'] != self.journal.spec.target_rollouts):
             raise ValueError('training completion requires the entire original update budget')
         sequence = self.control._request()['sequence']
         purpose = 'cold_learning_resume' if status == 'stopped' else 'training_budget_complete'
         path = self._save('final.pt', purpose=purpose, sequence=sequence)
         self._report = {'status': status, 'checkpoint': str(path),
                         'final_update': self.components.trainer.update_index,
+                        'budget_update': boundary['rollouts_reserved'],
+                        'total_consumption': self.journal.total_consumption(),
                         'cumulative_transitions': self.journal.summary()['returned_transitions'],
                         'stop_reason': reason}
         self._publish('stopping' if status == 'stopped' else 'checkpointing')
