@@ -110,6 +110,8 @@ def _parse_args(argv=None):
                         help="启用左右轮轮下/轮前 raycast 和 StairFSM")
     parser.add_argument("--terrain-profile", choices=("plane", "rough", "course"), default="plane")
     parser.add_argument('--terrain-atlas', type=Path, help='Prepared terrain atlas manifest; never a raw source USD')
+    parser.add_argument('--gui', action='store_true',
+                        help='Open the Isaac Lab window instead of headless mode')
     parser.add_argument('--profile-collection', action='store_true',
                         help='Diagnostic GPU fences and per-stage collection logs; disabled by default')
     parser.add_argument('--diagnostic-stage', type=int, choices=range(4),
@@ -151,7 +153,7 @@ def main(argv=None):
         raise ValueError('--diagnostic-only requires an explicit --diagnostic-stage')
 
     from .sdk import LabSimulation
-    launcher = LabSimulation(args.device)
+    launcher = LabSimulation(args.device, gui=args.gui)
     health = None
     try:
         import torch
@@ -287,7 +289,7 @@ def main(argv=None):
                 cfg.sim.physics, cfg.scene.robot, args.num_envs, args.device))
         if os.environ.get("LAB_SCAN_DEBUG") == "1":
             print("TRAIN before env construct", flush=True)
-        env = WheeledLabEnv(cfg)
+        env = WheeledLabEnv(cfg, render_mode=('human' if args.gui else None))
         health.check()
         if os.environ.get("LAB_SCAN_DEBUG") == "1":
             print("TRAIN after env construct", flush=True)

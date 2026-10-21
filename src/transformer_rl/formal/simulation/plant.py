@@ -217,6 +217,7 @@ class NativePhysicsPlant:
             'state_contact_read_s': ground_started - simulated_at,
             'ground_query_s': ground_finished - ground_started,
             'measurement_sensor_s': time.perf_counter() - ground_finished,
+            **{'contact_' + name: value for name, value in self.scene.contacts.last_timing.items()},
         }
         return result
 

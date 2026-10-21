@@ -24,14 +24,7 @@ class AssetDescription:
     manifest_sha256: str
 
     def _source_joints(self):
-        path = self.directory / "model_spec.json"
-        if path.is_symlink() or not path.is_file():
-            raise ValueError("joint velocity limits require the selected regular model source")
-        with path.open("rb") as source:
-            raw = source.read(256 * 1024 + 1)
-        expected = self.manifest.get("files_sha256", {}).get("model_spec.json")
-        if len(raw) > 256 * 1024 or hashlib.sha256(raw).hexdigest() != expected:
-            raise ValueError("joint velocity limits differ from the selected model source pin")
+        raw = self.bound_bytes('model_spec.json', maximum_bytes=256 * 1024)
         joints = json.loads(raw).get("joints")
         names = self.manifest["tree_joint_names"]
         if (not isinstance(joints, list) or len(joints) != len(names)
@@ -48,6 +41,29 @@ class AssetDescription:
         continuous = {joint['name'] for joint in self._source_joints()
                       if joint['type'] == 'continuous'}
         return tuple(name for name in self.manifest['tree_joint_names'] if name in continuous)
+
+    def bound_bytes(self, name: str, *, maximum_bytes: int = 8 * 1024 * 1024) -> bytes:
+        """Read a regular asset file only when it matches the manifest pin.
+
+        The one-time formal asset load authenticates the exact model, gas
+        spring, collision and SDK inputs. A path that redirects or a file that
+        changes after manifest admission must never reach a mechanical solve.
+        """
+        if (not isinstance(name, str) or not name or Path(name).is_absolute()
+                or '..' in Path(name).parts
+                or type(maximum_bytes) is not int or maximum_bytes < 1):
+            raise ValueError('bound asset path is not a manifest-relative regular file')
+        expected = self.manifest.get('files_sha256', {}).get(name)
+        if not isinstance(expected, str) or len(expected) != 64:
+            raise ValueError('asset file is absent from the frozen manifest pins')
+        path = self.directory / name
+        if (path.is_symlink() or not path.resolve().is_relative_to(self.directory)
+                or not path.is_file() or path.stat().st_size > maximum_bytes):
+            raise ValueError('asset file must be a regular file inside its bound directory and within the read cap')
+        raw = path.read_bytes()
+        if len(raw) > maximum_bytes or hashlib.sha256(raw).hexdigest() != expected:
+            raise ValueError('asset file bytes differ from the manifest pin: ' + name)
+        return raw
 
     def joint_velocity_limits(self) -> dict[str, float]:
         """Read source-defined solver limits in rad/s or m/s, not hardware certification."""
@@ -122,6 +138,18 @@ def load_asset_description(asset_directory, *, expected_manifest_sha256=None) ->
             raise ValueError("资产文件必须位于 asset 目录内")
     binding = MechanicalBinding.from_manifest(manifest, manifest["tree_joint_names"],
                                               manifest["rigid_body_names"])
+    # SDK-facing files are authenticated before Kit is asked to cook them.
+    def verify(name, cap):
+        expected = manifest.get("files_sha256", {}).get(name)
+        path = root / name
+        if (not isinstance(expected, str) or len(expected) != 64 or path.is_symlink()
+                or not path.resolve().is_relative_to(root) or not path.is_file()
+                or path.stat().st_size > cap):
+            raise ValueError("asset SDK file must be pinned and remain a regular file: " + name)
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError("asset SDK file bytes differ from the manifest pin: " + name)
+    verify(usd, 128 * 1024 * 1024)
+    verify(urdf, 16 * 1024 * 1024)
     height = manifest.get("nominal_base_height_m")
     if type(height) not in (int, float) or not math.isfinite(height) or height <= 0:
         raise ValueError("nominal_base_height_m 必须是有限正数")

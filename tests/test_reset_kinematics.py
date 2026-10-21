@@ -65,6 +65,20 @@ def test_batched_full_tree_matches_an_independent_matrix_and_quaternion_implemen
     assert actual.joint_axis_world.shape == (4, 18, 3)
 
 
+def test_body_pose_closure_replays_model_fk_and_detects_a_wrong_link_frame():
+    geometry, _, spec = fixture()
+    from test_joint_boundaries import forward_poses
+
+    q = geometry.nominal_tree_position[None].repeat(2, 1)
+    poses = forward_poses(spec, geometry.binding, q)
+    measured = geometry.closure_from_poses(poses.double())
+    torch.testing.assert_close(measured, geometry.closure(q), atol=2e-7, rtol=0)
+    wrong = poses.clone()
+    wrong[0, geometry.binding.native_body_names.index('L_link1'), :3] += .02
+    shifted = geometry.closure_from_poses(wrong.double())
+    assert not torch.allclose(shifted[0], measured[0], atol=1e-3, rtol=0)
+
+
 def test_loop_jacobian_matches_central_differences_for_every_native_coordinate():
     geometry, *_ = fixture()
     q = torch.linspace(-.1, .1, 18, dtype=torch.float64)[None].repeat(2, 1)

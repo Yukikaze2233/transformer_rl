@@ -9,9 +9,11 @@ from .terrain import NativeTerrainInstaller
 class NativeTerrainStream:
     """保留近身碰撞prim，不移动机器人、重置时钟或清空接触历史。"""
 
-    def __init__(self, installer: NativeTerrainInstaller, collision_geometry):
+    def __init__(self, installer: NativeTerrainInstaller, collision_geometry, *, interval_steps=1):
         if not isinstance(installer, NativeTerrainInstaller):
             raise TypeError('terrain stream requires its owned installer')
+        if type(interval_steps) is not int or interval_steps < 1:
+            raise ValueError('terrain stream interval must be a positive integer policy-step count')
         self.installer, self.environment = installer, installer.environment
         life = installer.lifecycle
         geometry = collision_geometry
@@ -36,6 +38,8 @@ class NativeTerrainStream:
         self.last_result = None
         self.last_changed_rows = 0
         self.resident_colliders = 0
+        self.interval_steps = interval_steps
+        self._steps_until_check = 0
 
     def _bind(self):
         scene = self.installer.lifecycle.plant.scene
@@ -72,6 +76,10 @@ class NativeTerrainStream:
         self._bind()
         if not self._tiled.any():
             return
+        if self._steps_until_check > 0:
+            self._steps_until_check -= 1
+            return
+        self._steps_until_check = self.interval_steps - 1
         scene, bridge = life.plant.scene, life.plant.scene.observation
         position = scene.robot.data.body_link_pose_w.torch[..., :2].double()
         velocity = scene.robot.data.body_com_vel_w.torch.double()

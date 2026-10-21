@@ -94,7 +94,7 @@ def build_robot_cfg(asset: AssetDescription, *,
             damping=group.damping,
             effort_limit=group.effort_limit,
             effort_limit_sim=group.effort_limit,
-            joint_velocity_limit={joint: velocity_limits[joint] for joint in group.names},
+            velocity_limit_sim={joint: velocity_limits[joint] for joint in group.names},
             **values,
         )
     return ArticulationCfg(

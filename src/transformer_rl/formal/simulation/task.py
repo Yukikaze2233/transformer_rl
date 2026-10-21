@@ -111,6 +111,14 @@ class NativeTaskEnvironment:
         self.last_timing = {}
         self.last_counts = {}
 
+    @property
+    def contact_peak_patch_count(self):
+        return self.lifecycle.plant.scene.contacts.peak_patch_count
+
+    @property
+    def contact_peak_patch_total(self):
+        return self.lifecycle.plant.scene.contacts.peak_patch_total
+
     def validate_collection_config(self, config):
         self.rewards.validate_collection_config(config)
 

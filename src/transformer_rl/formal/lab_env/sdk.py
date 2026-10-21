@@ -287,7 +287,7 @@ def verify_recovery_sdk_identity(session_root, *, authorized_boot, recipe_sha256
 class LabSimulation:
     """显式选择 Kit PhysX；GA 与 beta 的启动差异集中处理。"""
 
-    def __init__(self, device: str):
+    def __init__(self, device: str, *, gui: bool = False):
         from isaaclab import app
 
         self._scope = None
@@ -297,12 +297,20 @@ class LabSimulation:
         self._cuda_index = None
         if device.startswith('cuda'):
             self._cuda_index = int(device.split(':', 1)[1]) if ':' in device else 0
-        self.declarative_scene = callable(getattr(app, 'launch_simulation', None))
-        arguments = dict(headless=True, device=device, enable_cameras=False, livestream=0)
+        self.declarative_scene = callable(getattr(app, 'launch_simulation', None)) and not gui
+        arguments = dict(headless=not gui, device=device, enable_cameras=gui, livestream=0)
+        if gui:
+            # IsaacLab 3.0 selects the Kit viewport through the visualizer
+            # setting; headless=False alone creates no visible window.
+            arguments['visualizer'] = 'kit'
         argv = sys.argv
         try:
             sys.argv = [argv[0]]
-            if self.declarative_scene:
+            if gui:
+                # The declarative/kitless path does not create a visible Kit
+                # window. Use the standard AppLauncher for interactive GUI.
+                self._application = app.AppLauncher(**arguments).app
+            elif self.declarative_scene:
                 from isaaclab_physx.physics import PhysxCfg
 
                 # 显式 PhysxCfg 避免 GA 自动选择其他求解器或 kitless 后端。

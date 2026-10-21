@@ -49,6 +49,22 @@ def test_ga_uses_explicit_physx_context_and_current_settings(monkeypatch):
     assert events == ['enter', 'exit']
 
 
+def test_gui_uses_kit_visualizer_and_standard_launcher(monkeypatch):
+    modules = _modules(monkeypatch)
+    received = []
+
+    def launch(**kwargs):
+        received.append(kwargs)
+        return SimpleNamespace(app=SimpleNamespace(close=lambda: None))
+
+    modules['isaaclab.app'].AppLauncher = launch
+    simulation = LabSimulation('cuda:0', gui=True)
+    assert received == [dict(headless=False, device='cuda:0', enable_cameras=True,
+                             livestream=0, visualizer='kit')]
+    assert not simulation.declarative_scene
+    simulation.close()
+
+
 def test_beta_keeps_existing_launcher_and_settings(monkeypatch):
     modules = _modules(monkeypatch)
     events, settings = [], {}

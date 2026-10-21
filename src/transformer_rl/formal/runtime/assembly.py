@@ -136,6 +136,7 @@ class NativeTaskRuntime:
         editor = NativeTerrainEditor.on_admitted_context(sim, scene, tuning.terrain_edit)
         installer = NativeTerrainInstaller(env, source, editor)
         source.bind_native_installer(installer)
-        env.terrain_stream = NativeTerrainStream(installer, collision)
+        # 4 policy steps at <=5m/s move 0.2m, inside the stream's 0.25m pad.
+        env.terrain_stream = NativeTerrainStream(installer, collision, interval_steps=4)
         components.task_source = source
         return cls(env, source, installer)

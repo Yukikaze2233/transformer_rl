@@ -210,6 +210,12 @@ def runtime(recipe, components, configuration, *, control):
             'contact_measurement': env._contact_loads.receipt,
             'terrain_collision': env.terrain_collision_receipt,
             'startup_dynamics': env._startup_dynamics.receipt,
+            'mechanical_asset': (None if env._recovery_reset is None
+                                 else env._recovery_reset.receipt),
+            'gas_spring': (None if getattr(env, '_spring_source_sha256', None) is None
+                           else {'source_sha256': dict(env._spring_source_sha256),
+                                 'application': 'main_link_mount_force_and_com_torque',
+                                 'slider_effort': 'zero_target_with_manifest_damping_only'}),
             'sensors': {'configuration': configuration['sensors'],
                         'scope': 'actor encoder and IMU only; critic and supervision remain clean',
                         'timebase': 'past-only physical-clock samples; fresh reset projection',

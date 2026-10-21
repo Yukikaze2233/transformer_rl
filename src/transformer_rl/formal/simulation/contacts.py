@@ -7,6 +7,7 @@ starts index one shared buffer, never a lane-local subarray.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 
 import torch
 
@@ -112,6 +113,9 @@ class NativeTerrainContacts:
             group = _ContactGroup(torch.tensor(rows, device=self.device), view, sensors, filters, size, capacity)
             self._identity(group)
             self.groups.append(group)
+        self.last_timing = {}
+        self.peak_patch_count = 0
+        self.peak_patch_total = 0
 
     @staticmethod
     def _identity(group):
@@ -254,6 +258,10 @@ class NativeTerrainContacts:
             raise ValueError('native contact read requires the selected physical interval and same-batch float64 clock')
         if body_motion is not None:
             self._validate_motion(body_motion, physics_dt_s, timestamp_s)
+        started = time.perf_counter()
+        matrix_s = packet_s = layout_s = load_s = wheel_s = 0.
+        peak_count = torch.zeros((), dtype=torch.long, device=self.device)
+        peak_total = torch.zeros((), dtype=torch.long, device=self.device)
         bodies = len(self.binding.native_body_names)
         force = torch.zeros(self.num_envs, bodies, 3, device=self.device)
         load = torch.zeros(self.num_envs, bodies, device=self.device)
@@ -263,12 +271,16 @@ class NativeTerrainContacts:
             wheel_counts = torch.zeros(self.num_envs, 2, dtype=torch.long, device=self.device)
         for group in self.groups:
             self._identity(group)
+            part = time.perf_counter()
             matrix = self._convert(group.view.get_contact_force_matrix(dt=physics_dt_s))
+            matrix_s += time.perf_counter() - part
             expected = (len(group.sensor_paths), group.surface_count, 3)
             if (not isinstance(matrix, torch.Tensor) or matrix.shape != expected
                     or matrix.dtype != torch.float32 or matrix.device != self.device or not torch.isfinite(matrix).all()):
                 raise ValueError('native own-terrain force matrix shape/device/dtype or values differ')
+            part = time.perf_counter()
             packet = group.view.get_contact_data(dt=physics_dt_s)
+            packet_s += time.perf_counter() - part
             if len(packet) != 6:
                 raise ValueError('native contact patch tuple layout differs')
             normal_force, counts, starts = (self._convert(packet[index]) for index in (0, 4, 5))
@@ -276,19 +288,37 @@ class NativeTerrainContacts:
                     or counts.shape != expected[:2] or starts.shape != expected[:2]
                     or normal_force.device != self.device):
                 raise ValueError('native patch ranges do not match the bound sensor/filter matrix')
+            part = time.perf_counter()
             layout = self._patch_layout(normal_force, counts, starts, group.capacity)
+            layout_s += time.perf_counter() - part
+            part = time.perf_counter()
             normal, count = self._loads_from_layout(layout)
+            load_s += time.perf_counter() - part
+            peak_count = torch.maximum(peak_count, count.max())
+            peak_total = torch.maximum(peak_total, count.sum())
             force[group.rows] = matrix.reshape(len(group.rows), bodies, group.surface_count, 3).sum(2)
             load[group.rows] = normal.reshape(len(group.rows), bodies)
             patches[group.rows] = count.reshape(len(group.rows), bodies)
             if body_motion is not None:
+                part = time.perf_counter()
                 point, direction = (self._convert(packet[index]) for index in (1, 2))
                 values = self._wheel_motion(group, layout, point, direction, body_motion)
+                wheel_s += time.perf_counter() - part
                 for output, value in zip((*wheel_values, wheel_counts), values):
                     output[group.rows] = value
             self._identity(group)
         if not torch.isfinite(force).all():
             raise ValueError('native net force exceeds the published tensor range')
+        self.peak_patch_count = max(self.peak_patch_count, int(peak_count))
+        self.peak_patch_total = max(self.peak_patch_total, int(peak_total))
+        self.last_timing = {
+            'force_matrix_s': matrix_s,
+            'contact_data_s': packet_s,
+            'patch_layout_s': layout_s,
+            'patch_load_s': load_s,
+            'wheel_motion_s': wheel_s,
+            'total_s': time.perf_counter() - started,
+        }
         wheel_motion = None
         if body_motion is not None:
             wheel_motion = WheelContactMotion(*wheel_values, wheel_counts, wheel_counts > 0, timestamp_s.clone(),

@@ -40,6 +40,15 @@ class LabTerrainCourse:
         self.wheel_ground = torch.zeros(env.num_envs, 2, device=env._device)
         self.wheel_material = torch.zeros_like(self.wheel_ground)
         self._wheel_offsets = torch.tensor(wheels.local_xyz_m, dtype=torch.float32, device=env._device)
+        self._wheel_radius = torch.tensor(wheels.radius_m, dtype=torch.float32, device=env._device)
+        # Root-link-relative wheel centres from the selected closed chain. Do
+        # not reuse the drive-envelope track width as a vertical datum.
+        root_index = kin.binding.native_body_names.index('base_link')
+        self._wheel_centres_root = (centers - nominal.body_position_m[0, root_index, None]).float().to(env._device)
+        self._spawn_y_offset = self._measure_spawn_y_offsets()
+        self._reset_clearance_m = float(env._recovery_reset.config.clearance_m)
+        self._last_support_clearance = torch.full((env.num_envs,), float('nan'),
+                                                  dtype=torch.float32, device=env._device)
         self._ground_token = None
         # Match IsaacLab's default GridPatternCfg ordering: X changes fastest.
         x, y = torch.meshgrid(torch.linspace(-.5, .5, 11, device=env._device),
@@ -60,6 +69,60 @@ class LabTerrainCourse:
         self._course_stair_pending = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
         self._course_stair_height = torch.zeros(env.num_envs, device=env._device)
         self._last_stair_response = torch.zeros(env.num_envs, dtype=torch.long, device=env._device)
+
+    @staticmethod
+    def _rotate_xyzw(quaternion, vector):
+        imaginary, scalar = quaternion[..., :3], quaternion[..., 3]
+        cross = torch.linalg.cross(imaginary, vector)
+        return vector + 2 * (scalar[..., None] * cross
+                             + torch.linalg.cross(imaginary, cross))
+
+    @torch.no_grad()
+    def _measure_spawn_y_offsets(self):
+        """Choose an approach-line lateral offset with two supported wheels.
+
+        Terrain tiles are intentionally not all laterally symmetric (the
+        authored central-step asset has a lower side platform). A root at the
+        tile's nominal y=0 would therefore spawn one wheel above the surface.
+        The offset is selected from exact authored triangle heights and is a
+        reset placement choice, not a terrain observation or an actor input.
+        """
+        count = len(self.router.origins_table)
+        offsets = torch.linspace(-1.0, 1.0, 41, dtype=torch.float32,
+                                 device=self.env._device)
+        local = self._wheel_centres_root
+        approach = self.router.starts + .5
+        best = torch.zeros(count, dtype=torch.float32, device=self.env._device)
+        for tile in range(count):
+            if int(self.router.kinds[tile]) == int(TerrainKind.FLAT):
+                continue
+            origin = self.router.origins_table[tile]
+            # (candidate, wheel) -> world query point.
+            points = torch.stack((
+                (origin[0] + approach[tile] + local[:, 0]).expand(len(offsets), 2),
+                origin[1] + offsets[:, None] + local[None, :, 1],
+                torch.full((len(offsets), 2), self.query._ceiling_m,
+                           dtype=torch.float32, device=self.env._device),
+            ), -1).reshape(-1, 3)
+            heights, valid, _, _ = self.query(
+                points, torch.full((len(points),), tile, dtype=torch.long,
+                                   device=self.env._device))
+            heights = heights.reshape(len(offsets), 2)
+            valid = valid.reshape(len(offsets), 2)
+            score = (heights[:, 0] - heights[:, 1]).abs()
+            score = torch.where(valid.all(-1) & torch.isfinite(score), score,
+                                torch.full_like(score, float('inf')))
+            finite = torch.isfinite(score)
+            if not bool(finite.any()):
+                raise RuntimeError(
+                    f'terrain tile {tile} has no two-wheel-supported approach line')
+            best_score = score[finite].min()
+            tied = finite & (score <= best_score + 1e-8)
+            # Prefer the nominal centre line whenever it has equal support;
+            # do not spend downward runout on an arbitrary first tie.
+            choice = offsets.masked_fill(~tied, float('inf')).abs().argmin()
+            best[tile] = offsets[choice]
+        return best
 
     def _wheel_centres(self):
         env = self.env
@@ -194,9 +257,34 @@ class LabTerrainCourse:
         pose[:, :3] += origins
         # Spawn on the declared approach, rather than at the tile's first rise.
         nonflat = task.terrain_kind != 0
-        approach_x = self.router.starts[self.router.tile[ids]] + .5
+        tile = self.router.tile[ids]
+        approach_x = self.router.starts[tile] + .5
         pose[:, 0] += torch.where(nonflat, approach_x, 0.)
+        pose[:, 1] += torch.where(nonflat, self._spawn_y_offset[tile], 0.)
         pose[:, 2] = origins[:, 2] + ground + self.nominal_spawn_height_m
+        # The authored approach can contain a lower side platform. Correct the
+        # root height from the selected wheel colliders before writing it; a
+        # nominal flat spawn height alone would insert one wheel into geometry.
+        ordinary = task.mode != int(CommandMode.RECOVERY)
+        if ordinary.any():
+            rows = ordinary.nonzero(as_tuple=False).flatten()
+            wheel_points = pose[rows, :3][:, None, :] + self._rotate_xyzw(
+                pose[rows, 3:7][:, None, :], self._wheel_centres_root[None].to(pose.dtype))
+            wheel_points = wheel_points.to(torch.float32)
+            wheel_points[..., 2] = self.query._ceiling_m
+            query_tiles = tile.index_select(0, rows)[:, None].expand(-1, 2).contiguous()
+            heights, valid, _, _ = self.query(wheel_points, query_tiles)
+            if not valid.all():
+                raise RuntimeError('reset approach has no authored support under both wheel colliders')
+            # wheel bottom = root_z + local_z - radius. Raise only; never sink.
+            required = heights - self._wheel_centres_root[None, :, 2] + self._wheel_radius[None]
+            required = required + self._reset_clearance_m
+            adjusted = torch.maximum(pose[rows, 2:3], required.amax(-1, keepdim=True))
+            pose[rows, 2] = adjusted[:, 0]
+            gap = (pose[rows, 2, None] + self._wheel_centres_root[None, :, 2]
+                   - self._wheel_radius[None] - heights)
+            self._last_support_clearance[ids[rows]] = gap.amin(-1)
+        self._last_support_clearance[ids[~ordinary]] = float('nan')
         reverse = (task.command[:, 0] < 0) & (task.terrain_kind != 0)
         pose[reverse, 5] = 1
         pose[reverse, 6] = 0
@@ -380,6 +468,8 @@ class LabTerrainCourse:
 
     def metrics(self):
         return {'atlas_sha256': self.router.identity,
+                'spawn_lateral_offsets_m': self._spawn_y_offset.tolist(),
+                'spawn_lateral_offset_scope': 'exact_authored_two_wheel_approach_line',
                 'task_kind_histogram': self.tasks.kind_counts.tolist(),
                 'task_mode_histogram': self.tasks.mode_counts.tolist(),
                 'level_histogram': torch.bincount(self.router.level, minlength=self.router.manifest['levels']).tolist(),

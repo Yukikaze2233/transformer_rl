@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+import math
 import os
 import time
 
@@ -39,6 +40,7 @@ from ..tasks.termination import NativeTaskLimits, PhysicalFailureLatch
 from .recover import LabRecoverTask, RecoverTaskSpec
 from .recovery import LabRecoveryReset, _RecoveryPreparation
 from .materials import WheelMaterialReader
+from .spring_force_element import SpringForceElement
 from .isolation import author_shared_ground_groups, isolate_scene
 from .observations import LabObservationBuilder
 from .settings import LabEnvSettings, load_asset_description
@@ -46,6 +48,7 @@ from .terrain_collision import partition_static_collision
 from .dynamics import LabStartupDynamics
 from .sensors import LabSensorModel
 from .joint_coordinates import ContinuousJointCoordinates
+from .mechanics import NativeLoopTelemetry
 
 
 class WheeledLabEnv(DirectRLEnv):
@@ -80,6 +83,9 @@ class WheeledLabEnv(DirectRLEnv):
         self._joint_coordinates = ContinuousJointCoordinates(
             self._as_torch(self.robot.data.joint_pos), self._binding.native_joint_names,
             self._asset.continuous_joint_names(), float(self.physics_dt))
+        model_spec = json.loads(self._asset.bound_bytes('model_spec.json', maximum_bytes=256 * 1024))
+        self._loop_telemetry = NativeLoopTelemetry(
+            model_spec['constraints'], self.robot.body_names, self.num_envs, self._device)
         self._terrain_course = None
         self._completed_estimate = None
         self._active_indices = torch.tensor(self._binding.policy_joint_indices,
@@ -124,6 +130,22 @@ class WheeledLabEnv(DirectRLEnv):
         self._terminal_critic_182 = None
         self._ground_at_root = torch.zeros(self.num_envs, dtype=torch.float32, device=self._device)
         self._pressure = self._build_pressure()
+        self._spring_force = self._build_spring_force()
+        self._spring_strength = torch.ones(self.num_envs, 1, dtype=torch.float32, device=self._device)
+        self._spring_pressure_frame = None
+        self._spring_source_sha256 = getattr(self, '_spring_source_sha256', {})
+        # Rollout-level mechanical telemetry. Accumulate device tensors here;
+        # read them once at the collector boundary, not per physics substep.
+        self._spring_mount_min = torch.full((), float('inf'), dtype=torch.float32, device=self._device)
+        self._spring_mount_max = torch.full((), -float('inf'), dtype=torch.float32, device=self._device)
+        self._spring_compression_min = torch.full((), float('inf'), dtype=torch.float32, device=self._device)
+        self._spring_compression_max = torch.full((), -float('inf'), dtype=torch.float32, device=self._device)
+        self._spring_force_max = torch.full((), 0., dtype=torch.float32, device=self._device)
+        self._last_reset_closure_max = None
+        self._last_reset_q_closure_max = None
+        self._last_reset_pose_closure_max = None
+        self._last_reset_native_closure_max = None
+        self._last_reset_support_clearance = None
         self._observations = LabObservationBuilder(self._binding, self.num_envs,
                                                    device=self._device,
                                                    history_length=self.cfg.history_length)
@@ -268,10 +290,64 @@ class WheeledLabEnv(DirectRLEnv):
     def terrain_collision_receipt(self):
         return self._course_collision_receipt
 
+    def reset_mechanical_metrics(self):
+        self._loop_telemetry.clear_window()
+        self._spring_mount_min.fill_(float('inf'))
+        self._spring_mount_max.fill_(-float('inf'))
+        self._spring_compression_min.fill_(float('inf'))
+        self._spring_compression_max.fill_(-float('inf'))
+        self._spring_force_max.zero_()
+        self._last_reset_closure_max = None
+        self._last_reset_q_closure_max = None
+        self._last_reset_pose_closure_max = None
+        self._last_reset_native_closure_max = None
+        self._last_reset_support_clearance = None
+
+    @property
+    def mechanical_metrics(self):
+        """Rollout mechanical evidence, read only at the collection boundary."""
+        def scalar(value):
+            if value is None:
+                return None
+            value = float(value.detach().cpu())
+            return value if math.isfinite(value) else None
+        return {
+            'reset_closure_before_m': scalar(self._last_reset_closure_max),
+            'reset_q_closure_after_physics_m': scalar(self._last_reset_q_closure_max),
+            'reset_body_pose_closure_after_physics_m': scalar(self._last_reset_pose_closure_max),
+            'reset_closure_after_physics_m': scalar(self._last_reset_native_closure_max),
+            'reset_support_clearance_m': scalar(self._last_reset_support_clearance),
+            'spring_mount_distance_min_m': scalar(self._spring_mount_min),
+            'spring_mount_distance_max_m': scalar(self._spring_mount_max),
+            'spring_compression_min_m': scalar(self._spring_compression_min),
+            'spring_compression_max_m': scalar(self._spring_compression_max),
+            'spring_pressure_force_max_n': scalar(self._spring_force_max),
+            'spring_source_sha256': dict(self._spring_source_sha256),
+            'reset_readback_scope': 'forward(dt=0), before the next physical substep',
+            **self._loop_telemetry.summary(),
+        }
+
+    def _build_spring_force(self):
+        """Use the authenticated v7 main-link gas-spring mount path."""
+        if (len(self._binding.native_body_names) != 19
+                or len(self._binding.tree_joint_names) != 18
+                or len(self._asset.manifest.get('spring_joint_names', [])) != 2):
+            return None
+        model_spec = json.loads(self._asset.bound_bytes('model_spec.json', maximum_bytes=256 * 1024))
+        fit = json.loads(self._asset.bound_bytes('fit_10mpa.json', maximum_bytes=64 * 1024))
+        element = SpringForceElement(model_spec, self._asset.manifest, fit, self.robot.body_names,
+                                     self._device, dtype=torch.float32)
+        # Keep the source byte identities beside the applied force path so a
+        # native report can distinguish this mechanism from a later asset.
+        self._spring_source_sha256 = {
+            'model_spec.json': self._asset.manifest['files_sha256']['model_spec.json'],
+            'fit_10mpa.json': self._asset.manifest['files_sha256']['fit_10mpa.json'],
+        }
+        return element
+
     def _build_pressure(self):
-        asset = self._asset.directory
-        model = json.loads((asset / "model_spec.json").read_text())
-        fit = json.loads((asset / "fit_10mpa.json").read_text())
+        model = json.loads(self._asset.bound_bytes('model_spec.json', maximum_bytes=256 * 1024))
+        fit = json.loads(self._asset.bound_bytes('fit_10mpa.json', maximum_bytes=64 * 1024))
         parameters = PressureParameters.from_asset(self._asset.manifest, model, fit)
         return NativeSliderPressure(parameters, self.num_envs, device=str(self._device))
 
@@ -650,12 +726,34 @@ class WheeledLabEnv(DirectRLEnv):
             ).mean_effort
         else:
             effort = feedback.capped_effort
-        pressure = self._pressure.evaluate(
-            self._as_torch(self.robot.data.joint_pos).index_select(1, self._spring_indices),
-        )
+        # Gas pressure is a main-link mount force/torque, not a second
+        # prismatic slider effort. Slider damping remains in the actuator cfg.
+        if self._spring_force is not None:
+            frame = self._spring_force.evaluate(
+                self._as_torch(self.robot.data.body_link_pose_w),
+                self._as_torch(self.robot.data.body_com_pose_w)[..., :3],
+                self._spring_strength,
+            )
+            if not bool(frame.valid.all()):
+                raise FloatingPointError('invalid gas-spring mount geometry before physics')
+            self._spring_pressure_frame = frame
+            self._spring_mount_min = torch.minimum(
+                self._spring_mount_min, frame.mount_distance_m.amin())
+            self._spring_mount_max = torch.maximum(
+                self._spring_mount_max, frame.mount_distance_m.amax())
+            self._spring_compression_min = torch.minimum(
+                self._spring_compression_min, frame.compression_m.amin())
+            self._spring_compression_max = torch.maximum(
+                self._spring_compression_max, frame.compression_m.amax())
+            self._spring_force_max = torch.maximum(
+                self._spring_force_max, frame.pressure_force_n.abs().amax())
+            self.robot.instantaneous_wrench_composer.add_forces_and_torques_index(
+                forces=frame.forces_world.contiguous(),
+                torques=frame.torques_about_com_world.contiguous(),
+                body_ids=list(self._spring_force.body_ids), is_global=True,
+            )
         command = torch.zeros(self.num_envs, 18, dtype=torch.float32, device=self._device)
         command.index_copy_(1, self._active_indices, effort)
-        command.index_copy_(1, self._spring_indices, pressure.slider_effort_n)
         self.robot.set_joint_effort_target(command)
         self._last_effort.copy_(effort)
 
@@ -762,6 +860,9 @@ class WheeledLabEnv(DirectRLEnv):
                 self.sim.render(skip_app_pumping=not self.render_enabled)
             self.scene.update(dt=self.physics_dt)
             self._physical_tick += 1
+            self._loop_telemetry.observe_physics(
+                self._as_torch(self.robot.data.body_link_pose_w),
+                self._as_torch(self.robot.data.joint_vel))
             self._observe_substep()
         self.episode_length_buf += 1
         self.common_step_counter += 1
@@ -886,6 +987,10 @@ class WheeledLabEnv(DirectRLEnv):
         root_pose[:, :3] += self.scene.env_origins.index_select(0, ids)
         if self._terrain_course is not None:
             self._terrain_course.place_reset(ids, task_sample, root_pose)
+            support = self._terrain_course._last_support_clearance.index_select(0, ids)
+            support = support[torch.isfinite(support)]
+            self._last_reset_support_clearance = (
+                support.amin() if support.numel() else None)
         root_velocity = torch.zeros(count, 6, dtype=torch.float32, device=self._device)
         joint_position = self._as_torch(self.robot.data.default_joint_pos).index_select(0, ids).clone()
         joint_velocity = torch.zeros_like(joint_position)
@@ -894,6 +999,15 @@ class WheeledLabEnv(DirectRLEnv):
             root_velocity = recover_plan.root_velocity
             joint_position = recover_plan.joint_position
             joint_velocity = recover_plan.joint_velocity
+        if self._recovery_reset is not None and task_sample is not None:
+            # Ordinary birth is the selected asset's nominal closed chain, not
+            # an SDK default that may be reordered or changed by an exporter.
+            tree_order = [self._binding.native_joint_names.index(name)
+                          for name in self._binding.tree_joint_names]
+            nominal_native = self._recovery_reset.kinematics.nominal_tree_position.new_zeros(18)
+            nominal_native[tree_order] = self._recovery_reset.kinematics.nominal_tree_position
+            joint_position.copy_(nominal_native.to(self._device).float().expand(count, -1))
+            joint_velocity.zero_()
         if task_sample is not None:
             recovery_rows = task_sample.mode == int(CommandMode.RECOVERY)
             if recovery_rows.any():
@@ -908,9 +1022,27 @@ class WheeledLabEnv(DirectRLEnv):
                     recovery_ids.cpu(), task_sample.draw.recovery_posture.index_select(0, local).cpu(),
                     torch.zeros(local.numel(), dtype=torch.float64), origins)
                 root_pose[local] = pose.root_pose_xyzw
-                joint_position[local] = pose.joint_position
+                # LabRecoveryReset returns the asset's manifest-native joint
+                # order. The Articulation tensor follows the SDK body/joint
+                # order, so map by name instead of assuming both exporters kept
+                # the same ordering.
+                asset_joint_order = [self._recovery_reset.kinematics.binding.native_joint_names.index(name)
+                                     for name in self._binding.native_joint_names]
+                joint_position[local] = pose.joint_position.index_select(
+                    1, torch.tensor(asset_joint_order, device=self._device))
                 root_velocity[local] = pose.root_com_velocity
                 joint_velocity[local] = pose.joint_velocity
+        if self._recovery_reset is not None:
+            # Validate the exact q18 written to physics against the selected
+            # closed-chain source. Nominal/recovery solver output must already
+            # satisfy this; a bad branch must not enter the native solver.
+            tree_order = [self._binding.native_joint_names.index(name)
+                          for name in self._binding.tree_joint_names]
+            q_tree = joint_position.index_select(1, torch.tensor(tree_order, device=self._device)).double().cpu()
+            closure = self._recovery_reset.kinematics.closure(q_tree).norm(dim=-1).amax(-1)
+            if not torch.isfinite(closure).all() or (closure > 2e-6).any():
+                raise RuntimeError('reset q18 violates the selected closed-chain residual bound')
+            self._last_reset_closure_max = closure.max()
         self.robot.write_root_link_pose_to_sim_index(root_pose=root_pose, env_ids=ids)
         self.robot.write_root_com_velocity_to_sim_index(root_velocity=root_velocity, env_ids=ids)
         self.robot.write_joint_position_to_sim_index(position=joint_position, env_ids=ids)
@@ -919,6 +1051,38 @@ class WheeledLabEnv(DirectRLEnv):
         self.scene.write_data_to_sim()
         self.sim.forward()
         self.scene.update(dt=0.0)
+        self._loop_telemetry.observe_reset(
+            self._as_torch(self.robot.data.body_link_pose_w), ids)
+        if self._recovery_reset is not None:
+            # Readback admission after the native write. The source residual
+            # above is a solver claim; this is what PhysX actually accepted.
+            native_q = self._as_torch(self.robot.data.joint_pos).index_select(0, ids)
+            native_q = native_q.index_select(1, torch.tensor(tree_order, device=self._device))
+            native_closure = self._recovery_reset.kinematics.closure(
+                native_q.double().cpu()).norm(dim=-1).amax(-1)
+            if not torch.isfinite(native_closure).all():
+                raise RuntimeError('native reset readback contains nonfinite closed-chain state')
+            native_poses = self._as_torch(self.robot.data.body_link_pose_w).index_select(0, ids)
+            asset_body_order = [
+                self._binding.native_body_names.index(name)
+                for name in self._recovery_reset.kinematics.binding.native_body_names
+            ]
+            native_poses_asset = native_poses.index_select(
+                1, torch.tensor(asset_body_order, device=self._device))
+            native_pose_closure = self._recovery_reset.kinematics.closure_from_poses(
+                native_poses_asset).norm(dim=-1).amax(-1)
+            self._last_reset_q_closure_max = native_closure.max()
+            self._last_reset_pose_closure_max = native_pose_closure.cpu().max()
+            self._last_reset_native_closure_max = torch.maximum(
+                native_closure, native_pose_closure.cpu()).max()
+            if not torch.isfinite(native_pose_closure).all():
+                raise RuntimeError('native body-pose readback contains nonfinite closure')
+            if bool((native_pose_closure > 0.01).any()):
+                bad = (native_pose_closure > 0.01).nonzero().flatten()
+                raise RuntimeError(
+                    'native body-pose readback violates the 10mm closed-chain evidence bound: '
+                    f'max={float(native_pose_closure.max()):.6g} rows={bad[:8].tolist()} '
+                    f'per_constraint_max={native_pose_closure.max(0).values.tolist()}')
         if self._contact_loads is not None:
             self._contact_loads.reset_rows(ids, self._physical_tick)
         if self._scan_debug:

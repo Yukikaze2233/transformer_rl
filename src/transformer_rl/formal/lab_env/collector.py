@@ -45,6 +45,7 @@ class LabCollector:
         self.returned_vector_steps = 0
         self.last_metrics = {}
         self.last_timing = {}
+        self._mechanics_started = False
         if type(profile) is not bool:
             raise TypeError('collection profiling requires an explicit bool')
         self._profile = profile
@@ -91,6 +92,10 @@ class LabCollector:
         cause_counts = torch.zeros(len(cause_names), dtype=torch.long, device=self.device)
         environment_timing: dict[str, float] = {}
         raw_env = getattr(self.env, 'env', None)
+        reset_mechanics = getattr(raw_env, 'reset_mechanical_metrics', None)
+        if callable(reset_mechanics) and self._mechanics_started:
+            reset_mechanics()
+        self._mechanics_started = True
         formal_reward = getattr(raw_env, '_formal_reward', None)
         telemetry = RolloutTelemetry(self.num_envs, self.device,
                                      missing_terms=getattr(formal_reward, 'missing_term_reasons', {}))
@@ -268,4 +273,7 @@ class LabCollector:
         }
         if environment_timing:
             self.last_metrics["environment_host_wall_s"] = environment_timing
+        mechanical = getattr(raw_env, 'mechanical_metrics', None)
+        if mechanical is not None:
+            self.last_metrics['mechanical'] = mechanical
         return batch

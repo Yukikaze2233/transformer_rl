@@ -73,11 +73,13 @@ class PostureContinuation:
 
 
 class AssetResetKinematics:
-    """Batched full-3D tree/Jacobian, with bounded damped passive-only updates.
+    """Batched full-3D tree/Jacobian, with bounded reduced-QR passive updates.
 
     Units are metres and radians. The slider increment scale is explicit and
     differs from angle increments; all original passive limits remain enforced.
-    Each row keeps its own residual/damping and may fail independently.
+    Full-rank closure rows use the source mapper's reduced-QR kernel. A
+    rank-deficient row (a compliant slide outside the six loop equations) uses
+    minimum-norm Levenberg fallback and keeps its own residual/damping budget.
     """
 
     def __init__(self, manifest_bytes, model_spec_bytes, binding: MechanicalBinding, *, device='cpu'):
@@ -144,6 +146,10 @@ class AssetResetKinematics:
         self._lower = torch.tensor(lower, dtype=torch.float64, device=self.device)
         self._upper = torch.tensor(upper, dtype=torch.float64, device=self.device)
         self._prismatic = torch.tensor([kind == 'prismatic' for kind in self._kinds], device=self.device)
+        # Reduced QR treats the six three-row loop residuals as the overdetermined
+        # 18-row closure system. The same cutoff discovers slide-only null
+        # directions that need the explicit fallback below.
+        self._rank_rtol = 18 * torch.finfo(torch.float64).eps
         self._ancestors = ancestors.to(self.device)
         policy_names = tuple(binding.native_joint_names[i] for i in binding.policy_joint_indices)
         self.policy_tree_indices = tuple(binding.tree_joint_names.index(name) for name in policy_names)
@@ -211,6 +217,40 @@ class AssetResetKinematics:
                 rotations[child], positions[child] = rotation @ motion, position
         return TreeKinematics(torch.stack(rotations, 1), torch.stack(positions, 1),
                               torch.stack(axes, 1), torch.stack(pivots, 1))
+
+    @torch.no_grad()
+    def closure_from_poses(self, body_link_pose_world_xyzw):
+        """Measure the six source loop anchors from actual native body poses.
+
+        Joint-coordinate closure proves the source model was solved. This
+        second check is the native link-frame readback that detects an exporter
+        or frame mismatch between the selected URDF/model_spec and the USD.
+        """
+        if (not isinstance(body_link_pose_world_xyzw, torch.Tensor)
+                or body_link_pose_world_xyzw.ndim != 3
+                or body_link_pose_world_xyzw.shape[1:] != (len(self.binding.native_body_names), 7)
+                or not torch.isfinite(body_link_pose_world_xyzw).all()):
+            raise ValueError('native closure requires finite [N,19,7] body-link poses')
+        poses = body_link_pose_world_xyzw.to(device=self.device, dtype=torch.float64)
+        quaternion = poses[..., 3:7]
+        norm = quaternion.norm(dim=-1, keepdim=True)
+        if (norm <= 0).any():
+            raise ValueError('native body quaternion collapsed')
+        q = quaternion / norm
+        local = self._loop_points.unsqueeze(0).expand(len(poses), -1, -1, -1)
+        body = poses[:, self._loop_bodies, :3]
+        rotation = self._quaternion_rotation(q[:, self._loop_bodies])
+        anchors = body + (rotation @ local.unsqueeze(-1)).squeeze(-1)
+        return anchors[:, :, 0] - anchors[:, :, 1]
+
+    @staticmethod
+    def _quaternion_rotation(quaternion):
+        x, y, z, w = quaternion.unbind(-1)
+        return torch.stack((
+            1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
+            2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
+            2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y),
+        ), -1).reshape(*quaternion.shape[:-1], 3, 3)
 
     @torch.no_grad()
     def closure(self, tree_position, *, jacobian=False):
@@ -289,10 +329,13 @@ class AssetResetKinematics:
         q[:, passive] = q[:, passive].clamp(low, high)
         scale = torch.where(self._prismatic[passive], q.new_tensor(slider_scale_m), q.new_tensor(1.))
         step_bound = torch.where(self._prismatic[passive], q.new_tensor(slider_step_m), q.new_tensor(angular_step_rad))
-        damping = torch.full((count,), initial_damping_m2, dtype=torch.float64, device=self.device)
-        identity = torch.eye(len(passive), dtype=torch.float64, device=self.device)
+        # The passive closure uses the same reduced-QR fixed-iteration kernel
+        # as the source reset mapper. A damped normal-equation solve changes
+        # the descent direction and hides rank deficiency; neither is suitable
+        # for a reset admitted to native physics.
         iterations = 0
         rounds = torch.zeros(count, dtype=torch.long, device=self.device)
+        damping = torch.full((count,), initial_damping_m2, dtype=torch.float64, device=self.device)
         for iteration in range(maximum_iterations):
             residual, jac = self.closure(q, jacobian=True)
             ready = residual.norm(dim=-1).amax(-1) <= closure_tolerance_m
@@ -300,19 +343,52 @@ class AssetResetKinematics:
             if not active.any():
                 break
             rounds += active.long()
-            jac = jac[:, :, passive] * scale[None, None]
-            flat = residual.flatten(1)
-            normal = jac.transpose(-1, -2) @ jac + damping[:, None, None] * identity
-            rhs = -(jac.transpose(-1, -2) @ flat[:, :, None])
-            delta = torch.linalg.solve(normal, rhs).squeeze(-1) * scale
+            matrix = jac[:, :, passive] * scale[None, None]
+            rhs = -residual.flatten(1)
+            finite = torch.isfinite(matrix).all(dim=(-2, -1)) & torch.isfinite(rhs).all(-1)
+            singular = torch.linalg.svdvals(matrix)
+            full_rank = finite & (singular[:, -1] > self._rank_rtol * singular[:, 0])
+            # A spring slide can be a null direction of the six loop
+            # constraints. It remains at its seed coordinate instead of making
+            # the whole row fail or receiving an arbitrary damped displacement.
+            # Full-rank rows use reduced QR; rank-deficient rows use the
+            # explicit Levenberg fallback with the same QR-space scaling.
+            eye = torch.eye(matrix.shape[-2], matrix.shape[-1], dtype=torch.float64,
+                            device=self.device).expand(count, -1, -1)
+            qr_matrix = torch.where(full_rank[:, None, None], matrix, eye)
+            qr_rhs = torch.where(full_rank[:, None], rhs, 0.)
+            orthogonal, triangular = torch.linalg.qr(qr_matrix, mode='reduced')
+            qr_solution = torch.linalg.solve_triangular(
+                triangular, orthogonal.transpose(-1, -2) @ qr_rhs[:, :, None],
+                upper=True).squeeze(-1)
+            # Rank-deficient closure is possible when a compliant slide is a
+            # null direction of the loop equations. A small explicit
+            # Levenberg term keeps the minimum-norm fallback finite without
+            # changing the direction used by the full-rank QR path.
+            eye_k = torch.eye(matrix.shape[-1], dtype=torch.float64,
+                              device=self.device).expand(count, -1, -1)
+            safe_matrix = torch.where(finite[:, None, None], matrix, eye)
+            safe_rhs = torch.where(finite[:, None], rhs, 0.)
+            normal = safe_matrix.transpose(-1, -2) @ safe_matrix
+            normal += eye_k * damping[:, None, None]
+            damped = torch.linalg.solve(
+                normal, (safe_matrix.transpose(-1, -2) @ safe_rhs[:, :, None])).squeeze(-1)
+            solved = torch.where(full_rank[:, None], qr_solution, damped)
+            solved = torch.where(finite[:, None], solved, 0.)
+            delta = solved * scale
             fraction = (step_bound / delta.abs().clamp_min(1e-30)).amin(-1).clamp_max(1)
             delta *= fraction[:, None]
             candidate = q.clone()
             candidate[:, passive] = (q[:, passive] + delta).clamp(low, high)
             candidate_residual = self.closure(candidate)
-            improved = (candidate_residual.square().sum((-1, -2)) < residual.square().sum((-1, -2))) & active
+            improved = (candidate_residual.square().sum((-1, -2))
+                        < residual.square().sum((-1, -2))) & active
             q = torch.where(improved[:, None], candidate, q)
-            damping = torch.where(improved, damping * .3, damping * 10).clamp(1e-14, 1e4)
+            # The QR lane has no damping term; only the rank-deficient
+            # fallback adapts its explicit Levenberg regularization.
+            damping = torch.where(full_rank, damping,
+                                  torch.where(improved, damping * .3, damping * 10)
+                                  .clamp(1e-14, 1e4))
             iterations = iteration + 1
         residual = self.closure(q).norm(dim=-1)
         within = ((q >= self._lower - 1e-12) & (q <= self._upper + 1e-12)).all(-1)

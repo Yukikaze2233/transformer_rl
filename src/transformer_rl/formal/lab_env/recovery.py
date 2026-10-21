@@ -162,7 +162,7 @@ class LabRecoveryReset:
             raise TypeError("config 必须是 RecoveryResetConfig")
         self.asset, self.num_envs, self.device, self.config = asset, num_envs, torch.device(device), config
         raw = (asset.directory / "manifest.json").read_bytes()
-        spec = (asset.directory / "model_spec.json").read_bytes()
+        spec = asset.bound_bytes("model_spec.json", maximum_bytes=256 * 1024)
         if (hashlib.sha256(raw).hexdigest() != asset.manifest_sha256
                 or asset.manifest.get("files_sha256", {}).get("model_spec.json")
                 != hashlib.sha256(spec).hexdigest()):
@@ -182,6 +182,37 @@ class LabRecoveryReset:
                               torch.zeros(16, 3, dtype=torch.float64))
             if table.root_pose_xyzw[:, :2].eq(0).all():
                 self._zero_yaw_pose = table
+        fit = json.loads(asset.bound_bytes('fit_10mpa.json', maximum_bytes=64 * 1024))
+        nominal_closure = self.kinematics.closure(
+            self.kinematics.nominal_tree_position[None]).norm(dim=-1).amax()
+        self.receipt = {
+            'format': 'selected_mechanical_asset_receipt_v1',
+            'manifest_sha256': asset.manifest_sha256,
+            'model_spec_sha256': self.kinematics.model_sha256,
+            'body_count': len(asset.binding.native_body_names),
+            'tree_joint_count': len(asset.binding.tree_joint_names),
+            'constraint_count': len(self.kinematics.constraint_names),
+            'native_joint_names': list(asset.binding.native_joint_names),
+            'native_body_names': list(asset.binding.native_body_names),
+            'nominal_closure_max_m': float(nominal_closure),
+            'recovery_postures': 16,
+            'zero_yaw_pose_cached': self._zero_yaw_pose is not None,
+            'source_pins': {name: asset.manifest['files_sha256'][name]
+                            for name in ('model_spec.json', 'fit_10mpa.json',
+                                         'gas_spring_binding.json', 'mechanical_limits.json',
+                                         'robot.urdf', 'robot.usda')},
+            'gas_spring': {
+                'pressure_mpa': fit['pressure_mpa'],
+                'monomial_coefficients_n': list(fit['monomial_coefficients_n']),
+                'stroke_m': fit['stroke_m'],
+                'slider_damping_source': 'manifest.passive_damping.slider_N_s_per_m',
+            },
+            'collision_mesh_pins': list(self.geometry.source_mesh_pins),
+            'manifest_training_ready': bool(asset.manifest.get('training_ready', False)),
+            'manifest_physics_qualified': bool(asset.manifest.get('physics_qualified', False)),
+            'physical_qualification': False,
+            'scope': 'static source/kinematics/collision identity; native qualification remains separate',
+        }
 
     def _build_flat_courses(self):
         # 每个环境都需要独立、可验证的 flat course；几何只读且不含随机起伏。
