@@ -110,7 +110,7 @@ def test_sdk_open_failure_is_published_without_building_a_scene(tmp_path, monkey
     # control/lifecycle test so this test cannot create a CUDA context.
     monkeypatch.setattr(module, 'parse_configuration', lambda *_: (None, None, None, None, None, {}, None, None, None))
     failures = []
-    control = SimpleNamespace(binding={'boot_id': boot_id()}, fail=failures.append)
+    control = SimpleNamespace(binding={'boot_id': boot_id(), 'root': str(tmp_path)}, fail=failures.append)
     fake_package, fake_app = ModuleType('isaaclab'), ModuleType('isaaclab.app')
 
     def unavailable(**_kwargs):
@@ -131,7 +131,7 @@ def test_fatal_failure_never_enters_sdk_shutdown_that_can_exit_zero(tmp_path, mo
     monkeypatch.setattr(module, 'parse_configuration',
                         lambda *_: (None, None, None, None, None, {}, None, None, None))
     failures, closed = [], []
-    control = SimpleNamespace(binding={'boot_id': boot_id()}, fail=failures.append)
+    control = SimpleNamespace(binding={'boot_id': boot_id(), 'root': str(tmp_path)}, fail=failures.append)
     fake_app = ModuleType('isaaclab.app')
 
     def close():

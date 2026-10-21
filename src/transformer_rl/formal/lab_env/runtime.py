@@ -23,12 +23,41 @@ from .contract import FlatTaskSpec
 from .formal_curriculum import FormalCurriculumCapabilities
 from .managed import ManagedCurriculum, ManagedLabRuntime
 from .settings import load_asset_description
-from .sdk import LabSimulation
+from .sdk import LabSimulation, verify_recovery_sdk_identity
 
 
 _PHYSICS_FIELDS = {'gpu_found_lost_pairs_capacity', 'gpu_found_lost_aggregate_pairs_capacity',
                    'gpu_total_aggregate_pairs_capacity', 'gpu_max_rigid_contact_count',
                    'gpu_max_rigid_patch_count', 'gpu_collision_stack_size'}
+
+
+def _close_runtime_resources(env, health, launcher, failure):
+    """Leave fatal native teardown to the worker's explicit nonzero exit."""
+    cleanup_failure = None
+    for resource in (env, health, launcher):
+        if resource is None:
+            continue
+        if failure is not None or cleanup_failure is not None:
+            if launcher is not None:
+                launcher.defer_fatal_shutdown(env)
+            if resource is env or resource is launcher:
+                # env.close() and GA context-manager finalization can both
+                # terminate in C++ without returning to Python handlers.
+                continue
+        try:
+            resource.close()
+        except BaseException as error:
+            if failure is not None:
+                failure.add_note(f'Runtime cleanup raised {type(error).__name__}: {error}')
+            elif isinstance(error, SystemExit) and error.code in (None, 0):
+                continue
+            elif cleanup_failure is None:
+                cleanup_failure = error
+            else:
+                cleanup_failure.add_note(f'Additional cleanup raised {type(error).__name__}: {error}')
+    if cleanup_failure is not None and launcher is not None:
+        launcher.defer_fatal_shutdown(env)
+    return cleanup_failure
 
 
 def parse_configuration(recipe, configuration, authorized_boot):
@@ -107,6 +136,9 @@ def runtime(recipe, components, configuration, *, control):
     launcher = env = health = None
     failure = None
     try:
+        sdk_identity = verify_recovery_sdk_identity(
+            control.binding['root'], authorized_boot=control.binding['boot_id'],
+            recipe_sha256=recipe.sha256, learner_source_sha256=recipe.learner_source_sha256)
         launcher = LabSimulation(recipe.device)
         import omni.kit.app
         import torch
@@ -141,6 +173,18 @@ def runtime(recipe, components, configuration, *, control):
         cfg.sim.enable_scene_query_support = False
         cfg.sim.physics = PhysxCfg(enable_external_forces_every_iteration=True,
                                   enable_scene_query_support=False, **configuration['physics'])
+        if sdk_identity is not None:
+            from isaaclab.utils.string import string_to_callable
+            from isaaclab_physx.physics import PhysxManager
+
+            selected = cfg.sim.physics.class_type
+            selected = string_to_callable(selected) if isinstance(selected, str) else selected
+            if (not launcher.declarative_scene or cfg.sim.use_newton_actuators is not False
+                    or selected is not PhysxManager):
+                raise ValueError('migrated SDK launch differs from its PhysX actuator contract')
+            sdk_identity['launch_contract'] = {
+                'physics_manager': 'isaaclab_physx.physics.physx_manager:PhysxManager',
+                'use_newton_actuators': False, 'quaternion_order': 'xyzw'}
         if launcher.declarative_scene:
             from .ga_isolation import configure_ga_isolation
 
@@ -174,6 +218,7 @@ def runtime(recipe, components, configuration, *, control):
             'collision_isolation': env.collision_isolation_receipt,
             'cold_physical_state_restored': False, 'automatic_evaluation': False,
             'sdk_scene_api': 'declarative' if launcher.declarative_scene else 'manual_clone',
+            'sdk_identity': sdk_identity,
             'quaternion_order': 'xyzw', 'velocity_frame': 'world_COM_twist',
             'hardware_qualified': False, 'full_task_health_qualified': False})
         yield value
@@ -187,29 +232,7 @@ def runtime(recipe, components, configuration, *, control):
             error.add_note('Runtime failure publication raised: ' + repr(publication_error))
         raise
     finally:
-        cleanup_failure = None
-        for resource in (env, health, launcher):
-            if resource is None:
-                continue
-            if (launcher is not None and resource is launcher
-                    and (failure is not None or cleanup_failure is not None)):
-                # Kit can terminate inside native close(), bypassing Python
-                # exception handlers entirely. The worker entrypoint must emit
-                # the traceback and exit nonzero before interpreter shutdown.
-                continue
-            try:
-                resource.close()
-            except BaseException as error:
-                # Kit may raise SystemExit(0) while another error is unwinding.
-                # A successful shutdown must not turn failed learning into exit0.
-                if failure is not None:
-                    failure.add_note(f'Runtime cleanup raised {type(error).__name__}: {error}')
-                elif isinstance(error, SystemExit) and error.code in (None, 0):
-                    continue
-                elif cleanup_failure is None:
-                    cleanup_failure = error
-                else:
-                    cleanup_failure.add_note(f'Additional cleanup raised {type(error).__name__}: {error}')
+        cleanup_failure = _close_runtime_resources(env, health, launcher, failure)
         if failure is None and cleanup_failure is not None:
             control.fail(cleanup_failure)
             raise cleanup_failure
