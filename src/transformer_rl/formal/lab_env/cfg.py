@@ -226,6 +226,13 @@ def build_terrain_cfg(profile: str = "plane", *, atlas_manifest=None) -> Terrain
 
 
 @configclass
+class WheeledLabSceneCfg(InteractiveSceneCfg):
+    """GA 在 scene 构造期登记机器人；共享地形仍由环境绑定。"""
+
+    robot: ArticulationCfg = MISSING
+
+
+@configclass
 class WheeledLabEnvCfg(DirectRLEnvCfg):
     """M1 平地 DirectRLEnv 配置；资产相关字段由 build_env_cfg 填充。"""
 
@@ -236,6 +243,7 @@ class WheeledLabEnvCfg(DirectRLEnvCfg):
     state_space = CRITIC182_DIM
     history_length = HISTORY_LENGTH
     asset_directory: str = ""
+    declarative_scene: bool = False
 
     sim: SimulationCfg = SimulationCfg(
         dt=PHYSICS_DT_S,
@@ -290,6 +298,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
                   forward_scan: bool = False,
                   terrain_profile: str = "plane",
                   terrain_atlas_manifest: str | None = None,
+                  declarative_scene: bool = False,
                   seed: int | None = 0,
                   expected_manifest_sha256: str | None = None) -> WheeledLabEnvCfg:
     """从资产目录构造可直接交给 WheeledLabEnv 的配置。"""
@@ -326,6 +335,15 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     if recover is not None:
         cfg.episode_length_s = recover.episode_length_s
     cfg.robot_cfg = build_robot_cfg(asset, response=response)
+    if type(declarative_scene) is not bool:
+        raise ValueError('declarative_scene must be an explicit bool')
+    cfg.declarative_scene = declarative_scene
+    if declarative_scene:
+        cfg.scene = WheeledLabSceneCfg(
+            num_envs=num_envs, env_spacing=env_spacing_m, replicate_physics=True,
+            filter_collisions=False, robot=cfg.robot_cfg)
+        # 我们在每个物理步显式计算电机力矩，不启用 GA 新的 host actuator 路径。
+        cfg.sim.use_newton_actuators = False
     cfg.contact_sensor = build_contact_sensor_cfg()
     if formal_reward is not None and formal_reward.normal_load_source == 'native_contact_patch_normal_forces':
         if terrain_profile != 'course':

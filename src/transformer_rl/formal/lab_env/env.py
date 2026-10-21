@@ -1,6 +1,6 @@
 """平地 DirectRLEnv 编排层。
 
-只负责 IsaacLab 场景/传感器/物理接线；35D/81D/6D、历史、控制核心和
+只负责 IsaacLab 场景/传感器/物理接线；35D Actor/185D Critic/6D 动作、历史、控制核心和
 任务公式分别来自 lab_env.contract / control / observations。默认走
 M1 flat_reward；配置 ``formal_reward_spec`` 时改走正式
 PhysicalRewardComposer。100Hz 策略/200Hz 反馈的边界保持不变。
@@ -92,7 +92,8 @@ class WheeledLabEnv(DirectRLEnv):
         self._startup_dynamics = LabStartupDynamics(
             self.robot, self._binding, self.num_envs, self._asset.manifest['total_mass_kg'],
             int(getattr(cfg, 'seed', 0) or 0) + 15485863,
-            getattr(cfg, 'startup_dynamics_spec', None), device=self._device)
+            getattr(cfg, 'startup_dynamics_spec', None), device=self._device,
+            use_public_setters=cfg.declarative_scene)
         self._action_bounds = torch.tensor(self._task.action_bounds, dtype=torch.float32,
                                            device=self._device)
         self._physics_dt_tensor = torch.full((self.num_envs,), float(self.physics_dt),
@@ -281,8 +282,11 @@ class WheeledLabEnv(DirectRLEnv):
                 torch.tensor(target, dtype=torch.long, device=self._device))
 
     def _setup_scene(self):
-        self.robot = Articulation(self.cfg.robot_cfg)
-        self.scene.articulations["robot"] = self.robot
+        if self.cfg.declarative_scene:
+            self.robot = self.scene.articulations['robot']
+        else:
+            self.robot = Articulation(self.cfg.robot_cfg)
+            self.scene.articulations["robot"] = self.robot
         self.height_scanner = None
         if self.cfg.height_scanner is not None:
             self.height_scanner = RayCaster(self.cfg.height_scanner)
@@ -296,7 +300,12 @@ class WheeledLabEnv(DirectRLEnv):
             self.scene.sensors[f"forward_scanner_{index}"] = scanner
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
-        self.terrain = self.cfg.terrain.class_type(self.cfg.terrain)
+        if self.cfg.declarative_scene:
+            from isaaclab.utils import instantiate
+
+            self.terrain = instantiate(self.cfg.terrain)
+        else:
+            self.terrain = self.cfg.terrain.class_type(self.cfg.terrain)
         self._course_collision_receipt = (partition_static_collision(self.scene.stage)
             if getattr(self.cfg, 'course_manifest', None) else None)
         if self._course_collision_receipt is not None:
@@ -312,9 +321,14 @@ class WheeledLabEnv(DirectRLEnv):
                                            to.reshape(-1, 3).max(0).values.tolist()), flush=True)
             eo = self.terrain.env_origins
             print("TERRAIN env origins", eo.min(0).values.tolist(), eo.max(0).values.tolist(), flush=True)
-        self._collision_isolation = isolate_scene(self.scene)
-        self.scene.clone_environments(copy_from_source=False)
+        if self.cfg.declarative_scene:
+            self._collision_isolation = self.cfg._native_clone_binding
+        else:
+            self._collision_isolation = isolate_scene(self.scene)
+            self.scene.clone_environments(copy_from_source=False)
         self._collision_group_receipt = author_shared_ground_groups(self.scene)
+        if self.cfg.declarative_scene:
+            self._collision_isolation.confirm_shared_ground_groups(self._collision_group_receipt)
         light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
         light_cfg.func("/World/Light", light_cfg)
 
@@ -500,18 +514,19 @@ class WheeledLabEnv(DirectRLEnv):
 
 
     def _root_link_position(self):
-        data = self.robot.data
-        return self._as_torch(getattr(data, "root_link_pos_w", data.root_pos_w))
+        return self._as_torch(self.robot.data.root_link_pos_w)
 
     def _root_link_quat(self):
-        data = self.robot.data
-        return self._as_torch(getattr(data, "root_link_quat_w", data.root_quat_w))
+        # beta2 与 GA 均为 xyzw；不能再按旧 wxyz 约定二次重排。
+        return self._as_torch(self.robot.data.root_link_quat_w)
 
     def _sample(self) -> NativePhysicalSample:
         data = self.robot.data
         net = None
-        if self.contact_sensor.data.net_forces_w is not None:
-            net = self._as_torch(self.contact_sensor.data.net_forces_w)
+        forces = (self.contact_sensor.data.net_normal_forces_w if self.cfg.declarative_scene
+                  else self.contact_sensor.data.net_forces_w)
+        if forces is not None:
+            net = self._as_torch(forces)
         self._contact_force.zero_()
         if net is not None:
             self._contact_force.index_copy_(
@@ -521,10 +536,8 @@ class WheeledLabEnv(DirectRLEnv):
         position = self._root_link_position()
         quaternion_xyzw = self._root_link_quat()
         com_position = self._startup_dynamics.base_com_position(position, quaternion_xyzw)
-        com_velocity = self._as_torch(getattr(data, "root_com_vel_w", data.root_lin_vel_w))
-        if com_velocity.shape[-1] == 6:
-            com_velocity = com_velocity[..., :3]
-        angular_velocity = self._as_torch(getattr(data, "root_ang_vel_w", data.root_ang_vel_b))
+        com_twist_world = self._as_torch(data.root_com_vel_w)
+        com_velocity, angular_velocity = com_twist_world[..., :3], com_twist_world[..., 3:]
         # The 11x7 terrain scanner supplies the base ground reference once per
         # observation. _sample stays free of GPU ray-hit reductions, which can
         # stall on large rough-terrain batches.

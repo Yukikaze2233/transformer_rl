@@ -11,6 +11,7 @@ import traceback
 from dataclasses import asdict
 import json
 import os
+import sys
 from pathlib import Path
 import time
 
@@ -149,14 +150,13 @@ def main(argv=None):
     if args.diagnostic_only and args.diagnostic_stage is None:
         raise ValueError('--diagnostic-only requires an explicit --diagnostic-stage')
 
-    from isaaclab.app import AppLauncher
-    launcher = AppLauncher(headless=True, device=args.device, enable_cameras=False, livestream=0)
+    from .sdk import LabSimulation
+    launcher = LabSimulation(args.device)
     health = None
     try:
         import torch
         import omni.kit.app
         import omni.physx
-        from isaaclab.app.settings_manager import SettingsManager
         from isaaclab_physx.physics.physx_manager_cfg import PhysxCfg
 
         from ..control.actuation import PairTargetDomain, ResponseParameters
@@ -178,11 +178,8 @@ def main(argv=None):
         from .settings import load_asset_description
         from ..tasks.termination import NativeTaskLimits
 
-        settings = SettingsManager.instance()
-        settings.initialize_carb_settings()
+        launcher.configure_settings()
         if "cuda" in args.device:
-            settings.set_int("/physics/cudaDevice", int(args.device.split(":")[-1]))
-            settings.set_bool("/physics/suppressReadback", True)
             extensions = omni.kit.app.get_app().get_extension_manager()
             if not extensions.is_extension_enabled("omni.physx.gpu"):
                 extensions.set_extension_enabled_immediate("omni.physx.gpu", True)
@@ -264,6 +261,7 @@ def main(argv=None):
                             forward_scan=args.forward_scan,
                             terrain_profile=args.terrain_profile,
                             terrain_atlas_manifest=(None if args.terrain_atlas is None else str(args.terrain_atlas)),
+                            declarative_scene=launcher.declarative_scene,
                             expected_manifest_sha256=expected_asset)
         health = NativePhysicsHealth.for_native_process(args.output.parent)
         scene_queries = args.terrain_profile != 'course'
@@ -282,6 +280,11 @@ def main(argv=None):
             # A dropped-contact interval is rejected, never accepted as faster.
             gpu_collision_stack_size=2**28,
         )
+        if launcher.declarative_scene:
+            from .ga_isolation import configure_ga_isolation
+
+            object.__setattr__(cfg, '_native_clone_binding', configure_ga_isolation(
+                cfg.sim.physics, args.num_envs, args.device))
         if os.environ.get("LAB_SCAN_DEBUG") == "1":
             print("TRAIN before env construct", flush=True)
         env = WheeledLabEnv(cfg)
@@ -435,7 +438,8 @@ def main(argv=None):
             if health is not None:
                 health.close()
         finally:
-            launcher.app.close()
+            if sys.exc_info()[0] is None:
+                launcher.close()
 
 
 if __name__ == "__main__":

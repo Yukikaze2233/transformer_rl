@@ -12,7 +12,6 @@ import hashlib
 import json
 import math
 from pathlib import Path
-import sys
 
 from ...common.training_control import boot_id, verify_pin, write_json
 from ..control.actuation import PairTargetDomain, ResponseParameters
@@ -24,6 +23,7 @@ from .contract import FlatTaskSpec
 from .formal_curriculum import FormalCurriculumCapabilities
 from .managed import ManagedCurriculum, ManagedLabRuntime
 from .settings import load_asset_description
+from .sdk import LabSimulation
 
 
 _PHYSICS_FIELDS = {'gpu_found_lost_pairs_capacity', 'gpu_found_lost_aggregate_pairs_capacity',
@@ -107,27 +107,16 @@ def runtime(recipe, components, configuration, *, control):
     launcher = env = health = None
     failure = None
     try:
-        from isaaclab.app import AppLauncher
-
-        argv = sys.argv
-        try:
-            sys.argv = [argv[0]]
-            launcher = AppLauncher(headless=True, device=recipe.device, enable_cameras=False, livestream=0)
-        finally:
-            sys.argv = argv
+        launcher = LabSimulation(recipe.device)
         import omni.kit.app
         import torch
-        from isaaclab.app.settings_manager import SettingsManager
         from isaaclab_physx.physics.physx_manager_cfg import PhysxCfg
 
         from .cfg import build_env_cfg
         from .env import WheeledLabEnv
         from .formal_reward import FormalRewardConfig
 
-        settings = SettingsManager.instance()
-        settings.initialize_carb_settings()
-        settings.set_int('/physics/cudaDevice', 0)
-        settings.set_bool('/physics/suppressReadback', True)
+        launcher.configure_settings()
         extensions = omni.kit.app.get_app().get_extension_manager()
         if not extensions.is_extension_enabled('omni.physx.gpu'):
             extensions.set_extension_enabled_immediate('omni.physx.gpu', True)
@@ -142,6 +131,7 @@ def runtime(recipe, components, configuration, *, control):
                 asset.manifest, normal_load_source='native_contact_patch_normal_forces'),
             termination_limits=limits,
             sensors=sensors, dynamics=dynamics,
+            declarative_scene=launcher.declarative_scene,
             terrain_scan=True, forward_scan=True, terrain_profile='course',
             terrain_atlas_manifest=str(atlas), expected_manifest_sha256=asset.manifest_sha256)
         cfg.seed = recipe.training_seed
@@ -151,6 +141,11 @@ def runtime(recipe, components, configuration, *, control):
         cfg.sim.enable_scene_query_support = False
         cfg.sim.physics = PhysxCfg(enable_external_forces_every_iteration=True,
                                   enable_scene_query_support=False, **configuration['physics'])
+        if launcher.declarative_scene:
+            from .ga_isolation import configure_ga_isolation
+
+            object.__setattr__(cfg, '_native_clone_binding', configure_ga_isolation(
+                cfg.sim.physics, recipe.num_envs, recipe.device))
         env = WheeledLabEnv(cfg)
         health.check()
         value = ManagedLabRuntime(env, recipe, components, identity,
@@ -178,6 +173,8 @@ def runtime(recipe, components, configuration, *, control):
             'wheel_material': env.wheel_material_receipt,
             'collision_isolation': env.collision_isolation_receipt,
             'cold_physical_state_restored': False, 'automatic_evaluation': False,
+            'sdk_scene_api': 'declarative' if launcher.declarative_scene else 'manual_clone',
+            'quaternion_order': 'xyzw', 'velocity_frame': 'world_COM_twist',
             'hardware_qualified': False, 'full_task_health_qualified': False})
         yield value
         health.check()
@@ -191,10 +188,10 @@ def runtime(recipe, components, configuration, *, control):
         raise
     finally:
         cleanup_failure = None
-        for resource in (env, health, None if launcher is None else launcher.app):
+        for resource in (env, health, launcher):
             if resource is None:
                 continue
-            if (launcher is not None and resource is launcher.app
+            if (launcher is not None and resource is launcher
                     and (failure is not None or cleanup_failure is not None)):
                 # Kit can terminate inside native close(), bypassing Python
                 # exception handlers entirely. The worker entrypoint must emit
