@@ -144,3 +144,18 @@ def test_continuous_course_ramps_mixture_domain_and_flat_rehearsal():
     end = curriculum.weights[TaskFamily.REQUEST]
     assert start < end == JUMP_WEIGHTS[TaskFamily.REQUEST]
     assert curriculum._effective_domain().jump_m == (0.03, 0.40)
+
+
+def test_jump_envelope_follows_jump_stage_exposure_not_total_progress():
+    curriculum = FormalTaskCurriculum(32, capabilities=all_capabilities(), seed=2102,
+                                      include_jump=True, continuous=True)
+    curriculum.budget.consumed = [5000, 20000, 5000, 0]
+    curriculum.budget.stage = 3
+    early = curriculum._effective_domain().jump_m
+    assert early[0] == .03 and early[1] < .11
+    curriculum.budget.consumed[3] = 2500
+    middle = curriculum._effective_domain().jump_m
+    assert early[1] < middle[1] < .40
+    curriculum.budget.consumed[3] = 5000
+    final = curriculum._effective_domain().jump_m
+    assert final == (.03, .40)

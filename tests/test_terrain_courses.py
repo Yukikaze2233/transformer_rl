@@ -488,3 +488,21 @@ def test_invalid_external_id_is_not_overwritten_by_a_sampled_course_command():
     assert course._last_stair_response[0] == int(RequestResponse.INVALID)
     assert course.stair_requests.active_id[0] == -1
     assert not course._course_stair_pending[0]
+
+
+def test_terrain_route_binds_sampled_parameters_to_actual_atlas_buckets(atlas):
+    from transformer_rl.formal.tasks.geometry import TerrainKind
+
+    router = TerrainCourseRouter(atlas, 3)
+    ids = torch.arange(3)
+    zero = torch.zeros(3, dtype=torch.float32)
+    roughness = torch.tensor([.002, .018, .002], dtype=torch.float32)
+    router.reset(ids, torch.full((3,), int(TerrainKind.ROUGH), dtype=torch.long), stage=2,
+                 command_forward=torch.ones(3), requested={
+                     'slope_rad': zero, 'roughness_m': roughness,
+                     'step_up_m': zero, 'step_down_m': zero,
+                 })
+    selected = [router.manifest['tiles'][int(tile)]['parameters']['roughness_m']
+                for tile in router.tile]
+    assert selected[1] > selected[0] and selected[2] == selected[0]
+    assert abs(selected[0] - .002) < .01 and abs(selected[1] - .018) < .01

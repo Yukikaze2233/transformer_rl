@@ -280,8 +280,18 @@ class LabTerrainCourse:
         if task is None:
             raise ValueError('terrain course requires the formal TaskDraw sampler')
         env = self.env
+        draw = getattr(task, 'draw', None)
+        requested = None
+        if draw is not None:
+            requested = {
+                'slope_rad': draw.slope_rad,
+                'roughness_m': draw.roughness_m,
+                'step_up_m': draw.step_up_m,
+                'step_down_m': draw.step_down_m,
+            }
         origins, ground = self.router.reset(ids, task.terrain_kind, stage=env._task_sampler.stage,
-                                             command_forward=task.command[:, 0])
+                                             command_forward=task.command[:, 0],
+                                             requested=requested)
         pose[:, :3] -= env._as_torch(env.scene.env_origins).index_select(0, ids)
         pose[:, :3] += origins
         # Spawn on the declared approach, rather than at the tile's first rise.

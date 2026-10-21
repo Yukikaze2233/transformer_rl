@@ -277,3 +277,29 @@ def test_exposure_schedule_resumes_on_both_sides_of_the_boundary_without_promoti
 def test_invalid_domain_does_not_become_silent_sampling_clipping(changes):
     with pytest.raises(ValueError):
         replace(TaskDomain(), **changes)
+
+
+def test_dynamic_disable_retires_fractional_credit_and_roundtrips():
+    from copy import deepcopy
+    from transformer_rl.formal.tasks.curriculum import COMPLETE_STAGE_WEIGHTS
+
+    sampler = ContinuousTaskSampler(2102, stage_weights=COMPLETE_STAGE_WEIGHTS, continuous=True)
+    for _ in range(12):
+        sampler.sample(1000, 2, weights=COMPLETE_STAGE_WEIGHTS[2])
+    # The jump-stage target disables recovery at the boundary.
+    sampler.sample(1000, 3, weights=COMPLETE_STAGE_WEIGHTS[3])
+    state = sampler.state_dict()
+    assert state['dynamic_family_credit'][5] == 0
+    assert abs(sum(state['dynamic_family_credit'])) < 1e-6
+    restored = ContinuousTaskSampler(7, stage_weights=COMPLETE_STAGE_WEIGHTS, continuous=True)
+    restored.load_state_dict(state)
+    assert_draw_equal(sampler.sample(97, 3, weights=COMPLETE_STAGE_WEIGHTS[3]),
+                      restored.sample(97, 3, weights=COMPLETE_STAGE_WEIGHTS[3]))
+
+    # A pre-fix checkpoint may carry a residual deficit for a now-disabled
+    # family. Loading it must retire that credit rather than fail or carry it.
+    old = deepcopy(state)
+    old['dynamic_family_credit'][5] = .25
+    restored.load_state_dict(old)
+    assert restored._dynamic_family.credit[5] == 0
+    assert abs(sum(restored._dynamic_family.credit)) < 1e-6

@@ -7,7 +7,7 @@ StructuredPPOTrainer 负责，正式 reward 仍由 PhysicalRewardComposer 负责
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 import torch
@@ -150,7 +150,19 @@ class FormalTaskCurriculum:
         total = sum(self.stage_budgets)
         fraction = min(self.budget.total_updates / total, 1.0)
         fraction = fraction * fraction * (3.0 - 2.0 * fraction)
-        return interpolate_domain(self.initial_domain, self.domain, fraction)
+        domain = interpolate_domain(self.initial_domain, self.domain, fraction)
+        # Jump tasks are absent before the final stage. Their envelope must
+        # therefore follow the jump stage's own exposure, not total progress;
+        # otherwise the first sampled jump is already near the final ceiling.
+        if self.stage == len(self.stage_names) - 1:
+            exposure = min(self.budget.consumed[self.stage] / self.stage_budgets[self.stage], 1.0)
+            exposure = exposure * exposure * (3.0 - 2.0 * exposure)
+            start, end = self.initial_domain.jump_m, self.domain.jump_m
+            domain = replace(domain, jump_m=(
+                float(start[0] + (end[0] - start[0]) * exposure),
+                float(start[1] + (end[1] - start[1]) * exposure),
+            ))
+        return domain
 
     @property
     def status(self) -> str:

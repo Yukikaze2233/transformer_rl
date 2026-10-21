@@ -226,6 +226,15 @@ class TerrainCourseRouter:
         self.half_widths = torch.tensor([t['valid_half_width_m'] for t in tiles], device=self.device)
         self.finishes = torch.tensor([t['finish_x_m'] for t in tiles], device=self.device)
         self.starts = torch.tensor([t['start_x_m'] for t in tiles], device=self.device)
+        # Atlas tiles are the actual physical difficulty buckets. Retain their
+        # authored parameters so a sampled request selects a matching bucket
+        # instead of only changing the task-family proportions.
+        def parameter(name, default=0.):
+            return torch.tensor([float(t.get('parameters', {}).get(name, default))
+                                 for t in tiles], device=self.device)
+        self.slope_table = parameter('slope_rad')
+        self.roughness_table = parameter('roughness_m')
+        self.step_table = parameter('step_height_m')
         self.level = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         self.tile = torch.zeros_like(self.level)
         self.origins = self.origins_table[0].expand(num_envs, -1).clone()
@@ -249,28 +258,70 @@ class TerrainCourseRouter:
         self.course_exits.add_(exits.long())
         return exits
 
-    def reset(self, ids, kind, *, stage, command_forward):
+    def reset(self, ids, kind, *, stage, command_forward, requested=None):
         ids = torch.as_tensor(ids, device=self.device, dtype=torch.long)
         kind = torch.as_tensor(kind, device=self.device, dtype=torch.long)
         if kind.shape != ids.shape or ((kind < 0) | (kind > 7)).any():
             raise ValueError('terrain reset requires one valid kind per environment')
+        if requested is not None:
+            if not isinstance(requested, dict) or set(requested) != {
+                    'slope_rad', 'roughness_m', 'step_up_m', 'step_down_m'}:
+                raise ValueError('terrain request requires sampled slope, roughness and step values')
+            for name, value in requested.items():
+                if (not isinstance(value, torch.Tensor) or value.shape != ids.shape
+                        or value.dtype != torch.float32 or value.device != self.device
+                        or not torch.isfinite(value).all()):
+                    raise ValueError(f'terrain requested {name} must be finite [N] float32 on the router device')
         delta = self.last_success[ids].long() - self.last_failure[ids].long()
         cap = (0 if stage == 0 else min(6, self.manifest['levels'] - 1)
                if stage == 1 else self.manifest['levels'] - 1)
         self.level[ids] = (self.level[ids] + delta).clamp(0, cap)
-        # A full support sample avoids silently excluding hard terrain from
-        # long-lived low-level rows; it is exposure, never an evaluation gate.
-        explore = torch.rand(len(ids), generator=self.generator, device=self.device) < .15
-        sampled = torch.randint(cap + 1, (len(ids),), generator=self.generator, device=self.device)
-        level = torch.where(explore, sampled, self.level[ids])
         scores = torch.rand((len(ids), len(self.kinds)), generator=self.generator, device=self.device)
-        candidates = ((kind[:, None] == self.kinds)
-                       & ((level[:, None] == self.tile_levels) | self.authored[None, :]))
+        if requested is None:
+            # Legacy reset without a sampled request keeps the completed-episode
+            # level curriculum and its 15% explore coverage.
+            explore = torch.rand(len(ids), generator=self.generator, device=self.device) < .15
+            sampled = torch.randint(cap + 1, (len(ids),), generator=self.generator, device=self.device)
+            level = torch.where(explore, sampled, self.level[ids])
+            candidates = ((kind[:, None] == self.kinds)
+                           & ((level[:, None] == self.tile_levels) | self.authored[None, :]))
+        else:
+            # Bind the actual physical bucket to the sampled task parameter.
+            # The authored fixed assets have level == levels-1, so they only
+            # enter after the stage cap reaches the top bucket.
+            candidates = ((kind[:, None] == self.kinds)
+                          & (self.tile_levels[None, :] <= cap))
         candidates[kind == 0] = False
         candidates[kind == 0, 0] = True
         if not candidates.any(-1).all():
             raise ValueError('atlas lacks a requested terrain kind/level')
-        selected = scores.masked_fill(~candidates, -1).argmax(-1)
+        if requested is None:
+            selected = scores.masked_fill(~candidates, -1).argmax(-1)
+        else:
+            distance = torch.zeros_like(scores)
+            # Each kind is associated with the parameter that actually defines
+            # its geometry. Signed slope and down-step distances preserve the
+            # direction instead of selecting only by magnitude.
+            slope = (self.slope_table[None, :] - requested['slope_rad'][:, None]).abs()
+            roughness = (self.roughness_table[None, :] - requested['roughness_m'][:, None]).abs()
+            up = (self.step_table[None, :] - requested['step_up_m'][:, None]).abs()
+            down = (self.step_table[None, :] + requested['step_down_m'][:, None]).abs()
+            distance = torch.where((kind == int(TerrainKind.SLOPE))[:, None], slope, distance)
+            distance = torch.where((kind == int(TerrainKind.ROUGH))[:, None], roughness, distance)
+            distance = torch.where(torch.isin(kind, torch.tensor(
+                [int(TerrainKind.STEP_UP), int(TerrainKind.STAIRS), int(TerrainKind.TWO_PLATFORMS)],
+                device=self.device))[:, None], up, distance)
+            distance = torch.where((kind == int(TerrainKind.STEP_DOWN))[:, None], down, distance)
+            # Material/unknown buckets have no scalar request; use random ties
+            # inside the capped candidates rather than pretending a material
+            # friction was sampled.
+            distance = torch.where(torch.isin(kind, torch.tensor(
+                [int(TerrainKind.MATERIAL)], device=self.device))[:, None],
+                scores, distance)
+            selected = distance.masked_fill(~candidates, float('inf')).argmin(-1)
+            if not torch.isfinite(distance.gather(1, selected[:, None])).all():
+                raise ValueError('atlas lacks a requested terrain parameter bucket')
+            self.level[ids] = self.tile_levels[selected]
         self.tile[ids] = selected
         self.origins[ids] = self.origins_table[selected]
         self.direction[ids] = 1.0

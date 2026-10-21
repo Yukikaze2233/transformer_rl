@@ -130,6 +130,26 @@ class _FairQuota:
                 or abs(sum(weights) - 1) > 1e-9):
             raise ValueError('dynamic quota weights must be finite, nonnegative and sum to one')
         self.weights = weights
+        active = [index for index, weight in enumerate(weights) if weight > 0]
+        disabled = [index for index, weight in enumerate(weights) if weight == 0]
+        if not active:
+            self.credit = [0.0] * len(weights)
+            return
+        # A family disabled at a stage boundary cannot carry an old fractional
+        # deficit into a checkpoint. Retire it and redistribute the deficit to
+        # the still-active quotas so the row ledger remains conserved.
+        removed = sum(self.credit[index] for index in disabled)
+        for index in disabled:
+            self.credit[index] = 0.0
+        if removed:
+            active_total = sum(weights[index] for index in active)
+            for index in active:
+                self.credit[index] += removed * weights[index] / active_total
+        drift = sum(self.credit[index] for index in active)
+        if drift:
+            active_total = sum(weights[index] for index in active)
+            for index in active:
+                self.credit[index] -= drift * weights[index] / active_total
 
     def allocate(self, count):
         allocation = [0] * len(self.weights)
@@ -285,7 +305,9 @@ class ContinuousTaskSampler:
 
     def load_state_dict(self, state):
         expected = self.state_dict()
-        if not isinstance(state, dict) or state.keys() != expected.keys() or state['domain'] != expected['domain']:
+        if (not isinstance(state, dict) or state.keys() != expected.keys()
+                or state['domain'] != expected['domain']
+                or (self.continuous and state['continuous'] is not True)):
             raise ValueError('sampler checkpoint domain or fields differ')
         prepared_families = deepcopy(self._families)
         prepared_strata = deepcopy(self._strata)
@@ -300,7 +322,17 @@ class ContinuousTaskSampler:
         dynamic_strata = deepcopy(self._dynamic_strata)
         if self.continuous:
             dynamic_family.set_weights(state['dynamic_weights'])
-            self._restore_credits([dynamic_family], [state['dynamic_family_credit']])
+            # Older checkpoints may contain a fractional deficit for a family
+            # that is now disabled. Retire and redistribute it before applying
+            # the checkpoint; never accept an inactive credit as live state.
+            raw = state['dynamic_family_credit']
+            if (not isinstance(raw, list) or len(raw) != len(dynamic_family.credit)
+                    or any(type(value) not in (int, float) or not math.isfinite(value)
+                           or abs(value) > 2 for value in raw)):
+                raise ValueError('sampler checkpoint dynamic credit differs')
+            dynamic_family.credit = list(raw)
+            dynamic_family.set_weights(state['dynamic_weights'])
+            self._restore_credits([dynamic_family], [dynamic_family.credit])
             if (not isinstance(state['dynamic_stratum_credit'], list)
                     or len(state['dynamic_stratum_credit']) != len(dynamic_strata)):
                 raise ValueError('sampler checkpoint has invalid dynamic stratum stages')
@@ -312,14 +344,15 @@ class ContinuousTaskSampler:
         self._dynamic_family, self._dynamic_strata = dynamic_family, dynamic_strata
 
     @staticmethod
-    def _restore_credits(quotas, values):
+    def _restore_credits(quotas, values, *, allow_inactive_credit=False):
         if not isinstance(values, list) or len(values) != len(quotas):
             raise ValueError('sampler checkpoint quota dimensions differ')
         for quota, credit in zip(quotas, values):
             if (not isinstance(credit, list) or len(credit) != len(quota.credit)
                     or any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > 2 for v in credit)
                     or abs(sum(credit)) > 1e-6
-                    or any(weight == 0 and value != 0 for weight, value in zip(quota.weights, credit))):
+                    or (not allow_inactive_credit and any(
+                        weight == 0 and value != 0 for weight, value in zip(quota.weights, credit)))):
                 raise ValueError('sampler checkpoint quota credit is invalid')
             quota.credit = list(credit)
 
