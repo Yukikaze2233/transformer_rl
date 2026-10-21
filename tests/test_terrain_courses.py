@@ -12,6 +12,34 @@ from transformer_rl.formal.tasks.terrain_courses import TerrainCourseRouter, bui
 from test_terrain_assets import real_assets
 
 
+def test_ground_miss_reports_actual_rows_without_mutating_cached_ground():
+    import json
+    from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+
+    course = LabTerrainCourse.__new__(LabTerrainCourse)
+    position = torch.tensor([[1., 2., .3], [3., 4., .4]])
+    course.env = SimpleNamespace(_physical_tick=7, _root_link_position=lambda: position,
+                                 _ground_at_root=torch.full((2,), 9.))
+    course.router = SimpleNamespace(tile=torch.tensor([3, 4]), origins=torch.zeros(2, 3))
+    course._ground_token = None
+    course._wheel_centres = lambda: position[:, None].expand(-1, 2, -1)
+    course.wheel_ground = torch.full((2, 2), 8.)
+    course.wheel_material = torch.full((2, 2), .7)
+    valid = torch.tensor([[True, True, False], [True, True, True]])
+    course.query = lambda points, tile: (torch.zeros(2, 3), valid, None, torch.zeros(2, 3))
+    course.query._ceiling_m = 1.25
+    with pytest.raises(RuntimeError, match='no physical terrain support') as caught:
+        course.ground()
+    details = json.loads(str(caught.value).split(': ', 1)[1])
+    assert details['rows'] == [0] and details['tile'] == [3]
+    assert details['physical_tick'] == 7
+    assert details['valid_root_left_right'] == [[True, True, False]]
+    torch.testing.assert_close(torch.tensor(details['ray_origins'])[0],
+                               torch.tensor([[1., 2., 1.25]]).expand(3, -1))
+    assert course.env._ground_at_root.eq(9).all() and course.wheel_ground.eq(8).all()
+    assert course._ground_token is None
+
+
 @pytest.fixture(scope='module')
 def atlas(real_assets, tmp_path_factory):
     _, assets, _ = real_assets

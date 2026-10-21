@@ -47,6 +47,35 @@ def test_query_starts_at_ray_height_and_rejects_invalid_tile_without_memory_acce
     assert int(query.misses) == 3
 
 
+def test_ground_columns_keep_real_support_when_a_link_falls_below_the_mesh(geometry):
+    from types import SimpleNamespace
+    from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
+
+    mesh, index, _, _ = geometry
+    query = StaticTerrainQuery(mesh, index)
+    position = torch.tensor([[.1, .1, -6.]])
+    # The generic downward-ray API must still respect its supplied ray origin.
+    _, valid, _, _ = query(position + torch.tensor([0., 0., 5.]), torch.zeros(1, dtype=torch.long))
+    assert not valid.any()
+    course = LabTerrainCourse.__new__(LabTerrainCourse)
+    course.env = SimpleNamespace(_physical_tick=1, _root_link_position=lambda: position,
+                                 _ground_at_root=torch.zeros(1))
+    course.router = SimpleNamespace(tile=torch.zeros(1, dtype=torch.long), origins=torch.zeros(1, 3))
+    course.query, course._ground_token = query, None
+    course._wheel_centres = lambda: position[:, None].expand(-1, 2, -1)
+    course.wheel_ground = torch.zeros(1, 2)
+    course.wheel_material = torch.zeros(1, 2)
+    ground, wheel_ground = course.ground()
+    torch.testing.assert_close(ground, torch.tensor([.2]))
+    torch.testing.assert_close(wheel_ground, torch.full((1, 2), .2))
+    assert float(position[0, 2] - ground[0]) < -6.
+    # A true XY hole remains a miss even when its column starts above the mesh.
+    position[:, 0] = 2.
+    course.env._physical_tick += 1
+    with pytest.raises(RuntimeError, match='no physical terrain support'):
+        course.ground()
+
+
 def test_wheel_columns_preserve_left_right_positions_near_far_and_reverse():
     centres = torch.tensor([[[-.2, -.1, .3], [.2, .1, .3]]]).expand(3, -1, -1).clone()
     points = wheel_lookahead_points(centres, torch.tensor([0., 0., np.pi / 2]),

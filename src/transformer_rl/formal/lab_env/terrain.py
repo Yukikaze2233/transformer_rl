@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import torch
 
@@ -78,7 +79,7 @@ class LabTerrainCourse:
                              sine * offsets[..., 0] + cosine * offsets[..., 1]), -1)
         points = center[:, None, :].expand(-1, len(offsets), -1).clone()
         points[..., :2] += delta
-        points[..., 2] += 5
+        points[..., 2] = self.query._ceiling_m
         return points
 
     def ground(self):
@@ -86,10 +87,16 @@ class LabTerrainCourse:
         if self._ground_token == env._physical_tick:
             return env._ground_at_root, self.wheel_ground
         points = torch.cat((env._root_link_position()[:, None], self._wheel_centres()), 1)
-        points[..., 2] += 5
+        points[..., 2] = self.query._ceiling_m
         heights, valid, _, friction = self.query(points, self.router.tile[:, None].expand(-1, 3))
         if not valid.all():
-            raise RuntimeError('course root/wheel query has no physical terrain support')
+            ids = (~valid.all(-1)).nonzero().flatten()[:8]
+            details = {'physical_tick': env._physical_tick, 'rows': ids.tolist(),
+                       'tile': self.router.tile[ids].tolist(), 'ray_origins': points[ids].tolist(),
+                       'valid_root_left_right': valid[ids].tolist(),
+                       'root_local_m': (env._root_link_position() - self.router.origins)[ids].tolist()}
+            raise RuntimeError('course root/wheel query has no physical terrain support: '
+                               + json.dumps(details, allow_nan=True, separators=(',', ':')))
         env._ground_at_root.copy_(heights[:, 0])
         self.wheel_ground.copy_(heights[:, 1:])
         self.wheel_material.copy_(friction[:, 1:])
@@ -111,6 +118,7 @@ class LabTerrainCourse:
         x, y, z, w = quaternion.unbind(-1)
         yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
         points = wheel_lookahead_points(self._wheel_centres(), yaw, self.env._command[:, 0])
+        points[..., 2] = self.query._ceiling_m
         height, valid, _, _ = self.query(points, self.router.tile[:, None, None].expand(-1, 2, 3))
         # Invalid heights stay NaN. Missing columns cannot be labelled as a
         # downward edge or silently replaced with the wheel's current ground.

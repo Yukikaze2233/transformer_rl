@@ -146,6 +146,10 @@ class StaticTerrainQuery:
             vertices = source['vertices_m'].copy()
             faces = source['triangles'].astype(np.int32)
             friction = source['material_coefficients'][source['face_material']].astype(np.float32)
+        # Privileged ground columns start above the immutable collision mesh,
+        # not above the robot. A fallen link can be below the surface; using
+        # its altitude would turn a normal failure into an artificial ray miss.
+        self._ceiling_m = float(vertices[:, 2].max()) + 1.0
         with np.load(Path(index_path), allow_pickle=False) as source:
             data = {key: source[key].copy() for key in source.files}
         self.cell_size_m = float(data.pop('cell_size_m'))
