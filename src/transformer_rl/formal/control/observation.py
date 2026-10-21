@@ -278,7 +278,7 @@ class ObservationAssembler:
         jump = commands.mode == int(CommandMode.JUMP)
         invalid |= (commands.command_clock_s < 0) | (commands.admitted_body_command[:, 3] <= 0)
         invalid |= (commands.admitted_body_command[:, 1].abs() > 1e-8)
-        invalid |= jump & ((commands.request_height_m < .03) | (commands.request_height_m > .20))
+        invalid |= jump & ((commands.request_height_m < .03) | (commands.request_height_m > .30))
         invalid |= ~jump & (commands.request_height_m != 0)
         source = commands.previous_control_source
         if source is None:

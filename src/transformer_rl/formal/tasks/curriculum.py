@@ -47,8 +47,8 @@ PHASE_WEIGHTS = STAGE_WEIGHTS
 class TaskDomain:
     height_m: tuple[float, float] = (0.20, 0.35)
     forward_m_s: tuple[float, float] = (-2.7, 2.7)
-    yaw_rad_s: tuple[float, float] = (-2 * math.pi, 2 * math.pi)
-    jump_m: tuple[float, float] = (0.03, 0.20)
+    yaw_rad_s: tuple[float, float] = (-6 * math.pi, 6 * math.pi)
+    jump_m: tuple[float, float] = (0.03, 0.30)
     slope_rad: tuple[float, float] = (-math.pi / 12, math.pi / 12)
     roughness_m: tuple[float, float] = (0.0, 0.02)
     step_up_m: tuple[float, float] = (0.0, 0.20)

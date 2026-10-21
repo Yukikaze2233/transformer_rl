@@ -41,13 +41,32 @@ def test_final_mixture_contains_full_continuous_domains_and_both_endpoints():
     assert motion[:, 0].min() == -2.7 and motion[:, 0].max() == 2.7
     assert torch.count_nonzero(motion[:, 2]) == 0
     rotation = draw.requested_command[draw.family == TaskFamily.ROTATION]
-    torch.testing.assert_close(rotation[:, 2].min(), torch.tensor(-2 * torch.pi))
-    torch.testing.assert_close(rotation[:, 2].max(), torch.tensor(2 * torch.pi))
+    torch.testing.assert_close(rotation[:, 2].min(), torch.tensor(-6 * torch.pi))
+    torch.testing.assert_close(rotation[:, 2].max(), torch.tensor(6 * torch.pi))
     assert (rotation[:, 0] == 0).sum() > 400
     assert set(draw.terrain_kind[draw.family == TaskFamily.TERRAIN].tolist()) == set(range(1, 8))
     assert set(draw.recovery_posture[draw.family == TaskFamily.RECOVERY].tolist()) == set(range(16))
     assert set(draw.trajectory_kind.tolist()) == set(range(7))
     assert 0.15 < draw.nominal.float().mean() < 0.25
+
+
+def test_jump_stage_samples_full_confirmed_rise_range_without_changing_quota_or_budget():
+    from transformer_rl.formal.tasks.curriculum import (
+        COMPLETE_STAGE_BUDGETS, COMPLETE_STAGE_WEIGHTS,
+    )
+
+    sampler = ContinuousTaskSampler(2102, stage_weights=COMPLETE_STAGE_WEIGHTS)
+    draw = sampler.sample(10000, 3)
+    assert torch.bincount(draw.family, minlength=6).tolist() == [2000, 1000, 1000, 1000, 5000, 0]
+    rise = draw.jump_height_m[draw.family == TaskFamily.REQUEST]
+    torch.testing.assert_close(rise.min(), torch.tensor(.03))
+    torch.testing.assert_close(rise.max(), torch.tensor(.30))
+    assert (rise > .20).any()
+    assert sum(COMPLETE_STAGE_BUDGETS) == 35000
+    saved = sampler.state_dict()
+    resumed = ContinuousTaskSampler(7, stage_weights=COMPLETE_STAGE_WEIGHTS)
+    resumed.load_state_dict(saved)
+    assert_draw_equal(sampler.sample(193, 3), resumed.sample(193, 3))
 
 
 def test_strata_are_70_15_15_and_not_a_discrete_command_grid():

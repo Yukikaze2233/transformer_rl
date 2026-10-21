@@ -136,6 +136,28 @@ def test_actor_encodes_exactly35_fields_without_privileged_inputs_or_wheel_angle
     torch.testing.assert_close(frame, other_frame)
 
 
+def test_full_requested_jump_rise_survives_actor_encoding_with_unchanged_layout():
+    _, _, assembler, sample, command = fixture(4)
+    requested = torch.tensor([.03, .205, .25, .30])
+    command = replace(command, mode=torch.full((4,), int(CommandMode.JUMP), dtype=torch.long),
+                      request_height_m=requested)
+    state = assembler.measure(sample)
+    frame = assembler.actor(assembler.clean_sensors(state), command, now_s=sample.timestamp_s)
+    assert frame.shape == (4, 35)
+    torch.testing.assert_close(frame[:, 33], requested * 5)
+    torch.testing.assert_close(frame[:, 28:33], torch.tensor([[0., 0., 0., 0., 1.]]).repeat(4, 1))
+
+
+@pytest.mark.parametrize('rise', (.029, .3001, float('nan')))
+def test_jump_encoding_rejects_values_outside_the_confirmed_request_contract(rise):
+    _, _, assembler, sample, command = fixture()
+    command = replace(command, mode=torch.full((2,), int(CommandMode.JUMP), dtype=torch.long),
+                      request_height_m=torch.full((2,), rise))
+    with pytest.raises(ValueError):
+        assembler.actor(assembler.clean_sensors(assembler.measure(sample)), command,
+                        now_s=sample.timestamp_s)
+
+
 def test_leg_position_uses_wrapped_relative_coaxial_coordinates_without_a_differential_transform():
     _, binding, assembler, sample, command = fixture()
     q = sample.joint_position_rad.clone()
