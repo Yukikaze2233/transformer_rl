@@ -41,7 +41,6 @@ class _ActuatorGroup:
     names: tuple[str, ...]
     damping: float
     effort_limit: float
-    velocity_limit: float
 
 
 def _actuator_groups(asset: AssetDescription) -> dict[str, _ActuatorGroup]:
@@ -53,12 +52,12 @@ def _actuator_groups(asset: AssetDescription) -> dict[str, _ActuatorGroup]:
     if springs != ("L_spring_slide", "R_spring_slide"):
         raise ValueError("资产弹簧关节必须与当前契约一致")
     return {
-        "legs": _ActuatorGroup(ACTION_ORDER[:4], 0.0, 40.0, 1e9),
-        "wheels": _ActuatorGroup(ACTION_ORDER[4:], 0.0, 4.5, 1e9),
+        "legs": _ActuatorGroup(ACTION_ORDER[:4], 0.0, 40.0),
+        "wheels": _ActuatorGroup(ACTION_ORDER[4:], 0.0, 4.5),
         "passive": _ActuatorGroup(passive, float(damping["passive_hinge_Nm_s_per_rad"]),
-                                  100.0, 1e9),
+                                  100.0),
         "pressure": _ActuatorGroup(springs, float(damping["slider_N_s_per_m"]),
-                                   1000.0, 100.0),
+                                   1000.0),
     }
 
 
@@ -80,19 +79,22 @@ def build_robot_cfg(asset: AssetDescription, *,
     """
     groups = _actuator_groups(asset)
     fields = _response_fields(response)
+    velocity_limits = asset.joint_velocity_limits()
     actuators = {}
     for name, group in groups.items():
         values = {
             field_name: {joint: fields[field_name].get(joint, 0.0) for joint in group.names}
             for field_name in fields
         }
+        # Some USD exports omit maxJointVelocity. Use the pinned model source
+        # rather than an unbounded override or an SDK-dependent fallback.
         actuators[name] = IdealPDActuatorCfg(
             joint_names_expr=list(group.names),
             stiffness=0.0,
             damping=group.damping,
             effort_limit=group.effort_limit,
             effort_limit_sim=group.effort_limit,
-            velocity_limit_sim=group.velocity_limit,
+            joint_velocity_limit={joint: velocity_limits[joint] for joint in group.names},
             **values,
         )
     return ArticulationCfg(

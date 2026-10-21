@@ -23,6 +23,41 @@ class AssetDescription:
     nominal_height_m: float
     manifest_sha256: str
 
+    def joint_velocity_limits(self) -> dict[str, float]:
+        """Read source-defined solver limits in rad/s or m/s, not hardware certification."""
+        path = self.directory / "model_spec.json"
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("joint velocity limits require the selected regular model source")
+        with path.open("rb") as source:
+            raw = source.read(256 * 1024 + 1)
+        expected = self.manifest.get("files_sha256", {}).get("model_spec.json")
+        if len(raw) > 256 * 1024 or hashlib.sha256(raw).hexdigest() != expected:
+            raise ValueError("joint velocity limits differ from the selected model source pin")
+        joints = json.loads(raw).get("joints")
+        names = self.manifest["tree_joint_names"]
+        if (not isinstance(joints, list) or len(joints) != len(names)
+                or any(not isinstance(joint, dict) or not isinstance(joint.get("name"), str)
+                       for joint in joints)
+                or len({joint.get("name") for joint in joints}) != len(names)
+                or {joint.get("name") for joint in joints} != set(names)):
+            raise ValueError("joint velocity limits require every selected named tree joint")
+        limits = {}
+        for joint in joints:
+            limit = joint.get("limit")
+            value = limit.get("velocity") if isinstance(limit, dict) else None
+            if (joint.get("type") not in ("continuous", "revolute", "prismatic")
+                    or type(value) not in (int, float, str)):
+                raise ValueError("joint velocity limits require explicit positive native-unit speeds")
+            # URDF-derived model sources retain numeric XML attributes as strings.
+            try:
+                value = float(value)
+            except (ValueError, OverflowError) as error:
+                raise ValueError("joint velocity limit is not a finite source number") from error
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError("joint velocity limits require explicit positive native-unit speeds")
+            limits[joint["name"]] = value
+        return {name: limits[name] for name in names}
+
 
 @dataclass(frozen=True)
 class LabEnvSettings:

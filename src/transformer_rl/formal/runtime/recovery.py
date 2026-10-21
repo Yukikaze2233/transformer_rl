@@ -47,7 +47,8 @@ _REVIEWABLE = {
     'formal/runtime/session.py', 'formal/runtime/process.py', 'formal/runtime/recovery.py',
 }
 _GA_REVIEWABLE = {
-    'formal/lab_env/cfg.py', 'formal/lab_env/env.py', 'formal/lab_env/dynamics.py',
+    'formal/lab_env/cfg.py', 'formal/lab_env/settings.py',
+    'formal/lab_env/env.py', 'formal/lab_env/dynamics.py',
     'formal/lab_env/sdk.py', 'formal/lab_env/ga_isolation.py',
     'formal/lab_env/contact_measurement.py',
 }
