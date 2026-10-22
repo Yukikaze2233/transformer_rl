@@ -77,6 +77,12 @@ def test_all_terrain_kinds_have_physical_tiles_and_level_endpoints(atlas):
     assert {t['name'] for t in router.manifest['tiles']} >= {'road_step', 'central_steps', 'rough', 'stairs'}
     maxima = [t for t in router.manifest['tiles'] if t['name'] == 'two_platforms' and t['level'] == 2]
     assert maxima[0]['parameters']['platform_tops_m'] == [.2, .4]
+    slopes = [tile['parameters']['slope_rad'] for tile in router.manifest['tiles'] if tile['kind'] == 1]
+    assert min(slopes) == pytest.approx(-torch.pi / 12)
+    assert max(slopes) == pytest.approx(torch.pi / 12)
+    bearings = {round(tile['parameters']['slope_bearing_rad'], 6) for tile in router.manifest['tiles']
+                if tile['kind'] == 1 and tile['level'] == router.manifest['levels'] - 1}
+    assert bearings == {0., round(torch.pi / 2, 6)}
 
 
 def test_difficulty_uses_completed_episode_and_does_not_move_live_geometry(atlas):
@@ -497,6 +503,9 @@ def test_terrain_route_binds_sampled_parameters_to_actual_atlas_buckets(atlas):
     from transformer_rl.formal.tasks.geometry import TerrainKind
 
     router = TerrainCourseRouter(atlas, 3)
+    # Isolate request-to-geometry selection from the completed-episode cap;
+    # novice rows intentionally cannot jump straight to the largest request.
+    router.level.fill_(9)
     ids = torch.arange(3)
     zero = torch.zeros(3, dtype=torch.float32)
     roughness = torch.tensor([.002, .018, .002], dtype=torch.float32)

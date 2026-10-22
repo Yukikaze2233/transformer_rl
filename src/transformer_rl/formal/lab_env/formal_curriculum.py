@@ -147,22 +147,66 @@ class FormalTaskCurriculum:
     def _effective_domain(self) -> TaskDomain:
         if not self.continuous:
             return self.domain
-        total = sum(self.stage_budgets)
-        fraction = min(self.budget.total_updates / total, 1.0)
-        fraction = fraction * fraction * (3.0 - 2.0 * fraction)
+        # Reach the ordinary envelope by the end of rough. Hard and jump then
+        # rehearse the full range instead of first reaching it at budget end.
+        fraction = self._smooth_fraction(self.budget.total_updates,
+                                         sum(self.stage_budgets[:2]))
         domain = interpolate_domain(self.initial_domain, self.domain, fraction)
         # Jump tasks are absent before the final stage. Their envelope must
         # therefore follow the jump stage's own exposure, not total progress;
         # otherwise the first sampled jump is already near the final ceiling.
-        if self.stage == len(self.stage_names) - 1:
-            exposure = min(self.budget.consumed[self.stage] / self.stage_budgets[self.stage], 1.0)
-            exposure = exposure * exposure * (3.0 - 2.0 * exposure)
+        if self.include_jump and self.stage_name == 'jump':
+            exposure = self._smooth_fraction(self.budget.consumed[self.stage],
+                                             .8 * self.stage_budgets[self.stage])
             start, end = self.initial_domain.jump_m, self.domain.jump_m
             domain = replace(domain, jump_m=(
                 float(start[0] + (end[0] - start[0]) * exposure),
                 float(start[1] + (end[1] - start[1]) * exposure),
             ))
         return domain
+
+    def terrain_level_cap(self, levels):
+        if type(levels) is not int or levels < 1:
+            raise ValueError('terrain cap requires the actual atlas level count')
+        if self.stage == 0:
+            return 0
+        if self.stage > 1:
+            return levels - 1
+        start = min(6, levels - 1)
+        progress = (self._smooth_fraction(self.budget.consumed[1], .8 * self.stage_budgets[1])
+                    if self.continuous else 0.)
+        return start + int((levels - 1 - start) * progress)
+
+    @staticmethod
+    def _smooth_fraction(consumed, budget):
+        fraction = min(max(consumed / budget, 0.0), 1.0)
+        return fraction * fraction * (3.0 - 2.0 * fraction)
+
+    def _condition_task_difficulty(self, draw):
+        """Change within-family difficulty, never birth quotas or total budget."""
+        recovery_progress = self._smooth_fraction(self.budget.total_updates,
+                                                  .8 * self.stage_budgets[0])
+        count = min(16, 2 + int(14 * recovery_progress))
+        posture = draw.recovery_posture.clone()
+        if count < 16:
+            # Upright/crouched -> 45-degree pitch -> releases/sides -> prone.
+            order = posture.new_tensor([0, 1, 6, 7, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15])
+            rows = (draw.family == int(TaskFamily.RECOVERY)).nonzero().flatten()
+            choice = torch.randint(count, (len(rows),), device=self.device,
+                                   generator=self.sampler.generator)
+            posture[rows] = order[choice]
+        command = draw.requested_command.clone()
+        if self.include_jump and self.stage_name == 'jump':
+            budget = self.stage_budgets[self.stage]
+            # First learn a stationary jump during the mixture transition;
+            # then expand simultaneous motion, with the last 20% at full range.
+            combined = self._smooth_fraction(self.budget.consumed[self.stage] - .25 * budget,
+                                              .55 * budget)
+            rows = draw.family == int(TaskFamily.REQUEST)
+            command[rows, :3] *= combined
+            command[rows, 3] = (self.domain.nominal_height_m
+                                + combined * (command[rows, 3] - self.domain.nominal_height_m))
+        return replace(draw, recovery_posture=posture, requested_command=command)
 
     @property
     def status(self) -> str:
@@ -194,8 +238,9 @@ class FormalTaskCurriculum:
             raise ValueError("采样行数不能超过环境数")
         self.require_supported()
         if self.continuous:
-            return self.sampler.sample(ids.numel(), self.stage,
+            draw = self.sampler.sample(ids.numel(), self.stage,
                                        weights=self.weights, domain=self._effective_domain())
+            return self._condition_task_difficulty(draw)
         return self.sampler.sample(ids.numel(), self.stage)
 
     def begin_update(self) -> int:

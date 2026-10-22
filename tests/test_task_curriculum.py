@@ -35,8 +35,8 @@ def test_final_mixture_contains_full_continuous_domains_and_both_endpoints():
     assert torch.bincount(draw.family, minlength=6).tolist() == [1500, 1500, 1500, 3500, 0, 2000]
     assert torch.count_nonzero(draw.requested_command[:, 1]) == 0
     height = draw.requested_command[:, 3]
-    assert (height >= 0.20).all() and (height <= 0.35).all()
-    assert height.min() < 0.201 and height.max() > 0.349
+    assert (height >= 0.17).all() and (height <= 0.40).all()
+    assert height.min() < 0.171 and height.max() > 0.399
     motion = draw.requested_command[draw.family == TaskFamily.MOTION]
     assert motion[:, 0].min() == -2.7 and motion[:, 0].max() == 2.7
     assert torch.count_nonzero(motion[:, 2]) == 0

@@ -10,6 +10,7 @@ import torch
 from test_policy_optimization import assert_identical
 from test_structured_checkpoint import fixture, update
 from transformer_rl.formal.lab_env.course_tasks import LabCourseTasks, StairRequestProtocol
+from transformer_rl.formal.lab_env.action_transport import ActionTransportConfig, DelayedActionTransport
 from transformer_rl.formal.lab_env.formal_curriculum import FormalCurriculumCapabilities, UnsupportedCurriculumTask
 from transformer_rl.formal.lab_env.formal_reward import FormalRewardConfig
 from transformer_rl.formal.lab_env.managed import ManagedCurriculum, ManagedLabRuntime
@@ -57,6 +58,45 @@ def identity(env):
             'asset_manifest_sha256': 'a' * 64, 'response_sha256': 'd' * 64}
 
 
+def test_managed_timing_source_preserves_rng_and_rejects_missing_new_state(tmp_path):
+    from transformer_rl.formal.control.communication import (
+        CommunicationConfig, EpisodeRandomization, EpisodeRandomizationConfig, PhysicalCommunication,
+    )
+    recipe, components, journal, _ = fixture(tmp_path, full=True, target_rollouts=35000)
+    with journal:
+        def timing_scene():
+            env = scene(tmp_path, components)
+            comm = PhysicalCommunication(4, CommunicationConfig(enabled=True), seed=2102)
+            dr = EpisodeRandomization(4, EpisodeRandomizationConfig(enabled=True), seed=2102)
+            def snapshot():
+                return {'format': 'lab_control_timing_v1', 'communication': comm.state_dict(),
+                        'episode_randomization': dr.state_dict()}
+            def restore(state):
+                comm.restore_after_physical_reset(state['communication'])
+                dr.restore_after_physical_reset(state['episode_randomization'])
+            env.control_timing_state_dict = snapshot
+            env.restore_control_timing = restore
+            return env, comm, dr
+        env, comm, dr = timing_scene()
+        rows = torch.ones(4, dtype=torch.bool)
+        comm.reset(rows, torch.zeros(4, 6), torch.zeros(4, 6), env._clock())
+        dr.reset(rows, 3500)
+        source = ManagedLabRuntime(env, recipe, components, identity(env))
+        saved = source.checkpoint_state_dict()
+        assert saved['format'] == 'managed_lab_task_source_v6'
+        components.task_source = None
+        cold_env, cold_comm, cold_dr = timing_scene()
+        cold = ManagedLabRuntime(cold_env, recipe, components, identity(cold_env))
+        missing = deepcopy(saved)
+        missing.pop('control_timing')
+        with pytest.raises(ValueError, match='original sources'):
+            cold.load_after_explicit_cold_setup(missing)
+        cold.load_after_explicit_cold_setup(saved)
+        assert torch.equal(comm.generator.get_state(), cold_comm.generator.get_state())
+        assert torch.equal(dr.generator.get_state(), cold_dr.generator.get_state())
+        assert cold_comm.held_effort.eq(0).all() and not cold_comm.has_previous.any()
+
+
 def test_managed_course_shares_one_quota_and_refuses_double_reservation(tmp_path):
     recipe, components, journal, _ = fixture(tmp_path, full=True, target_rollouts=35000)
     with journal:
@@ -72,10 +112,15 @@ def test_managed_course_shares_one_quota_and_refuses_double_reservation(tmp_path
             ManagedCurriculum(recipe, components, FormalCurriculumCapabilities(recovery=True, requests=True))
 
 
-def test_managed_source_roundtrip_keeps_real_task_rng_ids_and_learning_budget(tmp_path):
+@pytest.mark.parametrize('with_transport', (False, True))
+def test_managed_source_roundtrip_keeps_real_task_rng_ids_and_learning_budget(tmp_path, with_transport):
     recipe, components, journal, store = fixture(tmp_path, full=True, target_rollouts=35000)
     with journal:
         env = scene(tmp_path, components)
+        if with_transport:
+            env._action_transport = DelayedActionTransport(
+                4, 6, ActionTransportConfig(enabled=True, delays_steps=(0, 1), nominal_fraction=.5),
+                seed=2102)
         managed = ManagedLabRuntime(env, recipe, components, identity(env))
         assert env._terrain_course.tasks.protocol is components.protocol
         from test_physical_observation import fixture as physical_fixture
@@ -108,6 +153,9 @@ def test_managed_source_roundtrip_keeps_real_task_rng_ids_and_learning_budget(tm
         restored = store.load('course.pt')
         assert restored.aborted_request_ids.tolist() == [7, -1, -1, -1]
         cold_env = scene(tmp_path, restored.components, seed=29)
+        if with_transport:
+            cold_env._action_transport = DelayedActionTransport(
+                4, 6, env._action_transport.config, seed=9)
         cold_env._sensor_model = LabSensorModel(4, env._sensor_model.seed)
         cold = ManagedLabRuntime(cold_env, recipe, restored.components, identity(cold_env))
         assert restored.components.task_source is cold
@@ -125,6 +173,13 @@ def test_managed_source_roundtrip_keeps_real_task_rng_ids_and_learning_budget(tm
         assert cold_env._terrain_course.tasks.protocol is restored.components.protocol
         assert restored.components.protocol.active_id.eq(-1).all()
         assert restored.components.protocol.max_seen_id.eq(7).all()
+        if with_transport:
+            assert torch.equal(env._action_transport.generator.get_state(),
+                               cold_env._action_transport.generator.get_state())
+            mask = torch.ones(4, dtype=torch.bool)
+            env._action_transport.reset(mask)
+            cold_env._action_transport.reset(mask)
+            assert torch.equal(env._action_transport.lags, cold_env._action_transport.lags)
         for first, second in ((course.router.generator, cold.course.router.generator),
                                (course.tasks.generator, cold.course.tasks.generator)):
             torch.testing.assert_close(torch.rand(16, generator=first), torch.rand(16, generator=second))
@@ -133,7 +188,8 @@ def test_managed_source_roundtrip_keeps_real_task_rng_ids_and_learning_budget(tm
         restored.restore_global_rng_after_cold_setup()
 
 
-@pytest.mark.parametrize('change', ('identity', 'reward', 'watermark', 'live_physics', 'legacy_format', 'mechanical_identity'))
+@pytest.mark.parametrize('change', ('identity', 'reward', 'watermark', 'live_physics', 'legacy_format',
+                                    'mechanical_identity', 'critic_contract_missing', 'critic_contract_changed'))
 def test_managed_restore_refuses_incompatible_or_live_task_state(tmp_path, change):
     recipe, components, journal, store = fixture(tmp_path, full=True, target_rollouts=35000)
     with journal:
@@ -153,6 +209,10 @@ def test_managed_restore_refuses_incompatible_or_live_task_state(tmp_path, chang
             saved['format'] = 'managed_lab_task_source_v2'
         elif change == 'mechanical_identity':
             saved['startup_parameters_sha256'] = 'c' * 64
+        elif change == 'critic_contract_missing':
+            saved['identity'].pop('critic_input_contract')
+        elif change == 'critic_contract_changed':
+            saved['identity']['critic_input_contract'] = 'different_meaning_same_dimensions'
         else:
             cold_env._physical_tick = 1
         with pytest.raises(ValueError, match='original sources|watermarks'):

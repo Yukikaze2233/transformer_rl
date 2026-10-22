@@ -119,7 +119,10 @@ class LabStartupDynamics:
             actual_mass, actual_com, actual_inertia = published_mass, published_com, published_inertia
         self.mass_kg_by_environment = actual_mass.sum(-1).to(device)
         self.mass_scale = (actual_mass.sum(-1) / nominal).to(device)[:, None]
-        self.base_com_local_m = actual_com[:, 0, :3].to(device)
+        base_index = binding.native_body_names.index('base_link')
+        self.base_com_local_m = actual_com[:, base_index, :3].to(device)
+        self.nominal_base_com_local_m = coms[:, base_index, :3].to(device)
+        self.base_com_delta_local_m = self.base_com_local_m - self.nominal_base_com_local_m
         bound = torch.cat((actual_mass.flatten(), actual_com.flatten(), actual_inertia.flatten())).numpy().tobytes()
         configuration = None if config is None else asdict(config)
         self._receipt = {

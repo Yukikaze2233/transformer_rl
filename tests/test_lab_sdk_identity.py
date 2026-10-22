@@ -227,7 +227,7 @@ def test_fresh_and_ordinary_same_sdk_recovery_need_no_new_inventory(tmp_path, mo
 def test_runtime_identity_failure_is_published_before_the_sdk_can_open(tmp_path, monkeypatch):
     from transformer_rl.formal.lab_env import runtime as module
 
-    monkeypatch.setattr(module, 'parse_configuration', lambda *_: (None,) * 5 + ({},) + (None,) * 3)
+    monkeypatch.setattr(module, 'parse_configuration', lambda *_: (None,) * 5 + ({},) + (None,) * 4)
     monkeypatch.setattr(module, 'ManagedCurriculum', lambda *_: None)
     failure = ValueError('changed target SDK')
 

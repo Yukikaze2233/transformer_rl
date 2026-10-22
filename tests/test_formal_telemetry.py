@@ -130,6 +130,21 @@ def test_nonfinite_density_is_unavailable_and_does_not_turn_into_zero():
     assert report['reward_nonfinite_samples']['reward_density_per_s/height'] == 1
 
 
+def test_learning_exposure_excludes_scripted_or_invalid_intervals():
+    observer = RolloutTelemetry(4, 'cpu')
+    family = torch.tensor([0, 5, 5, 99])
+    observer.observe_occupancy(family, torch.zeros(4, dtype=torch.long))
+    observer.observe_learning(family, torch.tensor([True, False, True, True]),
+                              torch.tensor([True, False, True, False]),
+                              torch.tensor([True, False, False, False]))
+    report = observer.summary()
+    assert report['task_environment_step_fraction']['recovery'] == .5
+    assert report['ppo_eligible_task_steps']['recovery'] == 1
+    assert report['state_auxiliary_eligible_task_steps']['recovery'] == 1
+    assert report['next_auxiliary_eligible_task_steps']['recovery'] == 0
+    assert sum(report['ppo_eligible_task_steps'].values()) == 2
+
+
 def test_reward_events_raw_costs_and_gates_keep_their_units_and_one_host_transfer(monkeypatch):
     observer = RolloutTelemetry(2, 'cpu', missing_terms={'contact_slip': 'unavailable'})
     observer.observe_rewards({'bounded_cost.effort': torch.tensor([-2., -4.])}, series={

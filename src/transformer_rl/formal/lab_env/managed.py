@@ -16,6 +16,7 @@ import torch
 from ..learning.checkpoint import LearningComponents, LearningRecipe
 from .adapter import LabLabeledEnv
 from .collector import LabCollector
+from .critic_features import CRITIC_INPUT_CONTRACT
 from .formal_curriculum import FormalCurriculumCapabilities, FormalTaskCurriculum, LabTaskDrawSampler
 
 
@@ -55,7 +56,7 @@ class ManagedLabRuntime:
     task quota and independent RNG streams survive the new physical reset.
     """
 
-    _FORMAT = 'managed_lab_task_source_v4'
+    _FORMAT = 'managed_lab_task_source_v5'
 
     def __init__(self, env, recipe, components, identity, *, profile=False, physics_health=None):
         if type(profile) is not bool or not isinstance(identity, dict):
@@ -68,12 +69,16 @@ class ManagedLabRuntime:
         from .sensors import LabSensorModel
 
         self.sensor_model = env._sensor_model
+        self.action_transport = getattr(env, '_action_transport', None)
         if (not isinstance(self.sensor_model, LabSensorModel)
                 or self.sensor_model.num_envs != recipe.num_envs
                 or self.sensor_model.device != torch.device(recipe.device)):
             raise ValueError('managed Lab requires the actual explicit actor sensor model')
         self.mechanical_identity = env._startup_dynamics.receipt['native_parameters_sha256']
         self.identity = json.loads(json.dumps(identity, sort_keys=True, allow_nan=False))
+        if self.identity.get('critic_input_contract', CRITIC_INPUT_CONTRACT) != CRITIC_INPUT_CONTRACT:
+            raise ValueError('managed Lab critic input contract differs')
+        self.identity['critic_input_contract'] = CRITIC_INPUT_CONTRACT
         self.profile = profile
         self.physics_health = physics_health
         curriculum = ManagedCurriculum(recipe, components, FormalCurriculumCapabilities(True, True, True))
@@ -103,6 +108,7 @@ class ManagedLabRuntime:
     def _require_binding(self):
         if (self.course is not self.env._terrain_course
                 or self.sensor_model is not self.env._sensor_model
+                or self.action_transport is not getattr(self.env, '_action_transport', None)
                 or self.course.tasks.protocol is not self.components.protocol
                 or self.env._task_sampler.curriculum.budget is not self.components.curriculum
                 or self.env._task_sampler.curriculum.sampler is not self.components.sampler):
@@ -114,23 +120,42 @@ class ManagedLabRuntime:
         # Protocol is serialized by StructuredCheckpointStore exactly once.
         # It is restored/aborted there before this source rebuilds its episode.
         course['tasks'] = {key: value for key, value in course['tasks'].items() if key != 'protocol'}
-        return {'format': self._FORMAT, 'identity': deepcopy(self.identity),
+        state = {'format': self._FORMAT, 'identity': deepcopy(self.identity),
                 'reward_contract': self._reward_contract(), 'course': course,
                 'sensor_model': self.sensor_model.checkpoint_state_dict(),
+                'action_transport': (None if self.action_transport is None
+                                     else self.action_transport.state_dict()),
                 'startup_parameters_sha256': self.mechanical_identity,
                 'cold_physical_state_restored': False}
+        timing = getattr(self.env, 'control_timing_state_dict', lambda: None)()
+        if timing is not None:
+            state.update(format='managed_lab_task_source_v6', control_timing=timing)
+        return state
 
     def load_after_explicit_cold_setup(self, state):
         self._require_binding()
         expected = {'format', 'identity', 'reward_contract', 'course', 'cold_physical_state_restored',
                     'sensor_model', 'startup_parameters_sha256'}
+        legacy = isinstance(state, dict) and state.get('format') == 'managed_lab_task_source_v4'
+        timing = getattr(self.env, 'control_timing_state_dict', lambda: None)()
+        if timing is not None:
+            expected.add('control_timing')
+        if not legacy:
+            expected.add('action_transport')
         if (self._restored or self.env._physical_tick != 0
                 or not isinstance(state, dict) or set(state) != expected
-                or state['format'] != self._FORMAT or state['identity'] != self.identity
+                or state['format'] not in ((self._FORMAT, 'managed_lab_task_source_v4')
+                                          if timing is None else ('managed_lab_task_source_v6',))
+                or state['identity'] != self.identity
                 or state['reward_contract'] != self._reward_contract()
                 or state['startup_parameters_sha256'] != self.mechanical_identity
                 or state['cold_physical_state_restored'] is not False):
             raise ValueError('managed Lab restore requires the original sources before fresh physical sampling')
+        if legacy and self.action_transport is not None and self.action_transport.config.enabled:
+            raise ValueError('legacy task source has no action transport random stream')
+        transport_state = None if legacy else state['action_transport']
+        if not legacy and ((transport_state is None) != (self.action_transport is None)):
+            raise ValueError('action transport source differs from its checkpoint')
         course = deepcopy(state['course'])
         if not isinstance(course, dict):
             raise ValueError('managed Lab course snapshot must be a mapping')
@@ -157,6 +182,10 @@ class ManagedLabRuntime:
                 or (protocol.active_id >= 0).any()):
             raise ValueError('managed Lab request watermarks differ from the cold learning protocol')
         task['protocol'] = protocol.state_dict()
+        if transport_state is not None:
+            self.action_transport.restore_after_physical_reset(transport_state)
+        if timing is not None:
+            self.env.restore_control_timing(state['control_timing'])
         self.sensor_model.load_after_explicit_cold_setup(state['sensor_model'])
         self.course.restore_after_physical_reset(course)
         self._restored = True

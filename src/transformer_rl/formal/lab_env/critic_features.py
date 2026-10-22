@@ -1,6 +1,7 @@
 """182D 环境特权块的显式组装。
 
-该模块只拼接调用方提供的真实字段，不推断、不补零。185D 网络输入由
+该模块只拼接调用方提供的真实字段，不推断、不补零。延迟统一使用物理步，
+其余物理量保留字段名声明的 SI 单位，不新增隐式缩放。185D 网络输入由
 ``StructuredActorCritic.critic_features`` 在 182D 之后追加 detach 的估计速度。
 """
 from __future__ import annotations
@@ -10,6 +11,7 @@ import torch
 
 CRITIC182_DIM = 182
 TERRAIN_SCAN_DIM = 77
+CRITIC_INPUT_CONTRACT = "lab_critic_physical_steps_relative_motion_issued_history_v2"
 CRITIC182_SLICES = {
     "actor_frame": slice(0, 35),
     "root_velocity_body_m_s": slice(35, 38),
@@ -31,6 +33,30 @@ CRITIC182_SLICES = {
 }
 
 
+class CriticActionHistory:
+    """Completed policy-issued actions, newest first, local to a control epoch.
+
+    The clean actor frame already contains the most recent action. Only the
+    second and third most recent completed actions belong in the extra 12D.
+    Transport arrivals and script targets must not replace issued actions.
+    """
+
+    def __init__(self, num_envs, *, device):
+        self.actions = torch.zeros(num_envs, 3, 6, dtype=torch.float32, device=device)
+
+    def record(self, issued_action, *, policy_owned):
+        self.actions[:, 2].copy_(self.actions[:, 1])
+        self.actions[:, 1].copy_(self.actions[:, 0])
+        self.actions[:, 0].copy_(issued_action.detach())
+        self.clear(~policy_owned)
+
+    def clear(self, mask):
+        self.actions.masked_fill_(mask[:, None, None], 0.)
+
+    def older_actions(self):
+        return self.actions[:, 1:].flatten(1)
+
+
 def _batch(name, value, width, n, device):
     if (not isinstance(value, torch.Tensor) or value.shape != (n, width)
             or value.device != device or value.dtype != torch.float32
@@ -45,7 +71,7 @@ def environment_features_182(*, actor_frame, root_velocity_body_m_s, height_abov
                              mass_scale, wheel_material, terrain_scan, previous_actions,
                              joint_acceleration_rad_s2, com_offset_body_m,
                              nominal_pose_delta_rad):
-    """按固定顺序拼成 182D 物理特权块。"""
+    """按固定顺序拼成 182D 物理特权块；步数为 dt_physics 的倍数。"""
     if not isinstance(actor_frame, torch.Tensor) or actor_frame.ndim != 2:
         raise ValueError("actor_frame 需要二维张量")
     n, device = actor_frame.shape[0], actor_frame.device
@@ -84,4 +110,5 @@ def environment_features_182(*, actor_frame, root_velocity_body_m_s, height_abov
     return result
 
 
-__all__ = ["CRITIC182_DIM", "CRITIC182_SLICES", "TERRAIN_SCAN_DIM", "environment_features_182"]
+__all__ = ["CRITIC182_DIM", "CRITIC182_SLICES", "CRITIC_INPUT_CONTRACT",
+           "CriticActionHistory", "TERRAIN_SCAN_DIM", "environment_features_182"]

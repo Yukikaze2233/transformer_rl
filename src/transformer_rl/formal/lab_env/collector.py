@@ -88,7 +88,7 @@ class LabCollector:
         mask_records = {}
         reset_before = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         outcomes = torch.zeros(2, dtype=torch.long, device=self.device)
-        cause_names = ('true_failure', 'time_limit', 'spatial_exit', 'simultaneous_truncations')
+        cause_names = ('true_failure', 'time_limit', 'spatial_exit', 'simultaneous_truncations', 'query_rejected')
         cause_counts = torch.zeros(len(cause_names), dtype=torch.long, device=self.device)
         environment_timing: dict[str, float] = {}
         raw_env = getattr(self.env, 'env', None)
@@ -107,11 +107,14 @@ class LabCollector:
 
         for step in range(steps):
             current = self._current
+            interval_family = None
             if telemetry_error is None:
                 try:
                     tasks = getattr(getattr(raw_env, '_terrain_course', None), 'tasks', None)
                     telemetry.observe_occupancy(getattr(tasks, 'family', None),
                                                 getattr(raw_env, '_command_mode', None))
+                    if tasks is not None:
+                        interval_family = tasks.family.clone()
                 except Exception as error:
                     telemetry_error = f'{type(error).__name__}: {error}'
             mean, raw_state, _ = (self.model.actor.policy.outputs(self._history)
@@ -178,6 +181,12 @@ class LabCollector:
                 next_label_valid=current.labels.valid & final.valid,
                 next_same_control_epoch=same_final_epoch,
             )
+            if telemetry_error is None:
+                try:
+                    telemetry.observe_learning(interval_family, masks.actor,
+                                                masks.state_auxiliary, masks.next_auxiliary)
+                except Exception as error:
+                    telemetry_error = f'{type(error).__name__}: {error}'
             self._profile_boundary('masks', step + 1)
             next_value = torch.zeros_like(old_value)
             ordinary = (masks.bootstrap & ~returned.truncated).nonzero().flatten()
@@ -276,4 +285,7 @@ class LabCollector:
         mechanical = getattr(raw_env, 'mechanical_metrics', None)
         if mechanical is not None:
             self.last_metrics['mechanical'] = mechanical
+        timing = getattr(raw_env, 'control_timing_metrics', None)
+        if timing is not None:
+            self.last_metrics['control_timing'] = timing()
         return batch

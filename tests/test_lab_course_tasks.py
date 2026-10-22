@@ -47,6 +47,23 @@ def test_completed_estimate_does_not_use_privileged_values():
     torch.testing.assert_close(result.wheel_contact_probability, raw[:, 6:8].sigmoid())
 
 
+@pytest.mark.parametrize('kind', [2, 3, 5])
+def test_cyclic_command_duration_allows_admitted_amplitude_to_reach_request(kind):
+    tasks, sample = fixture(kind)
+    sample = replace(sample, command=torch.tensor([[0., 0., 6., .32], [0., 0., -6., .32]]))
+    tasks.reset(torch.arange(2), sample, torch.zeros(2, dtype=torch.float64))
+    duration = float(tasks.trajectory.duration_s.max())
+    assert duration >= 6.
+    peaks = torch.zeros(2)
+    for tick in range(int(duration / .01) + 1):
+        admission, _, _, _ = tasks.step(torch.full((2,), (tick + 1) * .01, dtype=torch.float64),
+                                      None, torch.zeros(2))
+        peaks = torch.maximum(peaks, admission.admitted[:, 2].abs())
+    assert peaks.min() > 5.98
+    metrics = tasks.command_coverage_metrics()
+    assert metrics['interval_rows'] > 0 and metrics['wheel_projected_rows'] == 0
+
+
 def test_no_success_for_airborne_timer_without_ascent():
     tasks = supported_jump()
     for _ in range(10):

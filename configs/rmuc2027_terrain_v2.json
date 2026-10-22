@@ -1,0 +1,87 @@
+{
+  "schema": "rmuc2027-terrain-assets/2",
+  "package_root": "/home/kaiser/terrain/RMUC2027_RL_Terrains",
+  "units": "m",
+  "up_axis": "Z",
+  "assets": {
+    "single_step_buff": {
+      "usd": "single_step_buff/terrain.usdc",
+      "usd_sha256": "e8b0172199256b9ef8d7c7c6884f8735caa2b9080bf4a46ad2fc578cb2bb7a26",
+      "visual_prim": "/Terrain/Visual",
+      "collision_prim": "/Terrain/Collision",
+      "bounds_local_m": [
+        [
+          -0.56,
+          -1.50051419,
+          -0.19754526
+        ],
+        [
+          0.56,
+          1.50363069,
+          0.20100009
+        ]
+      ],
+      "approach_axis": "+Y",
+      "spawn_front_center_local_m": [
+        0.0,
+        -1.25,
+        0.0
+      ],
+      "step": {
+        "total_rise_m": 0.2,
+        "front_panel_m": 0.15,
+        "underpanel_gap_m": 0.05,
+        "width_m": 1.12,
+        "effective_step_rise_m": 0.2,
+        "front_panel_and_underpanel_are_geometry_details": true
+      },
+      "material": {
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.0,
+        "status": "unmeasured_shared_fallback"
+      },
+      "qualification": "static_geometry_only_not_robot_training_qualified"
+    },
+    "two_level_steps": {
+      "usd": "two_level_steps/terrain.usdc",
+      "usd_sha256": "ffd2579605af6f0664ea91098233742336b0b7d5e819c40b6404b4558d58af0a",
+      "visual_prim": "/Terrain/Visual",
+      "collision_prim": "/Terrain/Collision",
+      "bounds_local_m": [
+        [
+          -1.5,
+          -1.5015209728492878,
+          -0.3390085236960643
+        ],
+        [
+          2.449999753266033,
+          1.5018060850506827,
+          0.3498914902149704
+        ]
+      ],
+      "approach_axis": "+X",
+      "spawn_front_center_local_m": [
+        -1.25,
+        0.0,
+        0.0
+      ],
+      "profile": {
+        "tread_rise_m": 0.2,
+        "tread_depth_m": 0.8,
+        "inner_rim_rise_m": 0.15,
+        "inner_rim_depth_m": 0.8,
+        "landing_rise_m": 0.3,
+        "post_rim_descent_m": 0.05,
+        "width_m": 3.0
+      },
+      "material": {
+        "static_friction": 0.6,
+        "dynamic_friction": 0.5,
+        "restitution": 0.0,
+        "status": "unmeasured_shared_fallback"
+      },
+      "qualification": "static_geometry_only_not_robot_training_qualified"
+    }
+  }
+}

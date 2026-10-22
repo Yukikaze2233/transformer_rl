@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from transformer_rl.formal.lab_env import train
+from transformer_rl.formal.lab_env.critic_features import CRITIC_INPUT_CONTRACT
 from transformer_rl.formal.lab_env.formal_curriculum import FormalTaskCurriculum
 
 
@@ -55,7 +56,7 @@ def test_real_curriculum_checkpoint_preserves_count_without_stage_offset(include
     curriculum = FormalTaskCurriculum(2, include_jump=include_jump)
     curriculum.budget.charge_rollout()
     payload = {'format': 'lab_ppo_v1', 'update': 1, 'formal_curriculum': True,
-               'curriculum': curriculum.state_dict()}
+               'curriculum': curriculum.state_dict(), 'critic_input_contract': CRITIC_INPUT_CONTRACT}
     train._require_resume_scope(payload)
 
     # Earlier stage probes did not persist a validation-only marker. Their
@@ -88,3 +89,15 @@ def test_partial_validation_marker_still_forbids_resume(marker):
 def test_invalid_or_different_checkpoint_contract_is_rejected(payload):
     with pytest.raises(ValueError):
         train._require_resume_scope(payload)
+
+
+@pytest.mark.parametrize('contract', (None, 'different_meaning_same_dimensions', CRITIC_INPUT_CONTRACT))
+def test_same_network_dimensions_do_not_silently_migrate_critic_features(contract):
+    payload = {'format': 'lab_ppo_v1', 'update': 1, 'policy': {'critic_input_dim': 185}}
+    if contract is not None:
+        payload['critic_input_contract'] = contract
+    if contract == CRITIC_INPUT_CONTRACT:
+        train._require_resume_scope(payload)
+    else:
+        with pytest.raises(ValueError, match='critic input contract'):
+            train._require_resume_scope(payload)

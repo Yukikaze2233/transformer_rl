@@ -242,6 +242,19 @@ class LabCourseTasks:
         # Verified success, reset while unverified, closed while unverified.
         # The latter two are incomplete evidence, not invented physical failures.
         self.physical_outcome_counts = torch.zeros(3, dtype=torch.long, device=self.device)
+        self.command_min = torch.full((3, 4), float('inf'), device=self.device)
+        self.command_max = torch.full((3, 4), -float('inf'), device=self.device)
+        self.command_counts = torch.zeros(3, dtype=torch.long, device=self.device)
+
+    def command_coverage_metrics(self):
+        counts = self.command_counts.cpu().tolist()
+        if counts[0] == 0:
+            return {'scope': 'since_current_physical_runtime_setup', 'interval_rows': 0}
+        ranges = torch.stack((self.command_min, self.command_max), -1).cpu().tolist()
+        return {'scope': 'since_current_physical_runtime_setup', 'interval_rows': counts[0],
+                'wheel_projected_rows': counts[1], 'slew_limited_rows': counts[2],
+                'range_order': ['forward_m_s', 'lateral_m_s', 'yaw_rad_s', 'height_m'],
+                'ranges': dict(zip(('requested', 'wheel_projected', 'admitted'), ranges))}
 
     def reset(self, ids, task, now):
         self.physical_outcome_counts[1].add_((self.physical_id[ids] >= 0).sum())
@@ -262,6 +275,15 @@ class LabCourseTasks:
         start[hold] = target[hold]
         self.trajectory.start[ids], self.trajectory.end[ids] = start, target
         duration = .5 + 2.5 * torch.rand(len(ids), generator=self.generator, device=self.device)
+        # Leave enough time for the existing slew limits to cover the range.
+        projected_start = self.stream.envelope.project(start)[0]
+        projected_end = self.stream.envelope.project(target)[0]
+        rates = target.new_tensor((self.stream.rates.forward_acceleration_m_s2,
+                                   self.stream.rates.yaw_acceleration_rad_s2,
+                                   self.stream.rates.height_rate_m_s))
+        travel_time = ((projected_end - projected_start)[:, (0, 2, 3)].abs() / rates).amax(-1)
+        derivative = target.new_tensor((0., 1., math.pi, 2 * math.pi, 1.5, 10., 1.))
+        duration = torch.maximum(duration, travel_time * derivative[task.draw.trajectory_kind])
         self.trajectory.duration_s[ids] = duration
         self.trajectory.frequency_start_hz[ids] = 1 / duration
         self.trajectory.frequency_end_hz[ids] = 2 / duration
@@ -295,6 +317,13 @@ class LabCourseTasks:
         cyclic = (self.trajectory.kind == 2) | (self.trajectory.kind == 3) | (self.trajectory.kind == 5)
         clock = torch.where(cyclic, self.elapsed.remainder(self.trajectory.duration_s), self.elapsed)
         admission = self.stream.step(self.trajectory.at(clock))
+        command_values = torch.stack((admission.requested, admission.wheel_projected, admission.admitted))
+        self.command_min.copy_(torch.minimum(self.command_min, command_values.amin(1)))
+        self.command_max.copy_(torch.maximum(self.command_max, command_values.amax(1)))
+        self.command_counts.add_(torch.stack((
+            torch.full((), self.num_envs, device=self.device, dtype=torch.long),
+            (~admission.wheel_necessary_at_request).sum(),
+            (admission.slew_fraction < 1 - 1e-5).sum())))
         if estimate is None:
             estimate = CompletedEstimate(
                 torch.zeros(self.num_envs, device=self.device), torch.zeros(self.num_envs, 2, device=self.device),

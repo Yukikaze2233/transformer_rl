@@ -56,6 +56,14 @@ class LabTerrainCourse:
         self._last_support_clearance_lr = torch.full((env.num_envs, 2), float('nan'),
                                                      dtype=torch.float32, device=env._device)
         self._ground_token = None
+        self._scan_token = None
+        self._ground_ready = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
+        self._scan_ready = torch.zeros_like(self._ground_ready)
+        self.query_invalid = torch.zeros_like(self._ground_ready)
+        self.query_rejected_intervals = torch.zeros((), dtype=torch.long, device=env._device)
+        self._query_rejection_evidence = None
+        self._query_rejection_reported = False
+        self._scan_heights = torch.zeros(env.num_envs, 77, device=env._device)
         # Match IsaacLab's default GridPatternCfg ordering: X changes fastest.
         x, y = torch.meshgrid(torch.linspace(-.5, .5, 11, device=env._device),
                               torch.linspace(-.3, .3, 7, device=env._device), indexing='xy')
@@ -177,6 +185,11 @@ class LabTerrainCourse:
         heights, valid, _, friction = self.query(points, self.router.tile[:, None].expand(-1, 3))
         valid = valid & finite_state
         if not valid.all():
+            isolated = self._isolate_outside(points, valid, finite_state, self._ground_ready
+                                             if hasattr(self, '_ground_ready') else None)
+        else:
+            isolated = torch.zeros(len(points), dtype=torch.bool, device=points.device)
+        if not (valid.all(-1) | isolated).all():
             ids = (~valid.all(-1)).nonzero().flatten()[:8]
             details = {'reason': 'nonfinite_state' if not finite_state[ids].all() else 'no_terrain_hit',
                        'physical_tick': env._physical_tick, 'rows': ids.tolist(),
@@ -187,20 +200,33 @@ class LabTerrainCourse:
             raise self._query_failure(
                 'course root/wheel query has no physical terrain support', details,
                 points, self.router.tile[:, None].expand(-1, 3), valid, physical)
-        env._ground_at_root.copy_(heights[:, 0])
-        self.wheel_ground.copy_(heights[:, 1:])
-        self.wheel_material.copy_(friction[:, 1:])
+        # A quarantined row retains only its last real measurement as an
+        # internal placeholder. The interval is reset and excluded from every
+        # PPO/auxiliary/bootstrap mask; it is never a synthetic terrain hit.
+        healthy = valid.all(-1) & ~isolated
+        env._ground_at_root[healthy] = heights[healthy, 0]
+        self.wheel_ground[healthy] = heights[healthy, 1:]
+        self.wheel_material[healthy] = friction[healthy, 1:]
+        if hasattr(self, '_ground_ready'):
+            self._ground_ready |= healthy
         self._ground_token = env._physical_tick
         return env._ground_at_root, self.wheel_ground
 
     def scan_77(self):
         env = self.env
         root = env._root_link_position()
+        if getattr(self, '_scan_token', None) == env._physical_tick:
+            return (5 * (root[:, 2, None] - self._scan_heights - env._task.nominal_height_m)).clamp(-1, 1), self._scan_heights[:, 38]
         points = self._yaw_offsets(root, self._grid_offsets)
         tiles = self.router.tile[:, None].expand(-1, 77)
         heights, valid, _, _ = self.query(points, tiles)
         valid = valid & torch.isfinite(root).all(-1, keepdim=True)
         if not valid.all():
+            isolated = self._isolate_outside(points, valid, torch.isfinite(root).all(-1, keepdim=True),
+                                             getattr(self, '_scan_ready', None))
+        else:
+            isolated = torch.zeros(len(root), dtype=torch.bool, device=root.device)
+        if not (valid.all(-1) | isolated).all():
             ids = (~valid.all(-1)).nonzero().flatten()[:8]
             details = {'physical_tick': env._physical_tick, 'rows': ids.tolist(),
                        'tile': self.router.tile[ids].tolist(),
@@ -208,8 +234,59 @@ class LabTerrainCourse:
             raise self._query_failure(
                 'privileged terrain scan left the authored collision geometry',
                 details, points, tiles, valid, root[:, None].expand_as(points))
+        if hasattr(self, '_scan_heights'):
+            healthy = valid.all(-1) & ~isolated
+            self._scan_heights[healthy] = heights[healthy]
+            self._scan_ready |= healthy
+            self._scan_token = env._physical_tick
+            heights = self._scan_heights
         relative = root[:, 2, None] - heights - env._task.nominal_height_m
         return (5 * relative).clamp(-1, 1), heights[:, 38]
+
+    def _isolate_outside(self, points, valid, finite_state, ready):
+        """Quarantine only established rows whose misses all leave the mesh.
+
+        Initial/reset misses, nonfinite physics, invalid tile IDs, interior
+        holes and a lost entire batch still use the bounded hard-error path.
+        """
+        isolated = torch.zeros(len(points), dtype=torch.bool, device=points.device)
+        bounds = getattr(self.query, 'physical_xy_bounds', None)
+        if ready is None or bounds is None:
+            return isolated
+        tile = self.router.tile
+        legal = (tile >= 0) & (tile < len(bounds))
+        selected = bounds[tile.clamp(0, len(bounds) - 1)]
+        outside = ((points[..., :2] < selected[:, None, 0] - 1e-5)
+                   | (points[..., :2] > selected[:, None, 1] + 1e-5)).any(-1)
+        bad = ~valid.all(-1)
+        isolated = (bad & ready & legal & finite_state.all(-1)
+                    & (valid | outside).all(-1) & torch.isfinite(points).all(dim=(-2, -1)))
+        if bool(bad.all()) or bool((bad & ~isolated).any()):
+            return torch.zeros_like(isolated)
+        if getattr(self, '_query_rejection_evidence', None) is None and bool(isolated.any()):
+            # Preserve the first bounded failure before reset overwrites its
+            # coordinates. Transfer this diagnostic only when metrics publish.
+            indices = (isolated[:, None] & ~valid).nonzero()[:8]
+            rows, columns = indices.unbind(-1)
+            self._query_rejection_evidence = {
+                'physical_tick': self.env._physical_tick,
+                'environment': rows.clone(), 'column': columns.clone(),
+                'tile': tile[rows].clone(),
+                'ray_origin_world_m': points[rows, columns].clone(),
+                'root_position_world_m': self.env._root_link_position()[rows].clone(),
+                'root_quaternion_xyzw': self.env._root_link_quat()[rows].clone(),
+                'classification': 'previously_valid_row_outside_physical_mesh',
+                'scope': 'first rejected event, at most eight failed columns; not an exhaustive trace',
+            }
+        self.query_invalid |= isolated
+        return isolated
+
+    def finish_queries(self):
+        # Resolve the terminal scan before done/reward publication. Its cached
+        # values are reused by _capture_terminal at this same physical tick.
+        self.scan_77()
+        self.query_rejected_intervals.add_(self.query_invalid.sum())
+        return self.query_invalid
 
     def wheel_lookahead(self):
         """Privileged near/far supervision; never called by command/FSM code."""
@@ -293,9 +370,12 @@ class LabTerrainCourse:
                 'step_up_m': draw.step_up_m,
                 'step_down_m': draw.step_down_m,
             }
+        curriculum = getattr(env._task_sampler, 'curriculum', None)
+        level_cap = (None if curriculum is None else
+                     curriculum.terrain_level_cap(self.router.manifest['levels']))
         origins, ground = self.router.reset(ids, task.terrain_kind, stage=env._task_sampler.stage,
                                              command_forward=task.command[:, 0],
-                                             requested=requested)
+                                             requested=requested, level_cap=level_cap)
         pose[:, :3] -= env._as_torch(env.scene.env_origins).index_select(0, ids)
         pose[:, :3] += origins
         # Spawn on the declared approach, rather than at the tile's first rise.
@@ -339,6 +419,11 @@ class LabTerrainCourse:
         self._last_support_clearance[ids[~ordinary]] = float('nan')
         self._last_support_clearance_lr[ids[~ordinary]] = float('nan')
         self._ground_token = None
+        self._scan_token = None
+        if hasattr(self, 'query_invalid'):
+            self.query_invalid[ids] = False
+            self._ground_ready[ids] = False
+            self._scan_ready[ids] = False
 
     def reset_commands(self, ids, task):
         env = self.env
@@ -481,6 +566,7 @@ class LabTerrainCourse:
 
     def observe_reward(self, sample, state, boundary):
         env = self.env
+        env._interval_policy_owned &= ~self.query_invalid
         self.recovery.observe_physics(
             height_m=state.height_above_ground_m, command_height_m=env._command[:, 3],
             tilt_rad=env._last_tilt,
@@ -549,7 +635,9 @@ class LabTerrainCourse:
             self._birth_family_counts.copy_(births)
 
     def metrics(self):
-        return {'atlas_sha256': self.router.identity,
+        report = {'atlas_sha256': self.router.identity,
+                'query_rejected_intervals': int(self.query_rejected_intervals),
+                'query_rejection_scope': 'spatial misses; reset, no PPO/auxiliary/bootstrap credit',
                 'recovery': self.recovery.metrics(),
                 'episode_birth_family_counts': dict(zip(
                     (name.name.lower() for name in TaskFamily), self._birth_family_counts.tolist())),
@@ -558,6 +646,7 @@ class LabTerrainCourse:
                 'spawn_lateral_offset_scope': 'exact_authored_two_wheel_approach_line',
                 'task_kind_histogram': self.tasks.kind_counts.tolist(),
                 'task_mode_histogram': self.tasks.mode_counts.tolist(),
+                'command_coverage': self.tasks.command_coverage_metrics(),
                 'level_histogram': torch.bincount(self.router.level, minlength=self.router.manifest['levels']).tolist(),
                 'tile_histogram': torch.bincount(self.router.tile, minlength=len(self.router.kinds)).tolist(),
                 'course_exits': int(self.router.course_exits.sum()),
@@ -574,3 +663,10 @@ class LabTerrainCourse:
                 'physical_request_outcomes': dict(zip(
                     ('verified_success', 'reset_before_verified_success', 'closed_before_verified_success'),
                     self.tasks.physical_outcome_counts.tolist()))}
+        if (self._query_rejection_evidence is not None
+                and not self._query_rejection_reported):
+            report['first_query_rejection'] = {
+                key: value.detach().cpu().tolist() if isinstance(value, torch.Tensor) else value
+                for key, value in self._query_rejection_evidence.items()}
+            self._query_rejection_reported = True
+        return report

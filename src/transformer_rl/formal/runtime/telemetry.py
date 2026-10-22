@@ -30,6 +30,7 @@ class RolloutTelemetry:
                                       device=self.device, dtype=torch.float64)
         self._categories = (torch.arange(len(self._FAMILIES), device=self.device)[:, None],
                             torch.arange(len(self._MODES), device=self.device)[:, None])
+        self._learning = torch.zeros(3, len(self._FAMILIES), device=self.device, dtype=torch.float64)
 
     @torch.no_grad()
     def observe_occupancy(self, family, mode):
@@ -46,6 +47,15 @@ class RolloutTelemetry:
             self._occupancy[start + len(names)].add_(((value < 0) | (value >= len(names))).sum())
             start += len(names) + 1
         self._occupancy_steps += 1
+
+    @torch.no_grad()
+    def observe_learning(self, family, actor, state_auxiliary, next_auxiliary):
+        """Eligibility after ownership/query masks, before PPO minibatch updates."""
+        if family is None:
+            return
+        groups = family == self._categories[0]
+        for index, mask in enumerate((actor, state_auxiliary, next_auxiliary)):
+            self._learning[index].add_((groups & mask[None]).sum(-1))
 
     @torch.no_grad()
     def observe_rewards(self, terms, *, series=None):
@@ -91,7 +101,7 @@ class RolloutTelemetry:
         reward = (torch.cat((self._sums, self._invalid)) if names
                   else torch.empty(0, device=self.device, dtype=torch.float64))
         # This is the only device-to-host transfer in this observer.
-        values = torch.cat((reward, self._occupancy)).detach().cpu().tolist()
+        values = torch.cat((reward, self._occupancy, self._learning.flatten())).detach().cpu().tolist()
         size, samples = len(names), self._steps * self.num_envs
         densities, invalid = values[:size], values[size:2 * size]
         result = {
@@ -110,12 +120,18 @@ class RolloutTelemetry:
                 result['reward_nonfinite_samples'][name] = int(bad)
         if self._occupancy_steps:
             denominator = self._occupancy_steps * self.num_envs
-            occupancy = values[2 * size:]
+            occupancy = values[2 * size:2 * size + self._occupancy.numel()]
             offset = len(self._FAMILIES) + 1
             result['task_environment_step_fraction'] = dict(zip(
                 (*self._FAMILIES, 'unknown'), (v / denominator for v in occupancy[:offset])))
             result['command_mode_before_step_fraction'] = dict(zip(
                 (*self._MODES, 'unknown'), (v / denominator for v in occupancy[offset:])))
+            learning = values[2 * size + self._occupancy.numel():]
+            for index, name in enumerate(('ppo_eligible', 'state_auxiliary_eligible', 'next_auxiliary_eligible')):
+                start = index * len(self._FAMILIES)
+                result[name + '_task_steps'] = dict(zip(self._FAMILIES,
+                    (int(v) for v in learning[start:start + len(self._FAMILIES)])))
+            result['learning_exposure_scope'] = 'masked fresh endpoints; not retained optimizer steps or repeated sample uses'
         return result
 
 

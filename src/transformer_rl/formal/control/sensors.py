@@ -46,7 +46,8 @@ class SensorModel:
     重新采样新物理回合；不把旧缓存读数带入重建后的机器人。
     """
 
-    def __init__(self, num_envs, seed, config=SensorModelConfig(), *, device='cpu', initial_physical_tick=0):
+    def __init__(self, num_envs, seed, config=SensorModelConfig(), *, device='cpu', initial_physical_tick=0,
+                 uplink_delay_s=None, maximum_uplink_s=0.):
         if (type(num_envs) is not int or num_envs < 1 or type(seed) is not int or not 0 <= seed < 2**63
                 or not isinstance(config, SensorModelConfig) or type(initial_physical_tick) is not int
                 or initial_physical_tick < 0
@@ -59,11 +60,21 @@ class SensorModel:
         self.delay_choices = torch.tensor([round(v / config.physics_dt_s) for v in config.observation_delays_s],
                                          dtype=torch.long, device=self.device)
         self.capacity = int(max(config.observation_delays_s) / config.physics_dt_s + .5) + 1
+        if (type(maximum_uplink_s) not in (int, float) or not math.isfinite(maximum_uplink_s)
+                or not 0 <= maximum_uplink_s <= config.physics_dt_s
+                or (uplink_delay_s is None) != (maximum_uplink_s == 0)
+                or uplink_delay_s is not None and (
+                    not isinstance(uplink_delay_s, torch.Tensor) or uplink_delay_s.shape != (num_envs,)
+                    or uplink_delay_s.device != self.device or uplink_delay_s.dtype != torch.float64)):
+            raise ValueError('sensor uplink requires the shared bounded physical communication allocation')
+        self.uplink_delay_s, self.maximum_uplink_s = uplink_delay_s, maximum_uplink_s
+        self.capacity += math.ceil(maximum_uplink_s / config.physics_dt_s)
         self.values = torch.empty(self.capacity, num_envs, 18, device=self.device)
         self.times = torch.empty(self.capacity, num_envs, dtype=torch.float64, device=self.device)
         self.count = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         self.initialized = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         self.nominal = torch.zeros_like(self.initialized)
+        self.noise_scale = torch.ones(num_envs, device=self.device)
         self.lags = torch.zeros(num_envs, 4, dtype=torch.long, device=self.device)
         self._rows = torch.arange(num_envs, device=self.device)
         self._columns = torch.arange(18, device=self.device)
@@ -76,7 +87,7 @@ class SensorModel:
         self._sample_tick, self._sample = None, None
 
     @torch.no_grad()
-    def reset(self, mask, now_s):
+    def reset(self, mask, now_s, *, difficulty=1.):
         if (not isinstance(mask, torch.Tensor) or mask.shape != (self.num_envs,)
                 or mask.device != self.device or mask.dtype != torch.bool
                 or not isinstance(now_s, torch.Tensor) or now_s.shape != (self.num_envs,)
@@ -84,6 +95,8 @@ class SensorModel:
                 or not torch.isfinite(now_s).all()
                 or (now_s - self.physical_tick * self.config.physics_dt_s).abs().gt(1e-8).any()):
             raise ValueError('sensor reset requires selected rows at the actual current physical boundary')
+        if type(difficulty) not in (int, float) or not math.isfinite(difficulty) or not 0 <= difficulty <= 1:
+            raise ValueError('sensor difficulty must be a finite [0,1] exposure scale')
         rows = mask.nonzero().flatten()
         if not rows.numel():
             return
@@ -93,7 +106,8 @@ class SensorModel:
                                 generator=self.reset_generator, device=self.device)
         self.nominal[rows] = nominal < self.config.nominal_episode_fraction
         enabled = ~self.nominal[rows] & (extra < self.config.extra_delay_probability)
-        self.lags[rows] = self.delay_choices[choices] * enabled[:, None]
+        self.lags[rows] = (self.delay_choices[choices] * enabled[:, None] * difficulty).round().long()
+        self.noise_scale[rows] = difficulty
         self.initialized[rows], self.count[rows] = True, 0
         self.reset_rows_consumed += rows.numel()
         # 回合抽样不推进噪声RNG，避免一行reset改变其他行后续噪声序列。
@@ -147,20 +161,41 @@ class SensorModel:
     def _read_rows(self, rows, generator):
         """Read initialized ring rows; the caller owns the RNG and cache lifetime."""
         # 只选本回合已写入的槽，不复制reset投影来伪造更老的传感器样本。
-        lags = torch.minimum(self.lags[rows], (self.count[rows] - 1)[:, None])
-        slots = (self.physical_tick - lags) % self.capacity
-        values = self.values[slots[:, self._groups], rows[:, None], self._columns[None]]
-        stamps = self.times[slots, rows[:, None]]
+        lags = self.lags[rows]
+        if self.uplink_delay_s is None:
+            lags = torch.minimum(lags, (self.count[rows] - 1)[:, None])
+            slots = (self.physical_tick - lags) % self.capacity
+            values = self.values[slots[:, self._groups], rows[:, None], self._columns[None]]
+            stamps = self.times[slots, rows[:, None]]
+        else:
+            # Interpolate only already observed samples. A fresh reset has one
+            # sample, so its actual age is zero rather than invented prehistory.
+            age = lags.double() + self.uplink_delay_s[rows, None] / self.config.physics_dt_s
+            age = age.minimum((self.count[rows] - 1)[:, None])
+            recent = age.floor().long()
+            fraction = age - recent
+            older = (recent + 1).minimum((self.count[rows] - 1)[:, None])
+            recent_slots = (self.physical_tick - recent) % self.capacity
+            older_slots = (self.physical_tick - older) % self.capacity
+            a = self.values[recent_slots[:, self._groups], rows[:, None], self._columns[None]]
+            b = self.values[older_slots[:, self._groups], rows[:, None], self._columns[None]]
+            values = a + fraction[:, self._groups].float() * (b - a)
+            ta = self.times[recent_slots, rows[:, None]]
+            tb = self.times[older_slots, rows[:, None]]
+            stamps = ta + fraction * (tb - ta)
         noise = torch.rand(values.shape, generator=generator, device=self.device).mul_(2).sub_(1)
-        values = values + noise * self._halfwidth * ~self.nominal[rows, None]
+        values = values + noise * self._halfwidth * ~self.nominal[rows, None] * self.noise_scale[rows, None]
         return SensorSample(values[:, :6], values[:, 6:12], values[:, 12:15], values[:, 15:18], stamps)
 
     def checkpoint_state_dict(self):
-        return {'config': asdict(self.config), 'seed': self.seed, 'num_envs': self.num_envs,
+        state = {'config': asdict(self.config), 'seed': self.seed, 'num_envs': self.num_envs,
                 'generator_state': self.generator.get_state().clone(),
                 'reset_generator_state': self.reset_generator.get_state().clone(),
                 'reset_rows_consumed': self.reset_rows_consumed, 'noise_rows_consumed': self.noise_rows_consumed,
                 'cold_disposition': 'flush physical sensor cache; retain RNG; redraw new physical episodes'}
+        if self.maximum_uplink_s:
+            state['communication_uplink_limit_s'] = self.maximum_uplink_s
+        return state
 
     def load_after_explicit_cold_setup(self, state):
         expected = SensorModel.checkpoint_state_dict(self)
@@ -168,6 +203,7 @@ class SensorModel:
                 or any(state[key] != expected[key] for key in ('seed', 'num_envs', 'cold_disposition'))
                 or not isinstance(state['config'], dict) or state['config'].keys() != expected['config'].keys()
                 or SensorModelConfig(**state['config']) != self.config
+                or state.get('communication_uplink_limit_s') != expected.get('communication_uplink_limit_s')
                 or any(type(state[key]) is not int or state[key] < 0
                        for key in ('reset_rows_consumed', 'noise_rows_consumed'))
                 or self.initialized.any() or self.count.any() or self._sample is not None):

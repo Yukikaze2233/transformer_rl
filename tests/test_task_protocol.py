@@ -173,7 +173,7 @@ def test_cancelled_on_arrival_does_not_briefly_start_a_skill():
     assert tick(protocol, 0.01, request=1).response.item() == RequestResponse.REPLAY
 
 
-@pytest.mark.parametrize('height', [0.0, 0.31, float('nan')])
+@pytest.mark.parametrize('height', [0.0, 0.41, float('nan')])
 def test_invalid_height_is_rejected_instead_of_silently_clipped(height):
     protocol = RequestProtocol(1)
     result = tick(protocol, 0, request=1, height=height)

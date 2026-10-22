@@ -20,6 +20,10 @@ from ..tasks.termination import NativeTaskLimits
 from ..control.sensors import SensorModelConfig
 from ..simulation.dynamics import StartupDynamicsConfig
 from .contract import FlatTaskSpec
+from .critic_features import CRITIC_INPUT_CONTRACT
+from .action_transport import ActionTransportConfig
+from ..control.communication import CommunicationConfig, EpisodeRandomizationConfig
+from .materials import WheelMaterialConfig
 from .formal_curriculum import FormalCurriculumCapabilities
 from .managed import ManagedCurriculum, ManagedLabRuntime
 from .settings import load_asset_description
@@ -65,7 +69,8 @@ def parse_configuration(recipe, configuration, authorized_boot):
     expected = {'format', 'authorized_boot', 'asset_directory', 'response_source_pin',
                 'terrain_atlas_pin', 'environment_spacing_m', 'task', 'pair_domain',
                 'physics', 'profile_collection', 'termination_limits', 'sensors', 'dynamics'}
-    if (not isinstance(configuration, dict) or set(configuration) != expected
+    allowed = expected | {'action_transport', 'wheel_material', 'communication', 'episode_randomization'}
+    if (not isinstance(configuration, dict) or not expected <= set(configuration) <= allowed
             or configuration['format'] != 'managed_lab_runtime_v4'
             or configuration['authorized_boot'] != authorized_boot or authorized_boot != boot_id()
             or recipe.device != 'cuda:0' or recipe.policy.critic_input_dim != 185
@@ -94,6 +99,15 @@ def parse_configuration(recipe, configuration, authorized_boot):
     dynamics = StartupDynamicsConfig(**configuration['dynamics'])
     if sensors.physics_dt_s != .005 or sensors.policy_dt_s != recipe.collection.policy_dt_s:
         raise ValueError('managed Lab sensor delay must share the actual physical/policy clock')
+    transport_raw = configuration.get('action_transport')
+    transport = (ActionTransportConfig() if transport_raw is None
+                 else ActionTransportConfig.from_dict(transport_raw))
+    if configuration.get('wheel_material') is not None:
+        WheelMaterialConfig.from_dict(configuration['wheel_material'])
+    if configuration.get('communication') is not None:
+        CommunicationConfig.from_dict(configuration['communication'])
+    if configuration.get('episode_randomization') is not None:
+        EpisodeRandomizationConfig.from_dict(configuration['episode_randomization'])
     if (tuple(task.action_bounds) != tuple(recipe.collection.action_bounds)
             or task.nominal_height_m != recipe.domain.nominal_height_m):
         raise ValueError('managed Lab task differs from the collector action bounds or nominal height')
@@ -122,15 +136,24 @@ def parse_configuration(recipe, configuration, authorized_boot):
                  separators=(',', ':'), allow_nan=False).encode()).hexdigest(),
                 'asset_manifest_sha256': asset.manifest_sha256,
                 'atlas_sha256': configuration['terrain_atlas_pin']['sha256'],
-                'response_sha256': configuration['response_source_pin']['sha256']}
-    return asset, response, pair, task, atlas, identity, limits, sensors, dynamics
+                'response_sha256': configuration['response_source_pin']['sha256'],
+                'critic_input_contract': CRITIC_INPUT_CONTRACT}
+    return asset, response, pair, task, atlas, identity, limits, sensors, dynamics, transport
 
 
 @contextmanager
 def runtime(recipe, components, configuration, *, control):
     """Expose the actual Lab task to the complete managed learning loop."""
     parsed = parse_configuration(recipe, configuration, control.binding['boot_id'])
-    asset, response, pair, task, atlas, identity, limits, sensors, dynamics = parsed
+    # Accept the old nine-value return used by existing synthetic fixtures;
+    # current parser returns the explicit action transport as the tenth value.
+    if len(parsed) == 9:
+        asset, response, pair, task, atlas, identity, limits, sensors, dynamics = parsed
+        transport = ActionTransportConfig()
+    elif len(parsed) == 10:
+        asset, response, pair, task, atlas, identity, limits, sensors, dynamics, transport = parsed
+    else:
+        raise ValueError('runtime parser returned an unexpected configuration tuple')
     # Check every stage before scene setup or any reserved production rollout.
     ManagedCurriculum(recipe, components, FormalCurriculumCapabilities(True, True, True))
     launcher = env = health = None
@@ -162,7 +185,13 @@ def runtime(recipe, components, configuration, *, control):
             formal_reward=FormalRewardConfig.from_manifest(
                 asset.manifest, normal_load_source='native_contact_patch_normal_forces'),
             termination_limits=limits,
-            sensors=sensors, dynamics=dynamics,
+            sensors=sensors, dynamics=dynamics, action_transport=transport,
+            communication=(None if configuration.get('communication') is None
+                           else CommunicationConfig.from_dict(configuration['communication'])),
+            episode_randomization=(None if configuration.get('episode_randomization') is None
+                                   else EpisodeRandomizationConfig.from_dict(configuration['episode_randomization'])),
+            wheel_material=(None if configuration.get('wheel_material') is None
+                            else WheelMaterialConfig.from_dict(configuration['wheel_material'])),
             declarative_scene=launcher.declarative_scene,
             terrain_scan=True, forward_scan=True, terrain_profile='course',
             terrain_atlas_manifest=str(atlas), expected_manifest_sha256=asset.manifest_sha256)
@@ -192,6 +221,9 @@ def runtime(recipe, components, configuration, *, control):
                 cfg.sim.physics, cfg.scene.robot, recipe.num_envs, recipe.device))
         env = WheeledLabEnv(cfg)
         health.check()
+        if configuration.get('wheel_material') is not None:
+            identity['wheel_material_parameters_sha256'] = (
+                env.wheel_material_receipt['startup_randomization']['native_parameters_sha256'])
         value = ManagedLabRuntime(env, recipe, components, identity,
                                   profile=configuration['profile_collection'], physics_health=health)
         health.check()
@@ -218,8 +250,14 @@ def runtime(recipe, components, configuration, *, control):
                                  'slider_effort': 'zero_target_with_manifest_damping_only'}),
             'sensors': {'configuration': configuration['sensors'],
                         'scope': 'actor encoder and IMU only; critic and supervision remain clean',
-                        'timebase': 'past-only physical-clock samples; fresh reset projection',
-                        'extra_USB_delay': False},
+                        'timebase': 'past-only physical-clock samples; fresh reset projection'},
+            'action_transport': {'configuration': configuration.get('action_transport'),
+                                 'scope': 'policy-action to controller-target latch; whole policy steps; not USB one-way latency'},
+            'communication': {'configuration': configuration.get('communication'),
+                              'allocation': 'one round-trip draw; uplink shared by PD and Actor; downlink before motor response',
+                              'substep_model': 'duration-weighted torque impulse, not intermediate robot dynamics'},
+            'episode_randomization': {'configuration': configuration.get('episode_randomization'),
+                                     'sampling': 'episode reset; startup mass and wheel materials remain fixed'},
             'wheel_material': env.wheel_material_receipt,
             'collision_isolation': env.collision_isolation_receipt,
             'cold_physical_state_restored': False, 'automatic_evaluation': False,

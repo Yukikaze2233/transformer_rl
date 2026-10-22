@@ -10,6 +10,7 @@ from test_structured_checkpoint import fixture
 from transformer_rl.common.training_control import boot_id, file_pin
 from transformer_rl.formal.contracts import ACTION_ORDER
 from transformer_rl.formal.lab_env.contract import FlatTaskSpec
+from transformer_rl.formal.lab_env.materials import WheelMaterialConfig
 from transformer_rl.formal.tasks.termination import NativeTaskLimits
 from transformer_rl.formal.control.sensors import SensorModelConfig
 from transformer_rl.formal.simulation.dynamics import StartupDynamicsConfig
@@ -59,7 +60,7 @@ def inputs(tmp_path, monkeypatch):
 def test_frozen_runtime_pins_sources_and_preserves_exact_physical_options(tmp_path, monkeypatch):
     recipe, _, journal, config, received = inputs(tmp_path, monkeypatch)
     with journal:
-        asset, response, pair, task, atlas, identity, limits, sensors, dynamics = module.parse_configuration(recipe, config, boot_id())
+        asset, response, pair, task, atlas, identity, limits, sensors, dynamics, transport = module.parse_configuration(recipe, config, boot_id())
         assert received == [(config['asset_directory'], recipe.asset_manifest_sha256)]
         assert asset.manifest_sha256 == identity['asset_manifest_sha256']
         assert pair is None and task.action_bounds == recipe.collection.action_bounds
@@ -67,8 +68,41 @@ def test_frozen_runtime_pins_sources_and_preserves_exact_physical_options(tmp_pa
         assert identity['atlas_sha256'] == config['terrain_atlas_pin']['sha256']
         assert identity['response_sha256'] == config['response_source_pin']['sha256']
         assert len(identity['runtime_sha256']) == 64
+        from transformer_rl.formal.lab_env.critic_features import CRITIC_INPUT_CONTRACT
+        assert identity['critic_input_contract'] == CRITIC_INPUT_CONTRACT
         assert limits.failure_tilt_rad == 2.5 and limits.forbidden_contact_confirm_s == .02
         assert sensors == SensorModelConfig() and dynamics == StartupDynamicsConfig()
+        assert transport.enabled is False
+
+
+@pytest.mark.parametrize('transport', (False, True))
+def test_optional_material_distribution_is_source_bound_before_sdk_setup(tmp_path, monkeypatch, transport):
+    recipe, _, journal, config, _ = inputs(tmp_path, monkeypatch)
+    with journal:
+        original = module.parse_configuration(recipe, config, boot_id())[5]
+        config['wheel_material'] = asdict(WheelMaterialConfig())
+        if transport:
+            config['action_transport'] = {'enabled': True, 'delays_steps': [0, 1], 'nominal_fraction': .5}
+        parsed = module.parse_configuration(recipe, config, boot_id())
+        assert len(parsed) == 10
+        assert parsed[5]['runtime_sha256'] != original['runtime_sha256']
+        config['wheel_material']['num_buckets'] = 0
+        with pytest.raises(ValueError, match='buckets'):
+            module.parse_configuration(recipe, config, boot_id())
+
+
+def test_communication_and_episode_schedule_are_frozen_before_sdk_setup(tmp_path, monkeypatch):
+    from transformer_rl.formal.control.communication import CommunicationConfig, EpisodeRandomizationConfig
+    recipe, _, journal, config, _ = inputs(tmp_path, monkeypatch)
+    with journal:
+        old = module.parse_configuration(recipe, config, boot_id())[5]['runtime_sha256']
+        config['communication'] = asdict(CommunicationConfig(enabled=True))
+        config['episode_randomization'] = asdict(EpisodeRandomizationConfig(enabled=True))
+        new = module.parse_configuration(recipe, config, boot_id())[5]['runtime_sha256']
+        assert old != new
+        config['communication']['total_delay_range_s'] = [0., .1]
+        with pytest.raises(ValueError, match='200Hz'):
+            module.parse_configuration(recipe, config, boot_id())
 
 
 @pytest.mark.parametrize('change', ('boot', 'task', 'capacity', 'stack_missing', 'sensor_missing', 'sensor_clock',
@@ -108,7 +142,7 @@ def test_sdk_open_failure_is_published_without_building_a_scene(tmp_path, monkey
     recipe, components, journal, config, _ = inputs(tmp_path, monkeypatch)
     # Configuration parsing is tested separately. Use CPU components for the
     # control/lifecycle test so this test cannot create a CUDA context.
-    monkeypatch.setattr(module, 'parse_configuration', lambda *_: (None, None, None, None, None, {}, None, None, None))
+    monkeypatch.setattr(module, 'parse_configuration', lambda *_: (None, None, None, None, None, {}, None, None, None, None))
     failures = []
     control = SimpleNamespace(binding={'boot_id': boot_id(), 'root': str(tmp_path)}, fail=failures.append)
     fake_package, fake_app = ModuleType('isaaclab'), ModuleType('isaaclab.app')
@@ -129,7 +163,7 @@ def test_sdk_open_failure_is_published_without_building_a_scene(tmp_path, monkey
 def test_fatal_failure_never_enters_sdk_shutdown_that_can_exit_zero(tmp_path, monkeypatch, cleanup_error):
     recipe, components, journal, config, _ = inputs(tmp_path, monkeypatch)
     monkeypatch.setattr(module, 'parse_configuration',
-                        lambda *_: (None, None, None, None, None, {}, None, None, None))
+                        lambda *_: (None, None, None, None, None, {}, None, None, None, None))
     failures, closed = [], []
     control = SimpleNamespace(binding={'boot_id': boot_id(), 'root': str(tmp_path)}, fail=failures.append)
     fake_app = ModuleType('isaaclab.app')

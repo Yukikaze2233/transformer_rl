@@ -31,7 +31,7 @@ from .contact_measurement import LabContactLoads, LabPhysicalSample
 from .contract import ACTION_DIM, CRITIC182_DIM, FlatTaskSpec, flat_reward, flat_termination
 from .formal_curriculum import LabTaskSample
 from .formal_reward import FormalRewardConfig, LabFormalReward
-from .critic_features import TERRAIN_SCAN_DIM, environment_features_182
+from .critic_features import CriticActionHistory, TERRAIN_SCAN_DIM, environment_features_182
 from .warp_scan import miss_histograms
 from .forward_scan import ForwardStepDetector
 from .skill_fsm import JumpState, SkillFSM
@@ -47,6 +47,8 @@ from .settings import LabEnvSettings, load_asset_description
 from .terrain_collision import partition_static_collision
 from .dynamics import LabStartupDynamics
 from .sensors import LabSensorModel
+from .action_transport import DelayedActionTransport
+from ..control.communication import EpisodeRandomization, PhysicalCommunication
 from .joint_coordinates import ContinuousJointCoordinates
 from .mechanics import NativeLoopTelemetry
 
@@ -101,6 +103,10 @@ class WheeledLabEnv(DirectRLEnv):
         self._wheel_materials = WheelMaterialReader(
             self.robot, self._binding.wheel_body_indices,
             num_envs=self.num_envs, device=self._device)
+        wheel_material = getattr(cfg, 'wheel_material_spec', None)
+        if wheel_material is not None:
+            self._wheel_materials.randomize_startup(
+                wheel_material, seed=int(getattr(cfg, 'seed', 0) or 0) + 32452843)
         self._startup_dynamics = LabStartupDynamics(
             self.robot, self._binding, self.num_envs, self._asset.manifest['total_mass_kg'],
             int(getattr(cfg, 'seed', 0) or 0) + 15485863,
@@ -119,8 +125,6 @@ class WheeledLabEnv(DirectRLEnv):
         )
         self._stiffness = self._control.controller.stiffness
         self._damping = self._control.controller.damping
-        self._last_wheel_velocity_body = torch.zeros(self.num_envs, 6,
-                                                     dtype=torch.float32, device=self._device)
         self._last_joint_acceleration = torch.zeros(self.num_envs, 6,
                                                     dtype=torch.float32, device=self._device)
         self._last_policy_velocity = torch.zeros(self.num_envs, 6,
@@ -133,6 +137,12 @@ class WheeledLabEnv(DirectRLEnv):
         self._pressure = self._build_pressure()
         self._spring_force = self._build_spring_force()
         self._spring_strength = torch.ones(self.num_envs, 1, dtype=torch.float32, device=self._device)
+        episode_configuration = getattr(cfg, 'episode_randomization_spec', None)
+        self._episode_randomization = (None if episode_configuration is None or not episode_configuration.enabled
+            else EpisodeRandomization(self.num_envs, episode_configuration,
+                seed=int(getattr(cfg, 'seed', 0) or 0) + 49979687, device=self._device))
+        if self._episode_randomization is not None:
+            self._spring_strength = self._episode_randomization.strength
         self._spring_source_sha256 = getattr(self, '_spring_source_sha256', {})
         # Rollout-level mechanical telemetry. Accumulate device tensors here;
         # read them once at the collector boundary, not per physics substep.
@@ -176,9 +186,22 @@ class WheeledLabEnv(DirectRLEnv):
                                                    device=self._device,
                                                    history_length=self.cfg.history_length)
         sensor_configuration = getattr(cfg, 'sensor_model_spec', None)
+        communication_configuration = getattr(cfg, 'communication_spec', None)
+        self._communication = (None if communication_configuration is None or not communication_configuration.enabled
+            else PhysicalCommunication(self.num_envs, communication_configuration,
+                seed=int(getattr(cfg, 'seed', 0) or 0) + 67867967, device=self._device))
+        uplink = ({} if self._communication is None or communication_configuration.uplink_fraction == 0
+                  or communication_configuration.total_delay_range_s[1] == 0 else {
+            'uplink_delay_s': self._communication.uplink_s,
+            'maximum_uplink_s': (communication_configuration.total_delay_range_s[1]
+                                  * communication_configuration.uplink_fraction)})
         self._sensor_model = (None if sensor_configuration is None else LabSensorModel(
             self.num_envs, int(getattr(cfg, 'seed', 0) or 0) + 1299709,
-            sensor_configuration, device=self._device))
+            sensor_configuration, device=self._device, **uplink))
+        transport_configuration = getattr(cfg, 'action_transport_spec', None)
+        self._action_transport = (None if transport_configuration is None else DelayedActionTransport(
+            self.num_envs, ACTION_DIM, transport_configuration,
+            seed=int(getattr(cfg, 'seed', 0) or 0) + 32452843, device=self._device))
         formal_config = getattr(cfg, "formal_reward_spec", None)
         self._formal_reward = None
         self._boundary_geometry = None
@@ -259,6 +282,7 @@ class WheeledLabEnv(DirectRLEnv):
         self._previous_action = torch.zeros_like(self._issued_action)
         self._previous_control_source = torch.zeros(self.num_envs, dtype=torch.long, device=self._device)
         self._before_action = torch.zeros_like(self._issued_action)
+        self._critic_action_history = CriticActionHistory(self.num_envs, device=self._device)
         self._last_effort = torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32,
                                         device=self._device)
         self._reset_mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
@@ -597,13 +621,19 @@ class WheeledLabEnv(DirectRLEnv):
         return (5 * height).clamp(-1, 1), center
 
     def _wheel_velocity_body(self):
+        # Relative COM velocities expressed in the base frame. This is neither
+        # contact-point slip nor the derivative of rotating-frame coordinates.
         body_velocity = getattr(self.robot.data, "body_lin_vel_w", None)
         if body_velocity is None:
             raise RuntimeError("182D critic 需要 body_lin_vel_w 产生轮体速度")
         velocity = self._as_torch(body_velocity)
         if velocity.ndim != 3 or velocity.shape[:2] != (self.num_envs, len(self._binding.native_body_names)) or velocity.shape[-1] != 3:
             raise ValueError("body_lin_vel_w 布局不一致")
-        wheels = velocity.index_select(1, self._wheel_body_indices).reshape(-1, 3)
+        root_twist = self._as_torch(self.robot.data.root_com_vel_w)
+        if root_twist.shape != (self.num_envs, 6):
+            raise ValueError("root_com_vel_w 布局不一致")
+        wheels = (velocity.index_select(1, self._wheel_body_indices)
+                  - root_twist[:, None, :3]).reshape(-1, 3)
         quaternion = self._root_link_quat()
         rotated = self._observations.assembler._inverse_rotate(
             quaternion[:, None, :].expand(-1, 2, -1).reshape(-1, 4), wheels).reshape(self.num_envs, 6)
@@ -616,12 +646,15 @@ class WheeledLabEnv(DirectRLEnv):
         if joint_acceleration is None:
             joint_acceleration = self._last_joint_acceleration
         wheel_material = self._wheel_materials.features()
-        com_offset = self._observations.assembler._inverse_rotate(
-            sample.root_link_orientation_xyzw,
-            sample.root_com_position_world_m - sample.root_link_position_world_m)
+        com_offset = self._startup_dynamics.base_com_delta_local_m
         sensor_packet = self._sensor_packet(state)
-        observation_delay = ((state.timestamp_s[:, None] - sensor_packet.sampled_at_s) / self.step_dt).float()
-        zeros2 = torch.zeros(self.num_envs, 2, dtype=torch.float32, device=self._device)
+        observation_delay = ((state.timestamp_s[:, None] - sensor_packet.sampled_at_s) / self.physics_dt).float()
+        action_delay = (torch.zeros(self.num_envs, 2, dtype=torch.float32, device=self._device)
+                        if self._action_transport is None else
+                        self._action_transport.critic_steps() * (self.step_dt / self.physics_dt))
+        communication = getattr(self, '_communication', None)
+        if communication is not None:
+            action_delay = communication.action_age_steps(self.physics_dt)
         terrain, ground = self._terrain_scan_77()
         self._ground_at_root.copy_(ground)
         height = (self._root_link_position()[:, 2] - ground).clamp_min(0.0)
@@ -633,16 +666,17 @@ class WheeledLabEnv(DirectRLEnv):
             damping=self._damping[None].expand(self.num_envs, -1),
             active_torque=self._last_effort,
             observation_delay_steps=observation_delay,
-            action_delay_steps=zeros2,
-            wheel_velocity_body_m_s=self._last_wheel_velocity_body,
+            action_delay_steps=action_delay,
+            wheel_velocity_body_m_s=self._wheel_velocity_body(),
             wheel_contact=(state.wheel_ground_force_n > 2.0).to(torch.float32),
             mass_scale=self._startup_dynamics.mass_scale,
             wheel_material=wheel_material,
             terrain_scan=terrain,
-            previous_actions=torch.cat((self._before_action, self._previous_action), -1),
+            previous_actions=self._critic_action_history.older_actions(),
             joint_acceleration_rad_s2=joint_acceleration,
             com_offset_body_m=com_offset,
-            nominal_pose_delta_rad=state.policy_position_rad - self._observations.assembler._nominal,
+            nominal_pose_delta_rad=(self._control.controller.nominal - self._observations.assembler._nominal
+                                    )[None].expand(self.num_envs, -1),
         )
 
     def _capture_terminal(self):
@@ -784,13 +818,28 @@ class WheeledLabEnv(DirectRLEnv):
         )
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
-        if (not isinstance(actions, torch.Tensor) or actions.shape != (self.num_envs, ACTION_DIM)
+        action_width = self._issued_action.shape[-1]
+        if (not isinstance(actions, torch.Tensor)
+                or actions.shape != (self.num_envs, action_width)
                 or actions.device != self._device or not torch.isfinite(actions).all()):
-            raise ValueError("actions 需要有限 [N,6] 张量")
+            raise ValueError(f"actions 需要有限 [N,{action_width}] 张量")
         self._before_action.copy_(self._previous_action)
         self._issued_action.copy_(actions.clamp(-self._action_bounds, self._action_bounds))
         q = self._joint_positions().index_select(1, self._active_indices)
-        self._targets = self._control.decode(self._issued_action, q, self._clock())
+        communication = getattr(self, '_communication', None)
+        if communication is not None:
+            q, _, _ = communication.feedback(self._clock())
+        transport_owned = torch.ones(self.num_envs, dtype=torch.bool, device=self._device)
+        if self._recover_task is not None:
+            transport_owned &= ~self._recover_task.hold_mask
+        if self._recovery_preparation is not None:
+            transport_owned &= ~self._recovery_preparation.active
+        applied_action = (self._issued_action if self._action_transport is None
+                          else self._action_transport.step(
+                              self._issued_action, policy_allowed=transport_owned, issued_at_s=self._clock()))
+        self._policy_generated_at_s = (self._clock() if self._action_transport is None
+                                       else self._action_transport.arrived_generated_at_s.clone())
+        self._targets = self._control.decode(applied_action, q, self._clock())
         if self._recover_task is not None:
             hold = self._recover_task.hold_mask
             self._command_mode.copy_(self._recover_task.task_mode(
@@ -814,7 +863,11 @@ class WheeledLabEnv(DirectRLEnv):
             dq = self._as_torch(self.robot.data.joint_vel).index_select(1, self._active_indices)
             if self._recovery_preparation is not None:
                 self._targets = self._recovery_preparation.targets(self._targets, self._clock())
-                self._issued_action.copy_(self._targets.issued_action)
+                script = self._targets.control_source != int(ControlSource.POLICY)
+                # Actor history and action-rate costs describe issuance, not
+                # the older packet arriving at the controller this interval.
+                self._issued_action.copy_(torch.where(
+                    script[:, None], self._targets.issued_action, self._issued_action))
             self._interval_policy_owned = self._targets.control_source == int(ControlSource.POLICY)
             self._formal_reward.composer.begin(
                 self._issued_action, dq, now_s=self._clock(), episode_id=self._episode_id,
@@ -822,6 +875,9 @@ class WheeledLabEnv(DirectRLEnv):
                 command_mode=self._command_mode, policy_owned=self._interval_policy_owned,
                 control_source=self._targets.control_source,
             )
+        if communication is not None:
+            communication.begin_interval(transport_owned &
+                (self._targets.control_source == int(ControlSource.POLICY)), self._clock())
 
     def _apply_action(self) -> None:
         if self._targets is None:
@@ -829,8 +885,17 @@ class WheeledLabEnv(DirectRLEnv):
         q = self._joint_positions().index_select(1, self._active_indices)
         dq = self._as_torch(self.robot.data.joint_vel).index_select(1, self._active_indices)
         now = self._clock()
+        communication = getattr(self, '_communication', None)
+        if communication is not None:
+            q, dq, feedback_sample_s = communication.feedback(now)
         feedback = self._control.controller.effort(self._targets, q, dq, now)
-        if self._control.drive is not None:
+        if communication is not None:
+            generated = torch.where(self._targets.control_source == int(ControlSource.POLICY),
+                                    self._policy_generated_at_s, now)
+            effort = communication.deliver(feedback.capped_effort, feedback.effort_bounds,
+                now, generated, feedback_sample_s, response=self._control.drive,
+                target_arrived_at_s=self._targets.controller_issued_at_s)
+        elif self._control.drive is not None:
             effort = self._control.drive.advance(
                 feedback.capped_effort, self._physics_dt_tensor, feedback.effort_bounds,
             ).mean_effort
@@ -931,6 +996,8 @@ class WheeledLabEnv(DirectRLEnv):
                 self._as_torch(self.robot.data.joint_vel))
         sample = self._sample()
         state = self._observations.assembler.measure(sample)
+        if self._communication is not None:
+            self._communication.push(state.policy_position_rad, state.policy_velocity_rad_s)
         if self._sensor_model is not None:
             self._sensor_model.push(state, self._physical_tick)
         boundary = None
@@ -977,7 +1044,6 @@ class WheeledLabEnv(DirectRLEnv):
         self._terminated |= terminated
         self._last_sample = sample
         self._last_state = state
-        self._last_wheel_velocity_body.copy_(self._wheel_velocity_body())
         self._last_tilt = tilt
         self._last_base_contact = base_contact
         if self._formal_reward is not None:
@@ -1050,7 +1116,10 @@ class WheeledLabEnv(DirectRLEnv):
             self._preparation_handoff.copy_(handoff & ~self._terminated)
             self.extras['recovery_preparation_timeouts'] = preparation_timeout.sum()
         time_limit = self.episode_length_buf >= self.max_episode_length - 1
+        query_invalid = torch.zeros_like(time_limit)
         if self._terrain_course is not None:
+            query_invalid = self._terrain_course.finish_queries().clone()
+            self._terminated |= query_invalid
             recovery_timeout = self._terrain_course.finish_recovery_interval()
             time_limit |= recovery_timeout
             self.extras['recovery_timeouts'] = recovery_timeout.sum()
@@ -1061,13 +1130,15 @@ class WheeledLabEnv(DirectRLEnv):
         # Keep causes separate even when both share bootstrap/trace masks.
         # The collector transfers these small counters once per rollout.
         self.extras['termination_counts'] = torch.stack((
-            self._terminated.sum(), (time_limit & ~self._terminated).sum(),
+            (self._terminated & ~query_invalid).sum(), (time_limit & ~self._terminated).sum(),
             (spatial_exit & ~self._terminated).sum(),
             (time_limit & spatial_exit & ~self._terminated).sum()))
+        self.extras['interval_observation_valid'] = ~query_invalid
+        self.extras['query_rejected_intervals'] = query_invalid.sum()
         if self._formal_reward is not None:
             self._formal_result = self._formal_reward.finish(
                 terminated=self._terminated, truncated=truncated & ~self._terminated,
-                physical_success_request_id=(self._terrain_course.tasks.success_id
+                physical_success_request_id=(self._terrain_course.tasks.success_id.masked_fill(query_invalid, -1)
                                              if self._terrain_course is not None else self._pending_success_id),
             )
             self._pending_success_id.fill_(-1)
@@ -1080,6 +1151,9 @@ class WheeledLabEnv(DirectRLEnv):
                 self._recover_task.advance()
         else:
             self._last_reward.copy_(self._reward_policy_step())
+        # Missing terrain is not an invented physical reward/terminal value.
+        # Its finite placeholders are only for vectorized row bookkeeping.
+        self._last_reward.masked_fill_(query_invalid, 0.)
         self._last_truncated.copy_(truncated & ~self._terminated)
         self._last_terminated.copy_(self._terminated)
         self.reset_terminated.copy_(self._last_terminated)
@@ -1090,6 +1164,8 @@ class WheeledLabEnv(DirectRLEnv):
         terminated_out = self._last_terminated.clone()
         truncated_out = self._last_truncated.clone()
         self._previous_action.copy_(self._issued_action)
+        self._critic_action_history.record(
+            self._issued_action, policy_owned=self._targets.control_source == int(ControlSource.POLICY))
         previous_source = getattr(self, '_previous_control_source', None)
         if previous_source is not None:
             previous_source.copy_(self._targets.control_source)
@@ -1300,7 +1376,6 @@ class WheeledLabEnv(DirectRLEnv):
         # Keep the terminal reward in _last_reward until the next policy step;
         # the collector must return the PRE-reset reward for done rows.
         self._last_effort[ids] = 0.0
-        self._last_wheel_velocity_body[ids] = 0.0
         self._last_joint_acceleration[ids] = 0.0
         self._last_policy_velocity[ids] = 0.0
         self._issued_action[ids] = 0.0
@@ -1333,12 +1408,72 @@ class WheeledLabEnv(DirectRLEnv):
         if self._recovery_preparation is not None:
             self._recovery_preparation.reset_rows(
                 ids, q, self._base_command_mode == int(CommandMode.RECOVERY), self._clock())
+        mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
+        mask[ids] = True
+        difficulty = 1.
+        if self._episode_randomization is not None:
+            sampler = getattr(self, '_task_sampler', None)
+            update = 0 if sampler is None else sampler.curriculum.budget.total_updates
+            difficulty = self._episode_randomization.reset(mask, update)
+        if self._communication is not None:
+            dq = self._as_torch(self.robot.data.joint_vel).index_select(1, self._active_indices)
+            self._communication.reset(mask, q, dq, self._clock(), difficulty=difficulty)
         if self._sensor_model is not None:
-            mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
-            mask[ids] = True
-            self._sensor_model.reset(mask, self._clock())
+            self._sensor_model.reset(mask, self._clock(), difficulty=difficulty)
             current = self._observations.assembler.measure(self._sample())
             self._sensor_model.seed_after_reset(mask, current)
+        if self._action_transport is not None:
+            self._action_transport.reset(mask, difficulty=difficulty)
+
+    def control_timing_state_dict(self):
+        if self._communication is None and self._episode_randomization is None:
+            return None
+        return {'format': 'lab_control_timing_v1',
+                'communication': (None if self._communication is None else self._communication.state_dict()),
+                'episode_randomization': (None if self._episode_randomization is None
+                    else self._episode_randomization.state_dict())}
+
+    def restore_control_timing(self, state):
+        if self._physical_tick != 0:
+            raise ValueError('control timing restores before new physical episodes')
+        expected = self.control_timing_state_dict()
+        if expected is None:
+            if state is not None:
+                raise ValueError('control timing differs from the frozen runtime')
+            return
+        if (not isinstance(state, dict) or set(state) != set(expected)
+                or state['format'] != expected['format']
+                or any((state[key] is None) != (expected[key] is None)
+                       for key in ('communication', 'episode_randomization'))):
+            raise ValueError('control timing requires its complete cold-reset state')
+        if self._communication is not None:
+            self._communication.restore_after_physical_reset(state['communication'])
+        if self._episode_randomization is not None:
+            self._episode_randomization.restore_after_physical_reset(state['episode_randomization'])
+
+    def control_timing_metrics(self):
+        values = {} if self._communication is None else self._communication.metrics()
+        if self._sensor_model is not None:
+            values['sensor_noise_scale'] = self._sensor_model.noise_scale
+            values['sensor_extra_delay_s'] = self._sensor_model.lags.float() * self.physics_dt
+        if self._action_transport is not None:
+            values['policy_target_extra_delay_s'] = self._action_transport.lags.float() * self.step_dt
+        if self._episode_randomization is not None:
+            values['episode_exposure_scale'] = self._episode_randomization.scale
+            values['spring_force_scale'] = self._spring_strength
+        if self._communication is not None:
+            values['native_interval_effort_abs_nm'] = self._last_effort.abs()
+            if self._control.drive is not None:
+                values['motor_endpoint_effort_abs_nm'] = self._control.drive.state.abs()
+        if not values:
+            return {}
+        keys = tuple(values)
+        summaries = torch.stack([torch.stack((values[key].amin(), values[key].mean(), values[key].amax()))
+                                 for key in keys]).cpu().tolist()
+        return {'scope': 'current_episode_configuration_and_last_physical_interval',
+                'pooled_rollout_statistics': False,
+                'values': {key: dict(zip(('min', 'mean', 'max'), value))
+                           for key, value in zip(keys, summaries)}}
 
     def _sensor_packet(self, state):
         return (self._observations.assembler.clean_sensors(state) if self._sensor_model is None
@@ -1355,8 +1490,10 @@ class WheeledLabEnv(DirectRLEnv):
             print("OBS after measure", flush=True)
         commands = self._commands()
         sensors = self._sensor_packet(state)
+        boundary = self._reset_mask | self._preparation_handoff
+        self._critic_action_history.clear(boundary)
         actor, _ = self._observations.append(
-            sample, commands, sensors, self._reset_mask | self._preparation_handoff, measured=state,
+            sample, commands, sensors, boundary, measured=state,
         )
         if self._scan_debug:
             print("OBS after append", flush=True)
@@ -1365,8 +1502,6 @@ class WheeledLabEnv(DirectRLEnv):
                                   self._last_joint_acceleration)
         self._last_joint_acceleration.copy_(acceleration)
         self._last_policy_velocity.copy_(state.policy_velocity_rad_s)
-        if reset.any():
-            self._last_wheel_velocity_body[reset] = 0.0
         critic = self._critic_182(state, sample, joint_acceleration=acceleration)
         self._reset_mask.zero_()
         self._preparation_handoff.zero_()

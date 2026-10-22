@@ -1,0 +1,12 @@
+{
+  "communication": {
+    "enabled": true,
+    "total_delay_range_s": [0.0001, 0.005],
+    "uplink_fraction": 0.5
+  },
+  "episode_randomization": {
+    "enabled": true,
+    "full_at_update": 5000,
+    "spring_force_scale": [0.9, 1.1]
+  }
+}

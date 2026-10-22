@@ -97,3 +97,59 @@ def test_a_fallen_body_queries_real_ground_without_running_diagnostics(tmp_path)
     torch.testing.assert_close(center, torch.tensor([.2]))
     assert course._ground_token == 17
 
+
+def cached_course(tmp_path):
+    course = course_fixture(tmp_path, torch.tensor([[.1, .1, .3], [.2, .2, .3]]))
+    course._ground_ready = torch.zeros(2, dtype=torch.bool)
+    course._scan_ready = torch.zeros(2, dtype=torch.bool)
+    course.query_invalid = torch.zeros(2, dtype=torch.bool)
+    course.query_rejected_intervals = torch.zeros((), dtype=torch.long)
+    course._scan_heights = torch.zeros(2, 77)
+    course._scan_token = None
+    course.ground()
+    course.scan_77()
+    course.env._physical_tick += 1
+    return course
+
+
+def test_one_established_outside_row_is_excluded_without_fabricating_a_hit(tmp_path):
+    course = cached_course(tmp_path)
+    course.env._root_link_position()[0, 0] = 1.1
+    before_rng = torch.get_rng_state().clone()
+    ground, _ = course.ground()
+    invalid = course.finish_queries()
+    assert invalid.tolist() == [True, False]
+    assert course.query_rejected_intervals == 1
+    assert course.query.misses > 0
+    evidence = course._query_rejection_evidence
+    assert set(evidence['environment'].tolist()) == {0}
+    assert len(evidence['column']) <= 8
+    # The placeholder is the last measured support, never a zero-height hit.
+    torch.testing.assert_close(ground, torch.full((2,), .2))
+    queries = course.query.queries
+    course.scan_77()
+    assert course.query.queries == queries
+    assert torch.equal(before_rng, torch.get_rng_state())
+    course.env._root_link_position()[0, 0] = .1
+    assert evidence['root_position_world_m'][:, 0].eq(1.1).all()
+
+
+@pytest.mark.parametrize('failure', ['hole', 'nonfinite', 'initial', 'whole_batch', 'index'])
+def test_quarantine_does_not_hide_asset_or_systemic_errors(tmp_path, failure):
+    course = cached_course(tmp_path)
+    position = course.env._root_link_position()
+    position[0] = torch.tensor([1.1, .1, .3])
+    if failure == 'hole':
+        position[0, :2] = .9
+    elif failure == 'nonfinite':
+        position[0, 2] = float('nan')
+    elif failure == 'initial':
+        course._ground_ready[0] = False
+    elif failure == 'whole_batch':
+        position[1, 0] = 1.2
+    else:
+        course.query._buffers['offsets'].zero_()
+    with pytest.raises(RuntimeError, match='no physical terrain support'):
+        course.ground()
+    assert not course.query_invalid.any()
+

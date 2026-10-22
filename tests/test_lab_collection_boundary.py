@@ -10,6 +10,8 @@ from transformer_rl.formal.contracts import (LabeledObservation, LabeledStep,
                                              PhysicalLabels, StructuredCollectionConfig)
 from transformer_rl.formal.lab_env.adapter import LabLabeledEnv
 from transformer_rl.formal.lab_env.collector import LabCollector
+from transformer_rl.formal.lab_env.critic_features import CriticActionHistory
+from transformer_rl.formal.control.ownership import ControlSource
 from transformer_rl.formal.policy import StructuredActorCritic, StructuredPolicyConfig
 
 
@@ -23,7 +25,7 @@ def test_native_step_bootstrap_captures_next_command_before_physical_reset():
     definition = next(node for node in ast.parse(path.read_text()).body
                       if isinstance(node, ast.ClassDef) and node.name == 'WheeledLabEnv')
     step = next(node for node in definition.body if isinstance(node, ast.FunctionDef) and node.name == 'step')
-    namespace = {'torch': torch, 'time': time}
+    namespace = {'torch': torch, 'time': time, 'ControlSource': ControlSource}
     exec(compile(ast.Module(body=[step], type_ignores=[]), str(path), 'exec'), namespace)
 
     command = torch.zeros(3)
@@ -46,6 +48,8 @@ def test_native_step_bootstrap_captures_next_command_before_physical_reset():
         _last_truncated=torch.zeros(3, dtype=torch.bool), _last_terminated=torch.zeros(3, dtype=torch.bool),
         reset_terminated=torch.zeros(3, dtype=torch.bool), reset_time_outs=torch.zeros(3, dtype=torch.bool),
         _previous_action=torch.zeros(3, 6), _issued_action=torch.full((3, 6), .5),
+        _critic_action_history=CriticActionHistory(3, device='cpu'),
+        _targets=SimpleNamespace(control_source=torch.full((3,), int(ControlSource.POLICY))),
         _capture_terminal=capture, _update_skill=lambda: command.add_(.03), _reset_idx=reset,
         _get_observations=lambda: command.clone(), extras={}, _reward_terms={})
     observation, reward, terminated, truncated, _ = namespace['step'](env, torch.zeros(3, 6))
@@ -136,7 +140,59 @@ def test_lab_collector_preserves_terminal_reward_and_uses_five_frame_critic():
     assert collector.last_metrics["terminated_rows"] == 0
     assert collector.last_metrics["truncated_rows"] == 1
     assert collector.last_metrics['termination_causes'] == {
-        'true_failure': 0, 'time_limit': 1, 'spatial_exit': 1, 'simultaneous_truncations': 1}
+        'true_failure': 0, 'time_limit': 1, 'spatial_exit': 1,
+        'simultaneous_truncations': 1, 'query_rejected': 0}
+
+
+def test_query_invalid_interval_cannot_supply_any_learning_or_bootstrap_target():
+    from dataclasses import fields
+    from test_physical_observation import fixture
+    from transformer_rl.formal.learning.contracts import BoundaryMasks
+    _, _, assembler, sample, _ = fixture()
+
+    class FakeLab:
+        num_envs, step_dt, device = 2, .01, 'cpu'
+
+        def __init__(self):
+            self._observations = SimpleNamespace(assembler=assembler)
+            self.obs_buf = {'policy': torch.zeros(2, 175), 'critic': torch.zeros(2, 182)}
+            self.sample = sample
+
+        def _sample(self):
+            return self.sample
+
+        def _clock(self):
+            return self.sample.timestamp_s
+
+        def reset(self):
+            pass
+
+        def step(self, action):
+            self.sample = replace(sample, timestamp_s=torch.full((2,), .01, dtype=torch.float64))
+            self._terminal_sample = self.sample
+            self._terminal_state = assembler.measure(self.sample)
+            self._terminal_critic_182 = torch.ones(2, 182)
+            self._terminal_frame = torch.ones(2, 35)
+            return (self.obs_buf, torch.tensor([0., 1.]), torch.tensor([True, False]),
+                    torch.zeros(2, dtype=torch.bool),
+                    {'interval_observation_valid': torch.tensor([False, True]),
+                     'query_rejected_intervals': torch.tensor(1)})
+
+    adapter = LabLabeledEnv(FakeLab())
+    initial = adapter.reset()
+    returned = adapter.step(torch.zeros(2, 6), None)
+    assert returned.fully_policy_owned.tolist() == [False, True]
+    assert returned.final_labels.valid.tolist() == [False, True]
+    assert returned.final_critic_valid.tolist() == [False, True]
+    assert returned.observation.episode_id.tolist() == [2, 1]
+    masks = BoundaryMasks.from_events(
+        fully_policy_owned=returned.fully_policy_owned, terminated=returned.terminated,
+        truncated=returned.truncated, final_value_valid=returned.final_critic_valid,
+        handoff_after=returned.handoff_after, rollout_end=torch.zeros(2, dtype=torch.bool),
+        state_label_valid=initial.labels.valid, next_label_valid=returned.final_labels.valid,
+        next_same_control_epoch=torch.ones(2, dtype=torch.bool))
+    assert all(getattr(masks, field.name).tolist() == [False, True] for field in fields(masks))
+    assert adapter.last_counts['query_rejected'] == 1
 
 
 def test_adapter_excludes_script_hold_and_separates_handoff_from_partial_reset():

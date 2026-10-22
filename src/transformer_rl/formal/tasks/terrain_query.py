@@ -155,6 +155,15 @@ class StaticTerrainQuery:
             data = {key: source[key].copy() for key in source.files}
         self.cell_size_m = float(data.pop('cell_size_m'))
         self.tile_count = len(data['origins'])
+        # Exact physical bounds, not the padded acceleration-index cells.
+        # They classify out-of-domain rows without re-reading the mesh during
+        # sampling. Interior holes/index misses remain hard errors.
+        bounds = []
+        for tile in range(self.tile_count):
+            selected = faces if self._source_face_tiles is None else faces[self._source_face_tiles == tile]
+            points = vertices[selected, :2]
+            bounds.append(np.stack((points.min((0, 1)), points.max((0, 1)))))
+        self.physical_xy_bounds = torch.as_tensor(np.asarray(bounds), device=self.device)
         data.update(vertices=vertices, faces=faces, materials=friction)
         self._buffers = {key: torch.as_tensor(value, device=self.device).contiguous() for key, value in data.items()}
         types = {'origins': wp.vec2, 'shapes': wp.vec2i, 'vertices': wp.vec3}

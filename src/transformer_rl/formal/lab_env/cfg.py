@@ -12,6 +12,9 @@ from ..contracts import ACTION_ORDER
 from ..control.actuation import PairTargetDomain, ResponseParameters
 from .contract import ACTION_DIM, ACTOR_DIM, CRITIC182_DIM, HISTORY_LENGTH, POLICY_DT_S, PHYSICS_DT_S
 from .contract import FlatTaskSpec
+from .action_transport import ActionTransportConfig
+from ..control.communication import CommunicationConfig, EpisodeRandomizationConfig
+from .materials import WheelMaterialConfig
 from .formal_reward import FormalRewardConfig
 from .recover import RecoverTaskSpec
 from .settings import AssetDescription, load_asset_description
@@ -295,6 +298,10 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
                   termination_limits: NativeTaskLimits | None = None,
                   sensors: SensorModelConfig | None = None,
                   dynamics: StartupDynamicsConfig | None = None,
+                  action_transport: ActionTransportConfig | None = None,
+                  communication: CommunicationConfig | None = None,
+                  episode_randomization: EpisodeRandomizationConfig | None = None,
+                  wheel_material: WheelMaterialConfig | None = None,
                   recover: RecoverTaskSpec | None = None,
                   height_scanner: bool = False,
                   terrain_scan: bool = False,
@@ -313,10 +320,16 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     if formal_reward is not None and not isinstance(termination_limits, NativeTaskLimits):
         raise ValueError('formal Lab tasks require explicit original physical termination limits')
     if (sensors is not None and not isinstance(sensors, SensorModelConfig)
-            or dynamics is not None and not isinstance(dynamics, StartupDynamicsConfig)):
-        raise ValueError('Lab randomization requires its explicit sensor and mechanical configurations')
+            or dynamics is not None and not isinstance(dynamics, StartupDynamicsConfig)
+            or action_transport is not None and not isinstance(action_transport, ActionTransportConfig)
+            or communication is not None and not isinstance(communication, CommunicationConfig)
+            or episode_randomization is not None and not isinstance(episode_randomization, EpisodeRandomizationConfig)
+            or wheel_material is not None and not isinstance(wheel_material, WheelMaterialConfig)):
+        raise ValueError('Lab randomization requires its explicit sensor, transport and mechanical configurations')
     asset = load_asset_description(asset_directory,
                                    expected_manifest_sha256=expected_manifest_sha256)
+    if communication is not None and communication.enabled and sensors is None:
+        raise ValueError('shared communication requires the actual physical-clock sensor history')
     cfg = WheeledLabEnvCfg()
     object.__setattr__(cfg, "asset_manifest_sha256", asset.manifest_sha256)
     cfg.asset_directory = str(asset.directory)
@@ -332,6 +345,10 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
     object.__setattr__(cfg, 'termination_limits', termination_limits)
     object.__setattr__(cfg, 'sensor_model_spec', sensors)
     object.__setattr__(cfg, 'startup_dynamics_spec', dynamics)
+    object.__setattr__(cfg, 'action_transport_spec', action_transport)
+    object.__setattr__(cfg, 'communication_spec', communication)
+    object.__setattr__(cfg, 'episode_randomization_spec', episode_randomization)
+    object.__setattr__(cfg, 'wheel_material_spec', wheel_material)
     object.__setattr__(cfg, "recover_spec", recover)
     object.__setattr__(cfg, "course_manifest", terrain_atlas_manifest)
     object.__setattr__(cfg, 'static_plane_height_m', 0. if terrain_profile == 'plane' else None)

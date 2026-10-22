@@ -60,7 +60,7 @@ PHASE_WEIGHTS = STAGE_WEIGHTS
 
 @dataclass(frozen=True)
 class TaskDomain:
-    height_m: tuple[float, float] = (0.20, 0.35)
+    height_m: tuple[float, float] = (0.17, 0.40)
     forward_m_s: tuple[float, float] = (-2.7, 2.7)
     yaw_rad_s: tuple[float, float] = (-6 * math.pi, 6 * math.pi)
     jump_m: tuple[float, float] = (0.03, 0.40)
@@ -95,9 +95,9 @@ class TaskDomain:
 # formal course expands every range continuously; it never switches from a
 # flat-only world to the full course at one update boundary.
 INITIAL_DOMAIN = TaskDomain(
-    height_m=(0.20, 0.32),
-    forward_m_s=(-1.0, 1.0),
-    yaw_rad_s=(-math.pi, math.pi),
+    height_m=(0.28, 0.32),
+    forward_m_s=(-0.5, 0.5),
+    yaw_rad_s=(-1., 1.),
     jump_m=(0.03, 0.10),
     slope_rad=(-math.pi / 60, math.pi / 60),
     roughness_m=(0.0, 0.005),

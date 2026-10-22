@@ -104,6 +104,12 @@ class LabLabeledEnv:
         counts = extras.get('termination_counts')
         self.last_counts = ({} if counts is None else dict(zip(
             ('true_failure', 'time_limit', 'spatial_exit', 'simultaneous_truncations'), counts)))
+        if 'query_rejected_intervals' in extras:
+            self.last_counts['query_rejected'] = extras['query_rejected_intervals']
+        interval_valid = extras.get('interval_observation_valid', torch.ones_like(policy_before))
+        if (not isinstance(interval_valid, torch.Tensor) or interval_valid.shape != policy_before.shape
+                or interval_valid.dtype != torch.bool or interval_valid.device != self.device):
+            raise ValueError('interval validity must be one device-local bool per environment')
         final_state = self.env._terminal_state
         final_sample = self.env._terminal_sample
         if final_state is None or final_sample is None or self.env._terminal_critic_182 is None:
@@ -113,6 +119,7 @@ class LabLabeledEnv:
         final_control = self._control_epoch.clone()
         final_labels = self._labels(final_state, final_time,
                                     episode_id=final_episode, control_epoch=final_control)
+        final_labels.valid.logical_and_(interval_valid)
         done = terminated | truncated
         handoff = (policy_before != self._policy_allowed()) & ~done
         self._episode_id.add_(done.long())
@@ -126,9 +133,9 @@ class LabLabeledEnv:
             terminated=terminated,
             truncated=truncated,
             final_critic=final_critic,
-            final_critic_valid=torch.isfinite(final_critic).all(-1),
+            final_critic_valid=torch.isfinite(final_critic).all(-1) & interval_valid,
             final_labels=final_labels,
-            fully_policy_owned=policy_before,
+            fully_policy_owned=policy_before & interval_valid,
             handoff_after=handoff,
             terminal_frame=self.env._terminal_frame.clone(),
         )

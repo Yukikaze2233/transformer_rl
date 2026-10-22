@@ -56,6 +56,8 @@ def _invocation_scope(args):
 
 
 def _require_resume_scope(payload):
+    from .critic_features import CRITIC_INPUT_CONTRACT
+
     if not isinstance(payload, dict) or payload.get('format') != 'lab_ppo_v1':
         raise ValueError('Lab resume requires lab_ppo_v1; managed learning resumes through trainctl')
     if (payload.get('validation_only', False) is not False or payload.get('diagnostic_stage') is not None
@@ -72,6 +74,8 @@ def _require_resume_scope(payload):
                 or any(type(value) is not int or value < 0 for value in consumed)
                 or sum(consumed) != update):
             raise ValueError('Lab curriculum consumption differs from actual completed PPO updates')
+    if payload.get('critic_input_contract') != CRITIC_INPUT_CONTRACT:
+        raise ValueError('Lab resume critic input contract differs; equal dimensions do not imply compatibility')
 
 
 def _runtime_randomization(runtime, *, required):
@@ -196,6 +200,8 @@ def main(argv=None):
         from isaaclab_physx.physics.physx_manager_cfg import PhysxCfg
 
         from ..control.actuation import PairTargetDomain, ResponseParameters
+        from .action_transport import ActionTransportConfig
+        from .materials import WheelMaterialConfig
         from ...common.training_control import verify_pin
         from ...common.random_state import capture_rng, restore_rng
         from ..learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
@@ -204,6 +210,7 @@ def main(argv=None):
         from .adapter import LabLabeledEnv
         from .cfg import build_env_cfg
         from .collector import LabCollector
+        from .critic_features import CRITIC_INPUT_CONTRACT
         from .curriculum import LabCommandCurriculum
         from .env import WheeledLabEnv
         from .formal_curriculum import (
@@ -228,6 +235,16 @@ def main(argv=None):
             json.loads(response_path.read_text())["actuator_response"])
         pair_raw = runtime.get("tuning", {}).get("pair_domain")
         pair = PairTargetDomain(**pair_raw) if pair_raw is not None else None
+        transport_raw = runtime.get("action_transport")
+        action_transport = (ActionTransportConfig() if transport_raw is None
+                            else ActionTransportConfig.from_dict(transport_raw))
+        material_raw = runtime.get('wheel_material')
+        wheel_material = None if material_raw is None else WheelMaterialConfig.from_dict(material_raw)
+        from ..control.communication import CommunicationConfig, EpisodeRandomizationConfig
+        communication = (None if runtime.get('communication') is None
+                         else CommunicationConfig.from_dict(runtime['communication']))
+        episode_randomization = (None if runtime.get('episode_randomization') is None
+                                 else EpisodeRandomizationConfig.from_dict(runtime['episode_randomization']))
         asset = args.asset_directory or runtime["asset_directory"]
 
         source = args.resume or args.init_checkpoint
@@ -291,7 +308,9 @@ def main(argv=None):
                             device=args.device, response=response, pair_domain=pair,
                             formal_reward=formal_reward, recover=recover_spec,
                             termination_limits=termination_limits,
-                            sensors=sensors, dynamics=dynamics,
+                            sensors=sensors, dynamics=dynamics, action_transport=action_transport,
+                            communication=communication, episode_randomization=episode_randomization,
+                            wheel_material=wheel_material,
                             height_scanner=args.height_scanner,
                             terrain_scan=(args.terrain_scan or policy.critic_input_dim == 185),
                             forward_scan=args.forward_scan,
@@ -370,6 +389,16 @@ def main(argv=None):
             if payload.get('terrain_course') is None or payload.get('global_rng') is None:
                 raise ValueError('course resume requires terrain/request state and global RNG; no implicit migration')
             env._terrain_course.restore_after_physical_reset(payload['terrain_course'])
+        if args.resume is not None:
+            env.restore_control_timing(payload.get('control_timing'))
+            if env._sensor_model is not None:
+                if payload.get('sensor_model') is None:
+                    raise ValueError('sensor-enabled resume needs its independent random stream')
+                env._sensor_model.load_after_explicit_cold_setup(payload['sensor_model'])
+            if env._action_transport is not None:
+                if payload.get('action_transport') is None:
+                    raise ValueError('transport-enabled resume needs its independent random stream')
+                env._action_transport.restore_after_physical_reset(payload['action_transport'])
         args.output.mkdir(parents=True, exist_ok=True)
         metrics_path = args.output / "metrics.jsonl"
         collector.reset()
@@ -433,6 +462,7 @@ def main(argv=None):
                 torch.save({
                     **scope,
                     "format": "lab_ppo_v1",
+                    "critic_input_contract": CRITIC_INPUT_CONTRACT,
                     "policy": asdict(policy),
                     "ppo": asdict(ppo),
                     "model": _cpu(model.state_dict()),
@@ -446,6 +476,11 @@ def main(argv=None):
                     "curriculum": (None if formal_task_sampler is None
                                    else _cpu(formal_task_sampler.state_dict())),
                     'global_rng': _cpu(capture_rng()),
+                    'control_timing': _cpu(env.control_timing_state_dict()),
+                    'sensor_model': (None if env._sensor_model is None
+                                     else _cpu(env._sensor_model.checkpoint_state_dict())),
+                    'action_transport': (None if env._action_transport is None
+                                         else _cpu(env._action_transport.state_dict())),
                     'terrain_course': (None if env._terrain_course is None else _cpu(env._terrain_course.state_dict())),
                     "formal_reward_available_terms": (
                         None if env._formal_reward is None else list(env._formal_reward.config.available_terms)),

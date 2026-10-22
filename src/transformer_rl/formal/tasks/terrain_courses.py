@@ -45,6 +45,12 @@ def _rectangle(x0, x1, y0, y1, z0, z1):
 
 def _asset_geometry(root, name):
     record = json.loads((root / 'manifest.json').read_text())['assets'][name]
+    specification = record['specification']
+    profile = specification.get('profile_m', [0., specification.get('rise_m')])
+    if (len(profile) < 2 or any(type(z) not in (int, float) or not math.isfinite(z) for z in profile)
+            or profile[0] != 0 or profile[1] <= 0):
+        raise ValueError('authored terrain requires its actual approach-relative height profile')
+    rises = np.diff(profile)
     material = record['material']
     if material['combine_mode'] != 'multiply':
         raise ValueError('prepared terrain material combine mode is unsupported')
@@ -70,6 +76,10 @@ def _asset_geometry(root, name):
         'source_roi_m': [low.tolist(), high.tolist()],
         'training_padding_only': True, 'valid_half_width_m': float(min(abs(low[1]), high[1]) - .15),
         'spawn_z_m': float(ends[0]),
+        'step_height_m': float(profile[1]),
+        'profile_m': list(profile),
+        'maximum_ascent_m': float(max(rises.max(), 0.)),
+        'maximum_descent_m': float(max(-rises.min(), 0.)),
         'physical_material': material,
         'geometry_part_roles': ['prepared_source', 'approach_padding', 'runout_padding',
                                 'left_padding', 'right_padding'],
@@ -119,25 +129,28 @@ def build_atlas(prepared_assets, output, *, seed=2102, levels=10):
         for level in range(levels):
             # Keep endpoints and sample continuous values inside the other bins.
             fraction = 1. if level == levels - 1 else (level + rng.uniform(.05, .95)) / levels
-            sign = -1 if level % 2 else 1
-            request = TerrainRequest(
-                kind, TerrainExtent((-2., 6.), (-4., 4.)),
-                slope_rad=sign * math.pi / 12 * fraction,
-                slope_bearing_rad=(level % 4) * math.pi / 2,
-                roughness_m=.02 * fraction,
-                step_height_m=(-.15 if kind == TerrainKind.STEP_DOWN else .20) * fraction,
-                platform_tops_m=(.20 * fraction, .40 * fraction),
-                material_friction=(.7 - .5 * fraction, .7 + .4 * fraction),
-            )
-            surface = generator.build(request, geometry_seed=seed * 1000 + int(kind) * 32 + level).surface
-            tile_index = len(tiles) - 1
-            origin = [float(tile_index % 8 * 12), float(tile_index // 8 * 12), 0.]
-            append([(mesh.vertices_m, mesh.triangles) for mesh in surface.meshes],
-                   [(mesh.friction, mesh.friction, 0.) for mesh in surface.meshes], {
-                       'name': kind.name.lower(), 'kind': int(kind), 'level': level, 'origin_m': origin,
-                       'spawn_z_m': 0., 'valid_half_width_m': 3., 'finish_x_m': 5., 'start_x_m': -1.5,
-                       'parameters': asdict(request),
-                   })
+            signs = (-1, 1) if kind == TerrainKind.SLOPE else ((-1 if level % 2 else 1),)
+            for sign in signs:
+                bearings = (0., math.pi / 2) if kind == TerrainKind.SLOPE else ((level % 4) * math.pi / 2,)
+                for bearing in bearings:
+                    request = TerrainRequest(
+                        kind, TerrainExtent((-2., 6.), (-4., 4.)),
+                        slope_rad=sign * math.pi / 12 * fraction,
+                        slope_bearing_rad=bearing,
+                        roughness_m=.02 * fraction,
+                        step_height_m=(-.15 if kind == TerrainKind.STEP_DOWN else .20) * fraction,
+                        platform_tops_m=(.20 * fraction, .40 * fraction),
+                        material_friction=(.7 - .5 * fraction, .7 + .4 * fraction),
+                    )
+                    surface = generator.build(request, geometry_seed=seed * 1000 + int(kind) * 32 + level).surface
+                    tile_index = len(tiles) - 1
+                    origin = [float(tile_index % 8 * 12), float(tile_index // 8 * 12), 0.]
+                    append([(mesh.vertices_m, mesh.triangles) for mesh in surface.meshes],
+                           [(mesh.friction, mesh.friction, 0.) for mesh in surface.meshes], {
+                               'name': kind.name.lower(), 'kind': int(kind), 'level': level, 'origin_m': origin,
+                               'spawn_z_m': 0., 'valid_half_width_m': 3., 'finish_x_m': 5., 'start_x_m': -1.5,
+                               'parameters': asdict(request),
+                           })
     for name, kind in (('road_step', TerrainKind.STEP_UP), ('central_steps', TerrainKind.TWO_PLATFORMS)):
         parts, metadata = _asset_geometry(prepared_assets, name)
         index = len(tiles) - 1
@@ -217,9 +230,9 @@ class TerrainCourseRouter:
         self.spawn_z = torch.tensor([t['spawn_z_m'] for t in tiles], device=self.device)
         self.kinds = torch.tensor([t['kind'] for t in tiles], device=self.device)
         self.tile_levels = torch.tensor([t['level'] for t in tiles], device=self.device)
-        # Authored v2 assets are fixed geometry, not a difficulty rung. They
-        # remain eligible at every stage instead of disappearing when a stage
-        # caps the procedural level below their atlas level.
+        # Fixed assets have their own real profile; their storage level is not
+        # a procedural difficulty rung. Admission still needs a mature row and
+        # a sufficiently large task request.
         self.authored = torch.tensor(
             [t['name'] in ('road_step', 'central_steps') for t in tiles],
             dtype=torch.bool, device=self.device)
@@ -235,6 +248,14 @@ class TerrainCourseRouter:
         self.slope_table = parameter('slope_rad')
         self.roughness_table = parameter('roughness_m')
         self.step_table = parameter('step_height_m')
+        for tile, authored in zip(tiles, self.authored.tolist()):
+            if authored:
+                profile = tile.get('parameters', {}).get('profile_m')
+                step = tile.get('parameters', {}).get('step_height_m')
+                if (not isinstance(profile, list) or len(profile) < 2
+                        or any(type(z) not in (int, float) or not math.isfinite(z) for z in profile)
+                        or profile[0] != 0 or profile[1] <= 0 or step != profile[1]):
+                    raise ValueError('authored atlas lacks its real routing profile; rebuild the atlas')
         self.level = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         self.tile = torch.zeros_like(self.level)
         self.origins = self.origins_table[0].expand(num_envs, -1).clone()
@@ -258,7 +279,7 @@ class TerrainCourseRouter:
         self.course_exits.add_(exits.long())
         return exits
 
-    def reset(self, ids, kind, *, stage, command_forward, requested=None):
+    def reset(self, ids, kind, *, stage, command_forward, requested=None, level_cap=None):
         ids = torch.as_tensor(ids, device=self.device, dtype=torch.long)
         kind = torch.as_tensor(kind, device=self.device, dtype=torch.long)
         if kind.shape != ids.shape or ((kind < 0) | (kind > 7)).any():
@@ -275,6 +296,10 @@ class TerrainCourseRouter:
         delta = self.last_success[ids].long() - self.last_failure[ids].long()
         cap = (0 if stage == 0 else min(6, self.manifest['levels'] - 1)
                if stage == 1 else self.manifest['levels'] - 1)
+        if level_cap is not None:
+            if type(level_cap) is not int or not 0 <= level_cap < self.manifest['levels']:
+                raise ValueError('terrain level cap must be a valid explicit atlas level')
+            cap = level_cap
         self.level[ids] = (self.level[ids] + delta).clamp(0, cap)
         scores = torch.rand((len(ids), len(self.kinds)), generator=self.generator, device=self.device)
         if requested is None:
@@ -286,14 +311,16 @@ class TerrainCourseRouter:
             candidates = ((kind[:, None] == self.kinds)
                            & ((level[:, None] == self.tile_levels) | self.authored[None, :]))
         else:
-            # Bind the actual physical bucket to the sampled task parameter.
-            # The authored fixed assets have level == levels-1, so they only
-            # enter after the stage cap reaches the top bucket.
+            # The sampled request is an upper bound, and the row's completed
+            # episode level is a second bound. Selection must not overwrite
+            # that persistent proficiency with the chosen tile's storage ID.
+            procedural = self.tile_levels[None, :] <= self.level[ids, None]
+            fixed = self.authored[None, :] & (self.level[ids, None] >= cap) & (stage > 0)
             candidates = ((kind[:, None] == self.kinds)
-                          & (self.tile_levels[None, :] <= cap))
+                          & ((procedural & ~self.authored[None, :]) | fixed))
         candidates[kind == 0] = False
         candidates[kind == 0, 0] = True
-        if not candidates.any(-1).all():
+        if requested is None and not candidates.any(-1).all():
             raise ValueError('atlas lacks a requested terrain kind/level')
         if requested is None:
             selected = scores.masked_fill(~candidates, -1).argmax(-1)
@@ -306,6 +333,21 @@ class TerrainCourseRouter:
             roughness = (self.roughness_table[None, :] - requested['roughness_m'][:, None]).abs()
             up = (self.step_table[None, :] - requested['step_up_m'][:, None]).abs()
             down = (self.step_table[None, :] + requested['step_down_m'][:, None]).abs()
+            # Do not round a small/zero request up to a larger physical step.
+            # A finite atlas can resolve it to flat; that actual route is
+            # recorded separately from the requested kind and height.
+            slope_ok = ((self.slope_table[None, :].abs() <= requested['slope_rad'][:, None].abs() + 1e-7)
+                        & (self.slope_table[None, :] * requested['slope_rad'][:, None] >= 0))
+            candidates &= torch.where((kind == int(TerrainKind.SLOPE))[:, None], slope_ok, True)
+            candidates &= torch.where((kind == int(TerrainKind.ROUGH))[:, None],
+                                      self.roughness_table[None, :] <= requested['roughness_m'][:, None] + 1e-7, True)
+            up_kind = torch.isin(kind, kind.new_tensor(
+                [int(TerrainKind.STEP_UP), int(TerrainKind.STAIRS), int(TerrainKind.TWO_PLATFORMS)]))
+            candidates &= torch.where(up_kind[:, None],
+                                      self.step_table[None, :] <= requested['step_up_m'][:, None] + 1e-7, True)
+            candidates &= torch.where((kind == int(TerrainKind.STEP_DOWN))[:, None],
+                                      -self.step_table[None, :] <= requested['step_down_m'][:, None] + 1e-7, True)
+            candidates[~candidates.any(-1), 0] = True
             distance = torch.where((kind == int(TerrainKind.SLOPE))[:, None], slope, distance)
             distance = torch.where((kind == int(TerrainKind.ROUGH))[:, None], roughness, distance)
             distance = torch.where(torch.isin(kind, torch.tensor(
@@ -318,10 +360,13 @@ class TerrainCourseRouter:
             distance = torch.where(torch.isin(kind, torch.tensor(
                 [int(TerrainKind.MATERIAL)], device=self.device))[:, None],
                 scores, distance)
-            selected = distance.masked_fill(~candidates, float('inf')).argmin(-1)
+            distance = distance.masked_fill(~candidates, float('inf'))
+            nearest = distance == distance.amin(-1, keepdim=True)
+            # Resolve equal-height authored/procedural ties without starving
+            # either route. Reuse the router RNG and preserve it in checkpoint.
+            selected = scores.masked_fill(~nearest, -1).argmax(-1)
             if not torch.isfinite(distance.gather(1, selected[:, None])).all():
                 raise ValueError('atlas lacks a requested terrain parameter bucket')
-            self.level[ids] = self.tile_levels[selected]
         self.tile[ids] = selected
         self.origins[ids] = self.origins_table[selected]
         self.direction[ids] = 1.0
