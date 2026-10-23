@@ -60,10 +60,10 @@ class RewardTuning:
                 or min(self.robot_mass_kg, self.gravity_m_s2, self.landing_load_multiple) <= 0
                 or min(self.angular_damping_ordinary, self.angular_damping_jump,
                        self.angular_damping_recovery) < 0
-                or self.policy_dt_s != .01 or not 0 < self.gamma < 1 or self.cost_density_scale != 10.
+                or self.policy_dt_s not in (.01, .02) or not 0 < self.gamma < 1 or self.cost_density_scale != 10.
                 or self.absorbing_density >= -self.cost_density_scale or self.failure_event >= 0
                 or self.success_event < 0):
-            raise ValueError('reward tuning requires explicit mass,100Hz discount and a strictly worse absorbing density')
+            raise ValueError('reward tuning requires explicit mass, policy-period discount and a strictly worse absorbing density')
         # Even the best terminal density must be worse than safe continuation
         # at its worst continuous density. This is a reward-bound assertion,
         # not a claim about an imperfect learned critic or finite evaluation.
@@ -145,7 +145,7 @@ class PhysicalRewardComposer:
     """Integrate exactly one policy interval, then publish one reward.
 
     Physical terms use every200Hz/1kHz sample with its actual dt. Issued-action
-    differences are100Hz densities held over that interval, not differentiated
+    differences are policy-period densities held over that interval, not differentiated
     again at the physics rate. All raw costs survive bounded composition.
     Events occur once; absorbing value adds no synthetic physical transition.
     """

@@ -29,8 +29,9 @@ def rng_and_threads():
     torch.set_num_threads(threads)
 
 
-def fixture(tmp_path, full=False, target_rollouts=30000):
-    network = StructuredActorCritic() if full else small_model()
+def fixture(tmp_path, full=False, target_rollouts=30000, policy_config=None):
+    network = (StructuredActorCritic(policy_config) if policy_config is not None
+               else StructuredActorCritic() if full else small_model())
     ppo = replace(StructuredPPOConfig(), epochs=1, minibatches=1, probe_endpoints=16,
                   evaluation_chunk=32, learning_rate=1e-6)
     terrain = TerrainTuning(.7, (.2, 1.1), .25)

@@ -29,7 +29,7 @@ Kaiser使用完整路径 `/home/kaiser/.local/bin/trainctl`。以下 `<session>`
 
 正式会话由部署器冻结完整源码、recipe、runtime及资产绑定，再登记控制台。已有 `init`、`adopt`分别服务研究会话与研究队列，不拿旧研究配置冒充正式recipe。`jobs`也只适用于研究队列。
 
-正式采样参数在 [`configs/formal_training.json`](../configs/formal_training.json)：8192环境、48步、3个训练seed各35,000更新。完整展开后的参数写入运行目录的 `recipe.json`，checkpoint每100更新保存一次。修改源码配置不会改变已冻结会话。
+正式采样参数在 [`configs/formal_training.json`](../configs/formal_training.json)：4096环境、24步、50Hz策略/200Hz物理、3个训练seed各35,000更新。完整展开后的参数写入运行目录的 `recipe.json`，checkpoint每100更新保存一次。修改源码配置不会改变已冻结会话。
 
 Lab 正式接入使用经过验收的源码和两个已审核 JSON：runtime 绑定当前 boot、机械资产、电机响应及地形 atlas；resources 保留原 GPU、RAM、磁盘门槛和四个锁的身份。正式入口在一次命令中冻结 35k 配置并创建全新会话。默认只准备、不启动 Isaac：
 
@@ -42,9 +42,9 @@ Lab 正式接入使用经过验收的源码和两个已审核 JSON：runtime 绑
   --python /home/kaiser/software/isaaclab-3.0.0/IsaacLab/.venv/bin/python
 ```
 
-命令使用与原生验证相同的解释器，并显式用 `--python` 绑定已验证的 worker；省略 `--python` 时入口只会绑定当前解释器，不能证明 worker 是已验证的 Lab 3.0 环境。需要在准备后立即启动时追加 `--start`；仅初始化并暂停用 `--start --paused`。入口默认写入 action transport 的整策略步延迟 `0,1`（100Hz 下 0 或 10ms）。`nominal_fraction=0.5` 是**唯一**的零延迟概率：零延迟先从非零延迟集合中排除，再按该比例覆盖，因此实际为零延迟的 reset 行约为 50%，不是 75%。这是额外传输不确定度的压力项，**不是 USB 单向时延测量，也不是重新加入实测电机响应的标称延迟**。实际响应曲线保持不变；没有证据时不能把这组压力参数称为实测分布。可用 `--action-delay-steps` 指定其他非负整数步数，或用 `--no-action-transport` 保留 runtime 中已有的配置。
+命令使用与原生验证相同的解释器，并显式用 `--python` 绑定已验证的 worker；省略 `--python` 时入口只会绑定当前解释器，不能证明 worker 是已验证的 Lab 3.0 环境。需要在准备后立即启动时追加 `--start`；仅初始化并暂停用 `--start --paused`。入口默认写入 action transport 的整策略步延迟 `0,1`（50Hz 下 0 或 20ms）。`nominal_fraction=0.5` 是**唯一**的零延迟概率：零延迟先从非零延迟集合中排除，再按该比例覆盖，因此实际为零延迟的 reset 行约为 50%，不是 75%。这是额外传输不确定度的压力项，**不是 USB 单向时延测量，也不是重新加入实测电机响应的标称延迟**。实际响应曲线保持不变；没有证据时不能把这组压力参数称为实测分布。可用 `--action-delay-steps` 指定其他非负整数步数，或用 `--no-action-transport` 保留 runtime 中已有的配置。
 
-新会话可追加 `--control-timing-json configs/control_timing.json`，将完整上/下行预算和回合随机化课程写入冻结 runtime。模板的0.1–5ms总往返按一半分给两向；PD与Actor复用上行，额外Actor观测lag、策略目标lag和辨识电机响应各只经过一次。模板以5000更新为曝光终点：0时延/噪声增量和单位气簧强度逐步展开到原配置范围及0.9–1.1气簧强度。完整曝光时目标队列仍为0/10ms各50%，观测“无额外lag”约60%；上行不包含在这些零额外比例中。没有硬件证据支持的jitter/dropout不默认添加。
+新会话可追加 `--control-timing-json configs/control_timing.json`，将完整上/下行预算和回合随机化课程写入冻结 runtime。模板的0.1–5ms总往返按一半分给两向；PD与Actor复用上行，额外Actor观测lag、策略目标lag和辨识电机响应各只经过一次。模板以5000更新为曝光终点：0时延/噪声增量和单位气簧强度逐步展开到原配置范围及0.9–1.1气簧强度。完整曝光时目标队列仍为0/20ms各50%，观测“无额外lag”约60%；上行不包含在这些零额外比例中。没有硬件证据支持的jitter/dropout不默认添加。
 
 新增 `collection.control_timing` 输出当前回合配置与末个物理区间的范围/均值，不冒充整轮池化统计。新冷恢复同时校验并恢复通信、传感器、动作队列和气簧随机流；物理缓存与活动回合重新建立。模板只在新建会话显式启用，不会更新已有preflight或其runtime。
 
@@ -118,9 +118,9 @@ tensorboard --logdir <session>/attempts --host 0.0.0.0 --port 6006
 
 已有有效扫描的个别环境离开物理地形边界时，终止并reset该行，将该区间从Actor、Critic、辅助监督、GAE和bootstrap中排除，单独计为查询拒绝。初始/reset miss、非有限物理状态、mesh内部空洞/索引错误或整批miss仍报告实际查询错误；不会以零高度冒充命中。此行为需随新的冻结来源部署，运行中的会话不会热加载。
 
-正式计划为seed2101/2102/2103各35,000更新。每次8192×48＝393,216条fresh转移，每seed13,762,560,000条，总计41,287,680,000条；脚本准备等无Actor梯度区间单独mask，不冒充全部都是有效策略样本。周期checkpoint每100更新保存，暂停/停止另存完整学习状态。实际请求域以该运行冻结的 `recipe.json` 为准，修改域需要新的身份，不能改写旧记录。
+正式计划为seed2101/2102/2103各35,000更新。正式PPO以`1e-4`为初始学习率；每个**逻辑minibatch**在actor优化器步进前，复用该批actor loss前向得到的均值/标准差计算detached KL，再按KL调整actor/critic共同学习率：KL>2×desired时除以1.5，KL<0.5×desired时乘以1.5，边界为`1e-5–1e-2`，与核对到的RSL-RL adaptive PPO一致。随后actor和critic在同一轮调度结果下分别`step()`，不再让critic只使用actor最终LR。正式配置`kl_early_stop=false`、`validate_behavior=false`：不再有限KL超限回滚、停步、health门禁终止或更新前mean/std/logp重算allclose门禁；旧logp、PPO概率比、batch有限值和reset/GAE合同保持不变，非有限梯度/KL仍是不可继续的数值故障。当前formal为4096×24、50Hz策略/200Hz物理、5 epochs×4 minibatches（20步/update），与华南虎公开的4096×24、50Hz/200Hz、5×4=20步/update对齐；H5在这种情况下覆盖80ms，仍不是华南虎的单帧MLP。critic反向为`value_coefficient×MSE`（当前value系数4，即4×MSE），与参考的4×MSE一致，但奖励权重和预训练权重仍是独立问题。每次4096×24＝98,304条fresh转移，每seed3,440,640,000条，总计10,321,920,000条；脚本准备等无Actor梯度区间单独mask，不冒充全部都是有效策略样本。周期checkpoint每100更新保存，暂停/停止另存完整学习状态。实际请求域以该运行冻结的 `recipe.json` 为准，修改域需要新的身份，不能改写旧记录。
 
-部署顺序为：冻结名义105°、上界107°的选中机械资产与电机响应来源 → 核验12/6闭链、reset与时序 → 实测8192环境内存和完整采样/PPO → 冻结正式CLI会话并启动 → 按固定课程训练。人工评价按需加载checkpoint；训练完成后分别比较三个训练seed，再做部署导出与实机差距检查。完整课程配置不表示各能力已经学会，工期以8192环境的实际吞吐测量为准。
+部署顺序为：冻结名义105°、上界107°的选中机械资产与电机响应来源 → 核验12/6闭链、reset与时序 → 实测4096环境、50Hz策略/200Hz物理下的内存和完整采样/PPO → 冻结正式CLI会话并启动 → 按固定课程训练。人工评价按需加载checkpoint；训练完成后分别比较三个训练seed，再做部署导出与实机差距检查。完整课程配置不表示各能力已经学会，工期以4096环境的实际吞吐测量为准。
 
 人工评价加载指定checkpoint，显式选择任务与案例，使用同一观测、reset和动作映射。检查高度、速度、姿态、静止漂移、接触与饱和，同时记录时间和计算开销。`formal/evaluation/`提供独立执行器，不能用旧研究CLI的格式替代正式格式。
 

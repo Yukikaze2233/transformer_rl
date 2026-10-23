@@ -81,7 +81,7 @@ class _RecoveryPreparation:
     """
 
     def __init__(self, controller, *, policy_dt_s, timeout_s):
-        if (not isinstance(controller, OutputFeedbackController) or policy_dt_s != .01
+        if (not isinstance(controller, OutputFeedbackController) or policy_dt_s not in (.01, .02)
                 or not math.isfinite(timeout_s) or timeout_s <= 0):
             raise ValueError('recovery preparation requires the original controller and explicit clock/timeout')
         self.controller, self.dt, self.timeout_s = controller, policy_dt_s, timeout_s

@@ -49,12 +49,14 @@ def parse_tuning(value):
     return NativeRuntimeTuning(**parsed)
 
 
-def _initial_policy_boundary(sim, scene):
-    """完成一个真实100Hz准备区间，避免在奇数200Hz tick创建生命周期。"""
+def _initial_policy_boundary(sim, scene, policy_dt_s):
+    """完成一个真实策略准备区间，避免在非策略边界创建生命周期。"""
     bridge = scene.observation
-    if sim.cfg.dt != .005 or bridge.physical_tick != 0:
-        raise ValueError('initial refresh requires a fresh200Hz scene before its first physical step')
-    for _ in range(2):
+    substeps = round(policy_dt_s / sim.cfg.dt)
+    if (sim.cfg.dt != .005 or policy_dt_s not in (.01, .02)
+            or abs(substeps * sim.cfg.dt - policy_dt_s) > 1e-12 or bridge.physical_tick != 0):
+        raise ValueError('initial refresh requires a fresh200Hz scene and an aligned policy period')
+    for _ in range(substeps):
         sim.step(render=False)
         if scene.physics_health is not None:
             scene.physics_health.check()
@@ -90,7 +92,7 @@ def runtime(recipe, components, configuration, *, control):
     if (not isinstance(configuration, dict) or set(configuration) != expected
             or configuration['authorized_boot'] != boot_id()
             or configuration['authorized_boot'] != control.binding['boot_id']
-            or recipe.device != 'cuda:0' or recipe.collection.policy_dt_s != .01
+            or recipe.device != 'cuda:0' or recipe.collection.policy_dt_s not in (.01, .02)
             or type(configuration['environment_spacing_m']) not in (int, float)
             or configuration['environment_spacing_m'] <= 0):
         raise ValueError('native worker requires its exact current-boot recipe and spatial configuration')
@@ -161,7 +163,7 @@ def runtime(recipe, components, configuration, *, control):
         wheel_receipt = verify_wheel_cylinders(scene, wheels, query, native_to_tensor=wp.to_torch,
                                                tolerance_m=configuration['wheel_probe_tolerance_m'])
         scene.readback['native_wheel_collision_equivalence_verified'] = True
-        _initial_policy_boundary(sim, scene)
+        _initial_policy_boundary(sim, scene, recipe.collection.policy_dt_s)
         terrain_presence = NativeShapeQueries(query, tuning.terrain_edit.native_query_offset_m)(
             scene.contacts.terrain_paths_by_environment, scene.terrain_meshes,
             scene.environment_origins_m, required_present=True)

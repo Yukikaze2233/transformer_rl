@@ -123,7 +123,7 @@ class PhysicalJumpEvidence:
 
     def __init__(self, protocol: RequestProtocol, config=SkillEvidenceConfig(), *, initial_physical_tick=0):
         if (not isinstance(protocol, RequestProtocol) or not isinstance(config, SkillEvidenceConfig)
-                or protocol.config.policy_dt_s != .01
+                or protocol.config.policy_dt_s not in (.01, .02)
                 or config.stable_landing_s != protocol.config.stable_landing_s
                 or config.stable_vertical_speed_m_s != protocol.config.stable_vertical_speed_m_s
                 or config.stable_tilt_rad != protocol.config.stable_tilt_rad

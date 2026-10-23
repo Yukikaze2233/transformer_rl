@@ -8,7 +8,7 @@ from pathlib import Path
 from .checkpoint import LearningRecipe
 from .optimization import StructuredPPOConfig
 from ..contracts import StructuredCollectionConfig
-from ..policy import StructuredPolicyConfig
+from ..policy import PolicyConfig, policy_config_from_dict
 from ..tasks.curriculum import COMPLETE_STAGE_BUDGETS, TaskDomain
 from ..tasks.protocol import RequestProtocolConfig
 from ..tasks.terrain import TerrainTuning
@@ -21,7 +21,7 @@ class FormalTrainingSettings:
     num_envs: int
     rollout_steps: int
     checkpoint_interval: int
-    policy: StructuredPolicyConfig
+    policy: PolicyConfig
     ppo: StructuredPPOConfig
     collection: StructuredCollectionConfig
     domain: TaskDomain
@@ -51,6 +51,9 @@ class FormalTrainingSettings:
             raw = arguments[name]
             if not isinstance(raw, dict):
                 raise ValueError('formal configuration must be an object: ' + name)
+            if name == 'policy':
+                arguments[name] = policy_config_from_dict(raw)
+                continue
             try:
                 arguments[name] = config_type(**raw)
             except TypeError as error:

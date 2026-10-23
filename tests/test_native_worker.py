@@ -37,14 +37,14 @@ def test_initial_scene_refresh_reaches_a_real_policy_boundary_before_the_first_r
 
     previous, robot, sim, writes = fixture()
     plant = previous.plant
-    _initial_policy_boundary(sim, plant.scene)
+    _initial_policy_boundary(sim, plant.scene, .01)
     assert sim.steps == plant.scene.observation.physical_tick == 2
     life = NativeEpisodeLifecycle(plant, previous.ground, previous.protocol)
     receipt = reset(life, robot)
     assert receipt.physical_tick == 2 and life.episode_id.eq(0).all()
     assert writes and sim.steps == 2
     with pytest.raises(ValueError, match='fresh200Hz'):
-        _initial_policy_boundary(sim, plant.scene)
+        _initial_policy_boundary(sim, plant.scene, .01)
 
 
 def test_one_refresh_is_not_a_policy_boundary_and_cannot_write_the_first_reset():

@@ -53,7 +53,7 @@ class NativeEpisodeLifecycle:
         if (not isinstance(plant, NativePhysicsPlant) or not isinstance(ground, NativeGroundQuery)
                 or ground.scene is not plant.scene or plant._ground is not ground
                 or not isinstance(protocol, RequestProtocol) or protocol.num_envs != plant.num_envs
-                or protocol.device != plant.device or protocol.config.policy_dt_s != .01):
+                or protocol.device != plant.device or protocol.config.policy_dt_s not in (.01, .02)):
             raise ValueError('episode lifecycle requires one native plant, exact ground owner and request protocol')
         self.plant, self.ground, self.protocol = plant, ground, protocol
         self.num_envs, self.device = plant.num_envs, plant.device

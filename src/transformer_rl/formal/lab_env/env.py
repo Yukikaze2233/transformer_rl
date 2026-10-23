@@ -3,7 +3,7 @@
 只负责 IsaacLab 场景/传感器/物理接线；35D Actor/185D Critic/6D 动作、历史、控制核心和
 任务公式分别来自 lab_env.contract / control / observations。默认走
 M1 flat_reward；配置 ``formal_reward_spec`` 时改走正式
-PhysicalRewardComposer。100Hz 策略/200Hz 反馈的边界保持不变。
+PhysicalRewardComposer。50Hz 策略/200Hz 反馈的边界保持不变。
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from .formal_reward import FormalRewardConfig, LabFormalReward
 from .critic_features import CriticActionHistory, TERRAIN_SCAN_DIM, environment_features_182
 from .warp_scan import miss_histograms
 from .forward_scan import ForwardStepDetector
-from .skill_fsm import JumpState, SkillFSM
+from .skill_fsm import JumpFSMConfig, JumpState, SkillFSM, StairFSMConfig
 from ..tasks.reward import RewardPhase
 from ..tasks.termination import NativeTaskLimits, PhysicalFailureLatch
 from .recover import LabRecoverTask, RecoverTaskSpec
@@ -251,9 +251,12 @@ class WheeledLabEnv(DirectRLEnv):
         self._command_mode = torch.full((self.num_envs,), int(CommandMode.NORMAL),
                                         dtype=torch.long, device=self._device)
         self._base_command_mode = self._command_mode.clone()
-        self._skill_fsm = (SkillFSM(self.num_envs, device=str(self._device))
-                           if (len(cfg.forward_scanners) or self._formal_reward is not None)
-                           else None)
+        self._skill_fsm = (SkillFSM(
+            self.num_envs,
+            stair_config=StairFSMConfig(policy_dt_s=float(self.step_dt)),
+            jump_config=JumpFSMConfig(policy_dt_s=float(self.step_dt)),
+            device=str(self._device))
+            if (len(cfg.forward_scanners) or self._formal_reward is not None) else None)
         self._forward_detector = (ForwardStepDetector(self.num_envs, device=str(self._device))
                                   if self._skill_fsm is not None else None)
         self._reward_phase = torch.full((self.num_envs,), 0, dtype=torch.long, device=self._device)

@@ -80,6 +80,46 @@ def test_old_mlp_state_keys_and_adam_remain_loadable_without_rng_or_actor_change
     assert not torch.equal(network.critic(physical), old(physical))
 
 
+@pytest.mark.parametrize('early_stop', [False, True])
+def test_nonfinite_critic_gradient_never_reaches_critic_adam(monkeypatch, early_stop):
+    network = model()
+    trainer = StructuredPPOTrainer(network, replace(
+        StructuredPPOConfig(), epochs=1, minibatches=2, learning_rate=1e-8,
+        kl_early_stop=early_stop))
+    batch = batch_for(network)
+    before = deepcopy(network.state_dict())
+    calls = []
+    original = trainer.critic_optimizer.step
+
+    def step(*args, **kwargs):
+        calls.append('critic')
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(trainer.critic_optimizer, 'step', step)
+    handle = network.critic[6].bias.register_hook(lambda grad: torch.full_like(grad, float('nan')))
+    try:
+        with pytest.raises(FloatingPointError, match='critic gradient.*before optimizer step'):
+            trainer.update(batch)
+    finally:
+        handle.remove()
+    assert calls == []
+    assert trainer.critic_optimizer.state == {}
+    assert_identical(network.state_dict(), before)
+    assert trainer.consumed['fresh_endpoints'] == len(batch)
+    if not early_stop:
+        assert trainer.consumed['actor_optimizer_steps'] == 0
+
+
+def test_conditioned_critic_still_updates_with_all_reference_minibatches():
+    network = model()
+    trainer = StructuredPPOTrainer(network, replace(
+        StructuredPPOConfig(), epochs=2, minibatches=2, kl_early_stop=False))
+    metrics = trainer.update(batch_for(network))
+    assert metrics['actor_optimizer_steps'] == metrics['critic_optimizer_steps'] == 4
+    assert metrics['rolled_back_actor_steps'] == 0
+    assert metrics['critic_gradient_norm_mean'] >= 0
+
+
 def test_source_review_does_not_implicitly_allow_policy_preprocessing(tmp_path):
     import hashlib
     from transformer_rl.formal.runtime.transition import _review_sources

@@ -84,8 +84,9 @@ class CommandStream:
     """
 
     def __init__(self, initial, envelope: DriveEnvelope, rates: CommandRates, *, policy_dt_s=0.01):
-        if not isinstance(envelope, DriveEnvelope) or not isinstance(rates, CommandRates) or policy_dt_s != 0.01:
-            raise ValueError('command stream requires parsed bounds and the fixed 100Hz period')
+        if (not isinstance(envelope, DriveEnvelope) or not isinstance(rates, CommandRates)
+                or policy_dt_s not in (0.01, 0.02)):
+            raise ValueError('command stream requires parsed bounds and a 50/100Hz period')
         _, _, _, necessary, _ = envelope.project(initial)
         if not necessary.all():
             raise ValueError('initial admitted command must satisfy the wheel target bound and body vy=0')

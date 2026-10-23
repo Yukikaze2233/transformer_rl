@@ -176,4 +176,4 @@ def test_loss_summaries_have_explicit_weighting_and_one_small_host_transfer(monk
     assert summary['actor_attempted']['prediction'] == {'mean': None, 'sample_uses': 0}
     assert summary['actor_retained']['surrogate'] == {'mean': None, 'sample_uses': 0}
     assert summary['critic_attempted']['clipped_value_mse'] == {'mean': 3., 'sample_uses': 2}
-    assert summary['critic_attempted']['weighted_objective'] == {'mean': 6., 'sample_uses': 2}
+    assert summary['critic_attempted']['weighted_objective'] == {'mean': 12., 'sample_uses': 2}

@@ -74,7 +74,7 @@ def parse_configuration(recipe, configuration, authorized_boot):
             or configuration['format'] != 'managed_lab_runtime_v4'
             or configuration['authorized_boot'] != authorized_boot or authorized_boot != boot_id()
             or recipe.device != 'cuda:0' or recipe.policy.critic_input_dim != 185
-            or recipe.policy.history_length != 5 or recipe.collection.policy_dt_s != .01
+            or recipe.policy.history_length != 5 or recipe.collection.policy_dt_s not in (.01, .02)
             or type(configuration['profile_collection']) is not bool
             or type(configuration['environment_spacing_m']) not in (int, float)
             or not math.isfinite(configuration['environment_spacing_m'])

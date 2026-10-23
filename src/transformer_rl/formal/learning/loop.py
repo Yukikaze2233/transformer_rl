@@ -22,6 +22,76 @@ class StageValidationRequired(RuntimeError):
     """The exposure boundary is intact; the independent evaluator must run."""
 
 
+class ActorUpdateStalled(RuntimeError):
+    """Repeated rejected actor transactions would otherwise consume the full budget."""
+
+
+class ActorUpdateHealth:
+    """Tracks consecutive updates with no retained actor transaction.
+
+    A critic-only streak is not learning: the actor parameters are unchanged.
+    It is still charged against the journal, so it must terminate the session
+    rather than silently spend hours of fresh transitions.
+    """
+
+    def __init__(self, limit=20):
+        if type(limit) is not int or limit < 1:
+            raise ValueError('actor update health limit must be a positive integer')
+        self.limit = limit
+        self.consecutive_zero_updates = 0
+
+    def observe(self, metrics):
+        if not isinstance(metrics, dict):
+            raise ValueError('actor update health requires trainer metrics')
+        attempts = metrics.get('actor_endpoint_uses', 0)
+        retained = metrics.get('retained_actor_steps', 0)
+        if attempts > 0 and retained == 0:
+            self.consecutive_zero_updates += 1
+        else:
+            self.consecutive_zero_updates = 0
+        return self.consecutive_zero_updates
+
+    @property
+    def stalled(self):
+        return self.consecutive_zero_updates >= self.limit
+
+    def require_healthy(self):
+        if self.stalled:
+            raise ActorUpdateStalled(
+                f'actor produced no retained transaction for {self.consecutive_zero_updates} '
+                f'consecutive updates; refusing to spend more training budget')
+
+
+def last_actor_zero_streak(metrics_path):
+    """Read the last committed health counter for a cold resume.
+
+    The metrics JSONL remains the authoritative per-update record. The
+    checkpoint does not need a schema change, and an older file without the
+    field safely starts at zero.
+    """
+    path = Path(metrics_path)
+    if not path.is_file() or path.is_symlink():
+        return 0
+    try:
+        with path.open('rb') as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - 1024 * 1024))
+            raw = stream.read()
+        lines = raw.decode('utf-8').splitlines()
+        if size > 1024 * 1024 and lines:
+            lines = lines[1:]
+        if not lines:
+            return 0
+        row = json.loads(lines[-1])
+        value = row.get('optimization', {}).get('actor_consecutive_zero_updates', 0)
+        return value if type(value) is int and value >= 0 else 0
+    except (OSError, UnicodeError, ValueError, TypeError):
+        # A missing or malformed health field must not fabricate a streak; the
+        # next update will establish a fresh observation from live metrics.
+        return 0
+
+
 class StructuredLearningLoop:
     """One transaction per call, with cooperative control between updates.
 
@@ -31,13 +101,18 @@ class StructuredLearningLoop:
     """
 
     def __init__(self, recipe: LearningRecipe, components: LearningComponents, collector,
-                 journal, store: StructuredCheckpointStore, control: TrainingControl, stop):
+                 journal, store: StructuredCheckpointStore, control: TrainingControl, stop,
+                 *, initial_actor_zero_streak=0):
         self.recipe, self.components, self.collector = recipe, components, collector
         self.journal, self.store, self.control, self.stop = journal, store, control, stop
         self._faulted, self._finished = False, False
         self._report = None
         self._last_checkpoint = None
         self.last_timing = {}
+        self.actor_health = ActorUpdateHealth()
+        if type(initial_actor_zero_streak) is not int or initial_actor_zero_streak < 0:
+            raise ValueError('initial actor health streak must be a nonnegative integer')
+        self.actor_health.consecutive_zero_updates = initial_actor_zero_streak
         binding = control.binding
         boundary = journal.checkpoint_boundary()
         if (not isinstance(control, TrainingControl) or store.recipe != recipe or store.journal is not journal
@@ -177,6 +252,7 @@ class StructuredLearningLoop:
                 raise ValueError('collector returned a partial or differently sized rollout')
             self._publish('optimizing')
             metrics = self.components.trainer.update(batch)
+            metrics['actor_consecutive_zero_updates'] = self.actor_health.observe(metrics)
             optimization_finished = time.perf_counter()
             self.components.attempted_vector_steps = self.collector.attempted_vector_steps
             self.components.returned_vector_steps = self.collector.returned_vector_steps

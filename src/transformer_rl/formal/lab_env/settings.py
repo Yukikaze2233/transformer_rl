@@ -90,10 +90,10 @@ class LabEnvSettings:
     """DirectRLEnv 适配层需要的显式设置。"""
 
     asset_directory: str
-    num_envs: int = 8192
+    num_envs: int = 4096
     env_spacing_m: float = 4.0
     sim_dt_s: float = 0.005
-    decimation: int = 2
+    decimation: int = 4
     episode_length_s: float = 30.0
     device: str = "cuda:0"
     history_length: int = HISTORY_LENGTH
@@ -109,8 +109,8 @@ class LabEnvSettings:
             raise ValueError("sim_dt_s 只支持 1kHz 或 200Hz")
         if type(self.decimation) is not int or self.decimation < 1:
             raise ValueError("decimation 必须是正整数")
-        if abs(self.decimation * self.sim_dt_s - 0.01) > 1e-12:
-            raise ValueError("decimation*sim_dt_s 必须等于 100Hz 策略周期")
+        if abs(self.decimation * self.sim_dt_s - 0.02) > 1e-12:
+            raise ValueError("decimation*sim_dt_s 必须等于 50Hz 策略周期")
         if self.history_length != HISTORY_LENGTH:
             raise ValueError("M1 契约固定 5 帧历史")
         if not isinstance(self.task, FlatTaskSpec):

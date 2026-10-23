@@ -7,6 +7,7 @@ import torch
 from transformer_rl.formal.lab_env.recovery_lifecycle import (
     RecoveryLifecycle, RecoveryLifecycleConfig,
 )
+from transformer_rl.formal.control.observation import ControlSource
 from transformer_rl.formal.tasks.protocol import CompletedEstimate
 
 
@@ -169,7 +170,7 @@ def test_native_step_returns_recovery_timeout_and_preserves_pre_reset_endpoint()
     definition = next(node for node in ast.parse(path.read_text()).body
                       if isinstance(node, ast.ClassDef) and node.name == 'WheeledLabEnv')
     step = next(node for node in definition.body if isinstance(node, ast.FunctionDef) and node.name == 'step')
-    namespace = {'torch': torch, 'time': time}
+    namespace = {'torch': torch, 'time': time, 'ControlSource': ControlSource}
     exec(compile(ast.Module(body=[step], type_ignores=[]), str(path), 'exec'), namespace)
     command = torch.zeros(3)
     endpoints = []
@@ -182,9 +183,12 @@ def test_native_step_returns_recovery_timeout_and_preserves_pre_reset_endpoint()
 
     course = SimpleNamespace(
         finish_recovery_interval=lambda: torch.tensor([True, False, False]),
+        finish_queries=lambda: torch.zeros(3, dtype=torch.bool),
         router=SimpleNamespace(observe_end=lambda *_: torch.zeros(3, dtype=torch.bool)))
     env = SimpleNamespace(
         _device=torch.device('cpu'), cfg=SimpleNamespace(decimation=1, sim=SimpleNamespace(render_interval=1)),
+        _critic_action_history=SimpleNamespace(record=lambda *args, **kwargs: None),
+        _targets=SimpleNamespace(control_source=torch.zeros(3, dtype=torch.long)),
         sim=SimpleNamespace(is_rendering=False, step=lambda **kwargs: None),
         scene=SimpleNamespace(write_data_to_sim=lambda: None, update=lambda **kwargs: None),
         _pre_physics_step=lambda _: None, _apply_action=lambda: None, _observe_substep=observe,

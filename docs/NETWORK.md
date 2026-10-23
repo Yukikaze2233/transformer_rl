@@ -2,6 +2,8 @@
 
 本文对齐当前网络代码、Lab正式采样路径与配置，说明实际张量接口及尚待验证的设计。系统分层见[系统架构](ARCHITECTURE.md)，启停与课程见[使用说明](USAGE.md)。网络已接入训练；接线完成不代表完整课程、长期优化稳定性或实机能力已通过。
 
+历史MLP候选的结构、参数量和配置见[第11节](#11-历史mlp候选)，与默认Transformer共用环境及训练接口。
+
 **采用现有拓扑的轻量尺寸：一层32D空间门控注意力、两层64D时间门控注意力、五Query读出、35D×5帧Actor、185D独立Critic。** 保留身体分组、完整特征门控、状态估计、当前帧直连与腿／轮共享解码器。
 
 ## 1. 实现状态与固定接口
@@ -15,7 +17,7 @@
 | PPO batch与checkpoint | 按配置校验Critic宽度、记录对应归一化标识 | 同规格严格恢复；改变尺寸或recipe需新会话 |
 | 地形／课程／运行状态 | 属于环境与训练层 | 以各会话冻结recipe、状态与回执为准 |
 
-`B`为批量。策略100Hz、物理200Hz、闭链position12／velocity6。当前冻结机械源为`v6_232mm_stop105_nominal_v1`，膝内角限位40–105°；106–107°是待辨识的止挡误差范围，当前未开启止挡随机化。模型不会自动装载新课程，也不实现机械闭链、链传动或电机时延补偿。
+`B`为批量。正式策略50Hz、物理200Hz、闭链position12／velocity6。当前冻结机械源为`v6_232mm_stop105_nominal_v1`，膝内角限位40–105°；106–107°是待辨识的止挡误差范围，当前未开启止挡随机化。模型不会自动装载新课程，也不实现机械闭链、链传动或电机时延补偿。
 
 ## 2. 网络框图
 
@@ -45,7 +47,7 @@ Actor与Critic分别持有参数和Adam。环境不导入网络；采样器复�
 
 四腿轴是链传动后的同轴输出坐标，不直接等同于四个独立解剖关节角。成对位置只去除共同绕圈，不能分别wrap两轴。轮绝对角度不作为时钟输入。
 
-窗口为`t−40ms…t`共5帧，包含当前帧，不额外等待40ms。reset或控制epoch变化时切断历史；不足五帧时复制新边界首帧，不跨回合或脚本接管拼接。保存原始帧与索引，PPO用当前权重重算；可以打乱端点，不能打乱窗口内部顺序或用旧latent替代新前向。两层时间编码仍覆盖同一个40ms窗口；无RNN、跨调用隐状态或KV cache。
+窗口为`t−80ms…t`共5帧，包含当前帧，不额外等待80ms。reset或控制epoch变化时切断历史；不足五帧时复制新边界首帧，不跨回合或脚本接管拼接。保存原始帧与索引，PPO用当前权重重算；可以打乱端点，不能打乱窗口内部顺序或用旧latent替代新前向。两层时间编码仍覆盖同一个80ms窗口；无RNN、跨调用隐状态或KV cache。
 
 ## 4. Actor层尺寸与数学
 
@@ -86,7 +88,7 @@ y = x + sigmoid(Wg_ffn z + bg_ffn) ⊙ FFN(z)
 **Lab正式路径已接入182＋3＝185D。** 字段类别参考两套已核对实现，保持本车35D Actor接口；维度并集不等于逐字段语义兼容。下表按当前生产端实际计算填写，早期规格与实现的差异另列于5.3节。
 
 ```text
-环境182D = 78D基础 + 地形77 + 历史动作12 + 角加速度6 + COM偏移3 + 标称姿态扰动6
+环境182D = 78D基础 + 地形77 + 动作缓存12 + 角加速度6 + COM坐标3 + 当前姿态偏差6
 Critic185D = 环境182D + 当前Actor估计速度3D（detach）
 V = MLP(185→256→128→64→1)，隐藏激活ELU
 ```
@@ -110,7 +112,7 @@ V = MLP(185→256→128→64→1)，隐藏激活ELU
 | `78:155` | 77 | 周围地形高度 | B；第5.1节11×7扫描 |
 | `155:161` | 6 | 再前一拍已发动作 | 观察时刻`t`的`a(t−2Δt)`；最近一拍已在Actor的`22:28` |
 | `161:167` | 6 | 再前两拍已发动作 | `a(t−3Δt)`；不使用到达控制器的延迟动作替代 |
-| `167:173` | 6 | 输出轴角加速度 | 相邻策略端点的`Δdq/0.01s`；不是逐5ms物理子步差分 |
+| `167:173` | 6 | 输出轴角加速度 | 相邻策略端点的`Δdq/dt_policy`，50Hz时dt=0.02s；不是逐5ms物理子步差分 |
 | `173:176` | 3 | COM随机化增量 | 原生启动写入后读回的base COM局部坐标减去写入前标称值，m |
 | `176:182` | 6 | 标称输出轴姿态增量 | 控制器实际标称值减去资产标称值，rad；当前没有此项随机化，差值为0 |
 | `182:185` | 3 | Actor估计线速度 | B的runner拼接方式；本次`raw_state[:,:3]`，detach |
@@ -134,7 +136,7 @@ scan[11j+i] = clip(5 × (z_base − z_ground(p_xy(i,j)) − h_reference), −1, 
 
 真值来自本环境已绑定的完整源几何，必须与碰撞地形共用来源。粗糙面采用对应三角面的高度，不复制其他高度场的三邻点取最小近似。合法平面可以解析求值；无效几何、扫描越出源域或缺失高度不能悄悄替换成平地。
 
-100Hz策略边界一次批量查询，8192环境共630,784点／步，约3028万点／rollout。复用GPU地形数据，不逐点CPU射线、RPC或重建场景；新增扫描计入采样耗时，不追加自动评价。
+50Hz策略边界一次批量查询，4096环境共315,392点／步，约757万点／rollout。复用GPU地形数据，不逐点CPU射线、RPC或重建场景；新增扫描计入采样耗时，不追加自动评价。
 
 **只供Critic训练。** 不写入Actor窗口、状态估计器输入或部署模型。实车尚无ToF不影响仿真Critic使用这些真值，但Critic看到地形不代表部署Actor获得了前视感知。
 
@@ -150,9 +152,11 @@ rollout内Actor冻结，185D快照与旧value一起保存；Critic更新继续�
 
 输入合同标识为`lab_critic_physical_steps_relative_motion_issued_history_v2`。它随managed运行身份、task-source状态和直接Lab checkpoint保存；同为185D但标识缺失／不同的旧状态不能当作同合同resume。新实现不会热改已有冻结会话。
 
-轮相对COM速度不是接触点滑移，也不是旋转机身坐标中轮位置的时间导数；不额外减去`ω×r`。延迟块以物理步计数，但动作队列仍按策略步推进：100Hz下10ms的延迟在Critic中为2。该单位换算不改变USB／电机响应模型或随机化分布。
+轮相对COM速度不是接触点滑移，也不是旋转机身坐标中轮位置的时间导数；不额外减去`ω×r`。延迟块以物理步计数，但动作队列仍按策略步推进：50Hz下20ms的延迟在Critic中为4。该单位换算不改变USB／电机响应模型或随机化分布。
 
-185D第一层之前没有统一输入归一化。刚度、力矩、角加速度与0/1标志的范围不同；归一化标识`fixed_manual35_185_no_running_statistics`不会自动缩放它们。本次纠正字段来源与时序，不把新的预处理方案混入学习率实验，也不凭特征维数判断容量是否足够。
+185D进入第一层前按物理组固定裁剪、缩放（`formal/critic.py`，`grouped_physical_clip_scale_185_v1`）：力矩裁剪至±100 N·m后乘0.05，关节加速度裁剪至±1000 rad/s²后乘0.01，高度裁剪至±10m后乘5；刚度/阻尼裁剪至±100，乘数为1。其余共享字段采用各自固定界限。Actor 35D和77D地形块已有编码，不重复缩放；不引入运行均值或方差。
+
+环境、rollout和PRE-reset终点仍保存182D原始合同，普通value与timeout bootstrap统一经过上述入口。网络层数、宽度、参数名和Adam布局不变，但输入处理变化会改变旧Critic的值函数；接续必须创建显式新source身份，保留旧端点、完整学习状态和已用预算，不把这一变化称为无损数值等价。
 
 ## 6. 六维输出与请求状态机
 
@@ -181,22 +185,22 @@ wheel_speed_target = 10 × a_issued[4:6]             # rad/s，范围±90
 | Actor训练输出 | 均值`[B,6]`、raw_state`[B,8]`、状态Query上下文`[B,64]` |
 | 环境／Critic输入 | `[B,182]`物理块／拼接后`[B,185]` |
 | 监督 | 当前速度`[B,3]`、接触`[B,2]`、下一步速度变化`[B,6]` |
-| GAE | time-major`[T,N]`，`T=48,N=8192` |
-| PPO端点 | 393,216；五帧不计为五倍fresh样本 |
+| GAE | time-major`[T,N]`，`T=24,N=4096` |
+| PPO端点 | 98,304；五帧不计为五倍fresh样本 |
 
 ```text
 L_actor = L_PPO − 0.005×entropy + 0.1×L_velocity + 0.02×L_contact + 0.05×L_next
 L_velocity = mean_valid[0.5×((v_true−v_mu)/exp(log_sigma))² + log_sigma]
 L_contact = BCEWithLogits(contact_logits, contact_label)
 L_next = SmoothL1(delta_dq/s, delta_dq_true/s)，s=[5,5,5,5,20,20] rad/s
-L_critic = 0.5×4×mean(max((V−return)²,(V_clipped−return)²))
+L_critic = 4×mean(max((V−return)²,(V_clipped−return)²))
 ```
 
-速度标签是当前`t`的机身原点速度，接触来自截至`t`的历史；预测标签为`dq(t+10ms)−dq(t)`，不除dt，不与Critic角加速度混淆。特权标签detach，不直接进入动作头。
+速度标签是当前`t`的机身原点速度，接触来自截至`t`的历史；预测标签为`dq(t+20ms)−dq(t)`（50Hz策略周期），不除dt，不与Critic角加速度混淆。特权标签detach，不直接进入动作头。
 
 PPO和三个辅助项合成一次Actor事务，动作梯度允许穿过估计头。Actor与Critic独立Adam；没有绕过KL的辅助优化器。每个辅助项按整个逻辑minibatch有效标签数归一化；3072分块只累积梯度，不能按块独立平均再相加。
 
-保存旧均值／log标准差／原始动作logp，计算旧→新解析Gaussian KL。probe超过0.01停止剩余Actor更新，超过0.02或出现非有限梯度回滚该Actor与Adam事务；全rollout检查不合格时回滚整个Actor更新，包括辅助更新。检查只覆盖采样状态，不是全状态数学信赖域。
+保存旧均值／log标准差／原始动作logp，计算旧→新解析Gaussian KL。正式配置`kl_early_stop=false`：每个逻辑minibatch复用Actor损失前向的detached均值／log标准差计算KL，调节两套Adam的共同学习率，再分别更新Actor和Critic。KL大于目标两倍时LR除1.5，处于0与目标一半之间时乘1.5，边界为`1e-5…1e-2`；参考起点`1e-4`。有限KL不触发提前停止／回滚，连续零更新计数仅作诊断；非有限梯度／KL仍作为数值故障处理。旧实验可显式启用guard分支，不能将其规则描述为当前正式配置。
 
 | 边界事件 | Actor／Critic区间 | 下一步监督 | GAE跨边界 | bootstrap |
 |---|---|---|---|---|
@@ -209,7 +213,9 @@ PPO和三个辅助项合成一次Actor事务，动作梯度允许穿过估计头
 
 状态监督另由`state_auxiliary`有效标签mask控制；Actor、Critic、下一步监督、trace、bootstrap不可共用一个done。脚本交回RL建立新控制epoch与历史，不把准备阶段结果归给策略。
 
-训练保持8192×48、4 epochs×16逻辑minibatches，每批完整有效时24,576端点，Actor分块3072；两套Adam各最多64步。固定lr1e−4、clip／value clip0.2、value系数4、梯度范数上限1，`gamma=√0.99`、`lambda=√0.95`。周期checkpoint100更新，计划启停另存。课程、reward与人工评价独立，不因网络修改缩小课程或新增自动评价晋级。
+训练保持4096×24、50Hz策略/200Hz物理、5 epochs×4逻辑minibatches（20步/update），每批完整有效时24,576端点，Actor分块3072；两套Adam各最多20步。学习率和KL调度读取对应会话冻结的recipe及优化器状态，不能由并行修改中的工作树反推旧训练所用配置。clip／value clip0.2、value系数4、梯度范数上限1，`gamma=.99`、`lambda=.95`。周期checkpoint100更新，计划启停另存。
+
+应分别记录尝试、保留、回滚步数及两个optimizer实际使用的LR。正式路径在有效样本足够时完成20步，不能把旧guard下因拒绝而变短的优化耗时当作正常吞吐。正式配置另设`validate_behavior=false`，关闭更新前重算mean／std／logp的allclose门禁；保存旧logp、PPO概率比、batch有限值和reset／GAE合同不变。仅在显式诊断时开启该重算检查。学习率和辅助损失权重属于训练配置，不改变网络拓扑；短程成功更新不能证明长期稳定或任务能力。
 
 ## 8. 参数量与恢复
 
@@ -273,10 +279,75 @@ value = model.critic(critic_input)  # [B]
 
 部署只导出Actor：移除Critic、地形、高斯采样／探索与预测头，保留状态头。输入仍`B×5×35`，输出仍`B×6`，调用方管理历史。
 
-已有Kaiser网络检查覆盖参数量、因果mask、梯度隔离、PPO分块、checkpoint往返及导出接口；后续Lab接线也已实际用于8192×48采样和PPO。上述证据各自绑定源码，不自动覆盖新的并行改动。网络接入、训练健康、完整课程学习效果与实机验收是不同结论；当前运行状态由会话回执说明。
+已有Kaiser网络检查覆盖参数量、因果mask、梯度隔离、PPO分块、checkpoint往返及导出接口；后续Lab接线也已实际用于4096×24、50Hz采样和PPO。上述证据各自绑定源码，不自动覆盖新的并行改动。网络接入、训练健康、完整课程学习效果与实机验收是不同结论；当前运行状态由会话回执说明。
+
+## 10. 结构判断与优化风险
+
+**该结构是合理的轻量工程候选，尚无证据证明优于同输入、同预算的历史MLP，也不能用一次优化停滞认定Transformer选型错误。**
+
+- **身体分组与共享头有明确作用。** 每侧腿token包含同轴双输出的q／dq／上一动作，左右共享投影与解码；身体ID保留侧别。它不强制源机械零件完全镜像，也不代替闭链物理。
+- **Pre-LN与深度门控有研究依据。** 本实现是简单的逐特征sigmoid残差门控，借鉴稳定化方向；没有复现完整GTrXL、GRU式门控或跨段记忆，不能继承论文性能结论。[Pre-LN](https://proceedings.mlr.press/v119/xiong20b.html)、[GTrXL](https://proceedings.mlr.press/v119/parisotto20a.html)。
+- **空间mask是语义偏置。** 当前允许32／36个节点对，且仍执行稠密SDPA，不能宣称获得稀疏内核的计算收益。它只借鉴[Body Transformer](https://proceedings.mlr.press/v270/sferrazza25a.html)的身体结构思路，不是该模型的完整复现。
+- **五帧提供短时状态线索。** 两层时间注意力可组合当前与过去80ms的特征，但不会延长可观测历史；短通信RTT不能证明滑移、载荷和机身速度均已可辨识。
+- **当前帧直连降低信息绕行。** 动作头直接读取局部q／dq、IMU、命令及上次动作；状态头仍会影响动作，因此它不是独立且冻结的估计器。
+
+最需要实测的是**PPO与辅助监督对同一Actor的耦合**：速度NLL、接触BCE和下一步预测同时更新共享编码器；状态头的8D输出又进入动作解码器。辅助梯度可以改变策略均值，正式路径由联合更新的KL调节共同LR。只对8D估计做detach也不能隔离辅助损失到共享编码器的梯度。应同时检查KL、非有限梯度、辅助／PPO梯度占比和探索标准差；换成MLP不自动消除这些耦合。
+
+参数规模不大，但更新开销不只由参数量决定：一个24,576端点的逻辑minibatch会拆成8个3072端点块，完整5×4次Actor更新需要160次分块前向／反向。正式minibatch KL复用损失前向；`validate_behavior=false`时不执行更新前行为复现，全rollout KL仍作为诊断；旧guard分支才执行额外probe／回滚检查。吞吐应以有实际保留更新的轮次统计。
 
 源码：[网络](../src/transformer_rl/formal/policy.py) · [观测](../src/transformer_rl/formal/control/observation.py) · [动作映射](../src/transformer_rl/formal/control/actuation.py) · [窗口与mask](../src/transformer_rl/formal/learning/contracts.py) · [PPO](../src/transformer_rl/formal/learning/optimization.py) · [恢复](../src/transformer_rl/formal/learning/checkpoint.py)。
 
 参考77点布局、观测组成与144D口径分别见[固定配置](https://github.com/yly-true/fudan_rl_wheel_leg/blob/8204e853dfd2ed06d85a322e1a998c3d20a3be2c/plane/wheel_legged_gym/envs/base/legged_robot_config.py)、[观测组装](https://github.com/yly-true/fudan_rl_wheel_leg/blob/8204e853dfd2ed06d85a322e1a998c3d20a3be2c/plane/wheel_legged_gym/envs/base/legged_robot.py)、[runner](https://github.com/yly-true/fudan_rl_wheel_leg/blob/8204e853dfd2ed06d85a322e1a998c3d20a3be2c/plane/wheel_legged_gym/rsl_rl/runners/on_policy_runner.py)。参考用于信息类别与尺寸核对，不引入其训练框架依赖。
 
 78D参考的实际启用字段见[观测组装与特权块](https://github.com/scutrobotlab/wheeled-legged_RL/blob/1a26356d6f591734d4f6f666f5cead1a6925da67/source/agent_tasks/agent_tasks/direct/wheelbipe/wheelbipe25_v3/env.py#L3370)、[基础配置与39D特权扩展](https://github.com/scutrobotlab/wheeled-legged_RL/blob/1a26356d6f591734d4f6f666f5cead1a6925da67/source/agent_tasks/agent_tasks/direct/wheelbipe/wheelbipe_V14/env_cfg.py#L790)。注释中的候选项不计入已启用输入。
+
+## 11. 历史MLP候选
+
+`configs/formal_training_mlp.json`选择`architecture="history_mlp"`。这是独立候选，已有Transformer会话继续使用其冻结配置。代码在`formal/mlp_policy.py`，通过同一`StructuredActorCritic`、采样器、PPO和checkpoint接口对接。
+
+借鉴[SuperMimic的附录C、表A.4](https://arxiv.org/pdf/2610.28480v1)中“历史与任务条件编码→动作解码”的思路，缩为本车的轻量MLP。论文使用10帧历史、较大的目标编码器／解码器，并通过可微世界模型训练；本候选使用5帧和现有PPO，没有实现世界模型或复制论文训练算法。ELU激活与下表尺寸是本车的设计选择，不是论文已验证的配置。
+
+```mermaid
+flowchart LR
+    H["35D × 5帧历史"] --> E["展平175 → 256 → 128\nELU历史编码"]
+    E --> S["128 → 32 → 8\nGELU状态估计"]
+    E --> C["拼接171D"]
+    X["当前35D直连"] --> C
+    S --> C
+    C --> A["171 → 64 → 6\nELU＋线性输出"]
+    A --> O["四腿轴位置参考＋两轮速度参考"]
+    E -. 训练上下文 .-> P["128＋已发动作6 → 32 → 6\n下一步关节速度增量"]
+```
+
+| 部分 | 结构 | 参数量 |
+|---|---|---:|
+| 历史编码 | `175→256→128`，两层ELU | 77,952 |
+| 状态头 | `128→32→8`，GELU | 4,392 |
+| 动作解码 | `128+35+8=171→64→6`，隐藏层ELU | 11,398 |
+| **部署Actor** | 保留历史、状态与动作头 | **93,742** |
+| 预测头 | `128+6=134→32→6`，GELU，仅训练 | 4,518 |
+| 探索参数 | 六维log标准差，仅训练 | 6 |
+| **训练Actor** | — | **98,266** |
+| **独立Critic** | `185→256→128→64→1`，ELU | **88,833** |
+| **训练总量** | — | **187,099** |
+
+MLP不保留空间／时间注意力、Query、门控或左右共享动作头。历史位置由展平顺序区分，输入仅为过去与当前帧，无未来信息、RNN或跨调用缓存。当前命令已在35D观测内；当前帧直连不新增仿真真值。轮角度兼容槽`14:16`在编码和直连前显式置零，即使错误填入NaN也不进入前向。
+
+8D状态头仍表示速度均值3D、log标准差3D和轮接触logits2D，动作头使用其处理后的估计量。Critic仍读取环境182D＋detached估计速度3D。速度／接触／下一步预测损失及其梯度耦合沿用现有训练合同；MLP替换本身不解决辅助损失耦合、输入缩放或机械误差。
+
+动作顺序、Gaussian采样、原始动作logp、限幅和执行映射与第6节一致。动作输出末层仍按0.01缩放初始化；部署移除预测头、Critic和探索参数，输入`[B,5,35]`、输出`[B,6]`。选择5帧是为了首先保持对照的历史时间范围，配置允许独立指定历史长度；正式Lab入口当前仍校验5帧。
+
+```python
+from transformer_rl.formal.mlp_policy import HistoryMLPConfig
+from transformer_rl.formal.policy import StructuredActorCritic
+
+model = StructuredActorCritic(HistoryMLPConfig())
+mean, raw_state, context = model.actor.policy.outputs(frames)
+# mean[B,6], raw_state[B,8], context[B,128]
+value = model.critic(model.critic_features(privileged182, raw_state))
+deployed = model.actor.policy.for_deployment()
+```
+
+配置入口使用`--settings configs/formal_training_mlp.json`，其余资产、runtime、资源和课程接口不变。创建新会话时记录`architecture=history_mlp`；没有架构字段的旧配置仍按原Transformer解释，不改变其序列化字段或recipe哈希。两种网络的权重键／形状不同，不能互相strict resume，也不自动转移Adam。
+
+本候选的参数量较当前部署Transformer减少约34.2%。这不是整轮加速或控制性能的证明：需在Kaiser分别验证4096×24、50Hz/200Hz吞吐、学习曲线、各任务能力与部署推理。当前正式训练不因候选实现自动切换。

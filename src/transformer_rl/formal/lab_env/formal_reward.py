@@ -30,7 +30,7 @@ class FormalRewardConfig:
     """正式 reward 的显式来源与能力声明。"""
 
     robot_mass_kg: float
-    gamma: float = 0.99498743710662
+    gamma: float = 0.99
     physics_dt_s: float = 0.005
     available_terms: tuple[str, ...] = LAB_AVAILABLE_TERMS
     normal_load_source: str = "contact_force_world_z_abs"
@@ -45,7 +45,7 @@ class FormalRewardConfig:
     def __post_init__(self):
         if (type(self.robot_mass_kg) not in (int, float) or not math.isfinite(self.robot_mass_kg)
                 or self.robot_mass_kg <= 0
-                or self.gamma != 0.99498743710662 or self.physics_dt_s not in (0.005, 0.001)
+                or self.gamma not in (0.99498743710662, 0.99) or self.physics_dt_s not in (0.005, 0.001)
                 or not isinstance(self.available_terms, tuple)
                 or len(set(self.available_terms)) != len(self.available_terms)
                 or any(name not in REWARD_POSITIVE_TERMS + REWARD_COST_TERMS
@@ -155,7 +155,7 @@ class LabFormalReward:
         if not isinstance(config, FormalRewardConfig):
             raise TypeError("config 必须是 FormalRewardConfig")
         tuning = RewardTuning(config.robot_mass_kg, gamma=config.gamma,
-                              policy_dt_s=0.01, gravity_m_s2=9.81)
+                              policy_dt_s=0.02, gravity_m_s2=9.81)
         if "joint_boundary" in config.available_terms and boundary_geometry is None:
             raise ValueError("formal reward 请求 joint_boundary 但没有提供 LegBoundaryGeometry")
         self.config, self.binding, self.boundary_geometry = config, binding, boundary_geometry

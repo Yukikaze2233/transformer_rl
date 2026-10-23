@@ -23,7 +23,7 @@ class SensorModelConfig:
     gravity_halfwidth: float = .05
 
     def __post_init__(self):
-        if (self.physics_dt_s not in (.005, .001) or self.policy_dt_s != .01
+        if (self.physics_dt_s not in (.005, .001) or self.policy_dt_s not in (.01, .02)
                 or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1
                        for v in (self.nominal_episode_fraction, self.extra_delay_probability))
                 or not isinstance(self.observation_delays_s, (tuple, list)) or not self.observation_delays_s

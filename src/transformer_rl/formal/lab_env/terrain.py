@@ -14,8 +14,8 @@ from ..tasks.curriculum import TaskFamily
 from ..tasks.terrain_courses import TerrainCourseRouter
 from ..tasks.terrain_query import StaticTerrainQuery, wheel_lookahead_points
 from ..tasks.trajectory import DriveEnvelope
-from .course_tasks import LabCourseTasks, RequestCommand, StairRequestProtocol
-from .recovery_lifecycle import RecoveryLifecycle
+from .course_tasks import LabCourseTasks, RequestCommand, StairRequestProtocol, StairRequestConfig
+from .recovery_lifecycle import RecoveryLifecycle, RecoveryLifecycleConfig
 
 
 class LabTerrainCourse:
@@ -36,10 +36,15 @@ class LabTerrainCourse:
                                                 torch.zeros(1, dtype=torch.float64),
                                                 torch.zeros(1, 3, dtype=torch.float64))
         self.nominal_spawn_height_m = float(nominal_spawn.root_pose_xyzw[0, 2])
-        self.tasks = LabCourseTasks(env.num_envs, envelope, seed=int(env.cfg.seed or 0), device=env._device)
-        self.recovery = RecoveryLifecycle(env.num_envs, device=env._device)
+        self.tasks = LabCourseTasks(env.num_envs, envelope, seed=int(env.cfg.seed or 0),
+                                    device=env._device, policy_dt_s=float(env.step_dt))
+        self.recovery = RecoveryLifecycle(
+            env.num_envs, device=env._device,
+            config=RecoveryLifecycleConfig(policy_dt_s=float(env.step_dt), physics_dt_s=float(env.physics_dt)))
         self._birth_family_counts = torch.zeros(len(TaskFamily), dtype=torch.long, device=env._device)
-        self.stair_requests = StairRequestProtocol(env.num_envs, device=env._device)
+        self.stair_requests = StairRequestProtocol(
+            env.num_envs, device=env._device,
+            config=StairRequestConfig(policy_dt_s=float(env.step_dt)))
         self.body_contact_allowed = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
         self.wheel_ground = torch.zeros(env.num_envs, 2, device=env._device)
         self.wheel_material = torch.zeros_like(self.wheel_ground)

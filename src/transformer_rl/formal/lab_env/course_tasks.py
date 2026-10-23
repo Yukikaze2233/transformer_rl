@@ -13,7 +13,9 @@ import torch
 from ..control.observation import CommandMode
 from ..tasks.curriculum import TaskFamily
 from ..tasks.jump import JumpReferenceProgram
-from ..tasks.protocol import CompletedEstimate, RequestEnd, RequestProtocol, RequestResponse
+from ..tasks.protocol import (
+    CompletedEstimate, RequestEnd, RequestProtocol, RequestProtocolConfig, RequestResponse,
+)
 from ..tasks.reward import RewardPhase
 from ..tasks.trajectory import CommandRates, CommandStream, CommandTrajectory, DriveEnvelope
 
@@ -77,9 +79,9 @@ class StairRequestConfig:
     def __post_init__(self):
         if (any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
                 for value in vars(self).values())
-                or self.policy_dt_s != .01 or self.min_height_m >= self.max_height_m
+                or self.policy_dt_s not in (.01, .02) or self.min_height_m >= self.max_height_m
                 or self.timeout_s <= self.policy_dt_s):
-            raise ValueError('stair request bounds require finite 100Hz timing and ordered heights')
+            raise ValueError('stair request bounds require finite 50/100Hz timing and ordered heights')
 
 
 class StairRequestProtocol:
@@ -199,15 +201,21 @@ class LabCourseTasks:
     _COUNTERS = ('request_counters', 'external_request_counters', 'kind_counts', 'mode_counts',
                  'request_end_counts', 'physical_outcome_counts')
 
-    def __init__(self, num_envs, envelope: DriveEnvelope, *, seed=2102, device='cpu'):
+    def __init__(self, num_envs, envelope: DriveEnvelope, *, seed=2102, device='cpu',
+                 policy_dt_s=0.01):
+        if policy_dt_s not in (.01, .02):
+            raise ValueError('course task policy period must be 50 or 100Hz')
         self.num_envs, self.device = num_envs, torch.device(device)
+        self.policy_dt_s = float(policy_dt_s)
         self.generator = torch.Generator(device=self.device).manual_seed(seed)
         initial = torch.zeros(num_envs, 4, device=self.device)
         initial[:, 3] = .32
-        self.stream = CommandStream(initial, envelope, CommandRates(2., 3., .2))
+        self.stream = CommandStream(initial, envelope, CommandRates(2., 3., .2),
+                                    policy_dt_s=policy_dt_s)
         self.trajectory = CommandTrajectory(initial, initial, torch.ones(num_envs, device=self.device),
                                              torch.zeros(num_envs, dtype=torch.long, device=self.device))
-        self.protocol = RequestProtocol(num_envs, self.device)
+        self.protocol = RequestProtocol(num_envs, self.device,
+                                        RequestProtocolConfig(policy_dt_s=policy_dt_s))
         self.reference = JumpReferenceProgram()
         self.family = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         self.base_mode = self.family.clone()
@@ -313,7 +321,7 @@ class LabCourseTasks:
         self.success_id.fill_(-1)
         if command is not None:
             command.validate(self.num_envs, self.device)
-        self.elapsed.add_(.01)
+        self.elapsed.add_(self.policy_dt_s)
         cyclic = (self.trajectory.kind == 2) | (self.trajectory.kind == 3) | (self.trajectory.kind == 5)
         clock = torch.where(cyclic, self.elapsed.remainder(self.trajectory.duration_s), self.elapsed)
         admission = self.stream.step(self.trajectory.at(clock))

@@ -90,7 +90,7 @@ def test_default_complete_minibatches_have_64_steps_and_no_sample_refund():
 @pytest.mark.parametrize('training_chunk', [3072, 3])
 def test_rejected_actor_step_restores_adam_and_stops_all_auxiliary_updates(monkeypatch, training_chunk):
     network = model()
-    config = replace(StructuredPPOConfig(), epochs=1, minibatches=2, learning_rate=1e-6,
+    config = replace(StructuredPPOConfig(), epochs=1, minibatches=2, learning_rate=1e-4,
                      training_chunk=training_chunk)
     trainer = StructuredPPOTrainer(network, config)
     trainer.update(batch_for(network))
@@ -108,7 +108,15 @@ def test_rejected_actor_step_restores_adam_and_stops_all_auxiliary_updates(monke
     batch = batch_for(network)
     metrics = trainer.update(batch)
     assert_identical(network.actor.state_dict(), before)
-    assert_identical(trainer.actor_optimizer.state_dict(), adam_before)
+    adam_after = deepcopy(trainer.actor_optimizer.state_dict())
+    adam_expected = deepcopy(adam_before)
+    for state in (adam_after, adam_expected):
+        state['param_groups'][0].pop('lr')
+    assert_identical(adam_after, adam_expected)
+    assert trainer.actor_optimizer.param_groups[0]['lr'] == pytest.approx(
+        adam_before['param_groups'][0]['lr'] / 1.5)
+    assert metrics['actor_reject_kl_excess_steps'] == 1
+    assert metrics['actor_rejected_kl_last'] == pytest.approx(.03)
     assert metrics['actor_optimizer_steps'] == metrics['rolled_back_actor_steps'] == 1
     assert metrics['retained_actor_steps'] == 0
     assert metrics['critic_optimizer_steps'] == 2
@@ -119,7 +127,7 @@ def test_rejected_actor_step_restores_adam_and_stops_all_auxiliary_updates(monke
 def test_final_rollout_guard_can_reject_changes_missed_by_fixed_probe(monkeypatch):
     network = model()
     trainer = StructuredPPOTrainer(network, replace(StructuredPPOConfig(), epochs=1, minibatches=2,
-                                                    probe_endpoints=8, learning_rate=1e-6))
+                                                    probe_endpoints=8, learning_rate=1e-4))
     before = deepcopy(network.actor.state_dict())
     adam_before = deepcopy(trainer.actor_optimizer.state_dict())
     original = trainer._kl
@@ -139,7 +147,15 @@ def test_final_rollout_guard_can_reject_changes_missed_by_fixed_probe(monkeypatc
     assert metrics['retained_actor_steps'] == 0
     assert metrics['full_rollout_kl_after_guard'] < 1e-6
     assert_identical(network.actor.state_dict(), before)
-    assert_identical(trainer.actor_optimizer.state_dict(), adam_before)
+    adam_after = deepcopy(trainer.actor_optimizer.state_dict())
+    adam_expected = deepcopy(adam_before)
+    for state in (adam_after, adam_expected):
+        state['param_groups'][0].pop('lr')
+    assert_identical(adam_after, adam_expected)
+    assert trainer.actor_optimizer.param_groups[0]['lr'] == pytest.approx(
+        adam_before['param_groups'][0]['lr'] / 1.5)
+    assert metrics['actor_reject_full_rollout_kl_steps'] == 1
+    assert metrics['actor_rejected_kl_last'] == pytest.approx(.03)
 
 
 def test_target_kl_stops_without_undoing_an_admitted_transaction(monkeypatch):
@@ -163,6 +179,41 @@ def test_target_kl_stops_without_undoing_an_admitted_transaction(monkeypatch):
     assert any(not torch.equal(value, before[name]) for name, value in network.actor.state_dict().items())
 
 
+def test_disabled_early_stop_runs_all_actor_minibatches():
+    network = model()
+    trainer = StructuredPPOTrainer(network, replace(
+        StructuredPPOConfig(), epochs=1, minibatches=2, learning_rate=1e-4,
+        target_kl=1e-12, kl_early_stop=False))
+    metrics = trainer.update(batch_for(network))
+    assert metrics['actor_optimizer_steps'] == metrics['retained_actor_steps'] == 2
+    assert metrics['rolled_back_actor_steps'] == 0
+    assert metrics['whole_actor_update_rolled_back'] is False
+    assert metrics['actor_stop_reason'] is None
+    assert metrics['actor_reject_kl_excess_steps'] == 0
+    assert metrics['actor_learning_rate_after_update'] < metrics['actor_learning_rate']
+
+
+def test_actor_and_critic_steps_share_the_same_lr_schedule(monkeypatch):
+    network = model()
+    trainer = StructuredPPOTrainer(network, replace(
+        StructuredPPOConfig(), epochs=1, minibatches=2, learning_rate=1e-4,
+        kl_early_stop=False))
+    actor_lrs, critic_lrs = [], []
+    original = torch.optim.Adam.step
+
+    def record(optimizer, *args, **kwargs):
+        if optimizer is trainer.actor_optimizer:
+            actor_lrs.append(optimizer.param_groups[0]['lr'])
+        elif optimizer is trainer.critic_optimizer:
+            critic_lrs.append(optimizer.param_groups[0]['lr'])
+        return original(optimizer, *args, **kwargs)
+
+    monkeypatch.setattr(torch.optim.Adam, 'step', record)
+    trainer.update(batch_for(network))
+    assert len(actor_lrs) == len(critic_lrs) == 2
+    assert actor_lrs == critic_lrs
+
+
 @pytest.mark.parametrize('training_chunk', [3072, 3])
 def test_auxiliary_nonfinite_gradient_is_covered_by_actor_transaction(training_chunk):
     network = model()
@@ -176,6 +227,7 @@ def test_auxiliary_nonfinite_gradient_is_covered_by_actor_transaction(training_c
     finally:
         hook.remove()
     assert metrics['actor_stop_reason'] == 'rejected_actor_and_auxiliary_transaction'
+    assert metrics['actor_reject_nonfinite_gradient_steps'] == 1
     assert metrics['actor_optimizer_steps'] == metrics['rolled_back_actor_steps'] == 1
     assert metrics['retained_actor_steps'] == 0
     assert metrics['critic_optimizer_steps'] == 4

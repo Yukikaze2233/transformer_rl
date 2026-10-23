@@ -18,7 +18,7 @@ ACTION_DIM = 6
 HISTORY_LENGTH = 5
 
 # 策略/物理时钟来自正式契约，不在任务模块里另立默认值。
-POLICY_DT_S = 0.01
+POLICY_DT_S = 0.02
 PHYSICS_DT_S = 0.005
 
 

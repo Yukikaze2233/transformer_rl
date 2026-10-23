@@ -7,7 +7,7 @@ the network. The existing research policy/config/checkpoint formats are untouche
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import math
 
 import torch
@@ -17,6 +17,7 @@ from torch.nn import functional as F
 
 from ..common.types import ActionSample, HistoryBatch, PolicyEvaluation
 from .critic import PrivilegedValueNetwork
+from .mlp_policy import HistoryMLPConfig, HistoryMLPPolicy
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,30 @@ class StructuredPolicyConfig:
     @property
     def normalization_contract(self):
         return f"fixed_manual35_{self.critic_input_dim}_no_running_statistics"
+
+
+PolicyConfig = StructuredPolicyConfig | HistoryMLPConfig
+POLICY_CONFIG_TYPES = (StructuredPolicyConfig, HistoryMLPConfig)
+
+
+def policy_config_from_dict(value, *, complete=False) -> PolicyConfig:
+    """Absent discriminator retains the original Transformer serialization.
+
+    Settings may omit default fields; source-bound checkpoint recipes must
+    contain the complete selected configuration, including its discriminator.
+    """
+    if not isinstance(value, dict):
+        raise ValueError('policy configuration must be an object')
+    if 'architecture' not in value:
+        config_type = StructuredPolicyConfig
+    elif value['architecture'] == 'history_mlp':
+        config_type = HistoryMLPConfig
+    else:
+        raise ValueError('unknown policy architecture')
+    expected = {field.name for field in fields(config_type)}
+    if not set(value) <= expected or (complete and set(value) != expected):
+        raise ValueError('policy configuration fields differ')
+    return config_type(**value)
 
 
 class _GatedAttentionBlock(nn.Module):
@@ -284,7 +309,8 @@ class StructuredGaussianActor(nn.Module):
 
     def __init__(self, config=StructuredPolicyConfig()):
         super().__init__()
-        self.policy = StructuredPolicy(config)
+        self.policy = (HistoryMLPPolicy(config) if isinstance(config, HistoryMLPConfig)
+                       else StructuredPolicy(config))
         self.log_std = nn.Parameter(torch.tensor([math.log(0.3)] * 4 + [math.log(0.5)] * 2))
 
     @staticmethod

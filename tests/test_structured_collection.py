@@ -323,9 +323,11 @@ def test_full_width_collection_and_guarded_ppo_share_identical_raw_windows():
     assert collector.returned_vector_steps == 6
 
 
-def test_training_config_rejects_rate_change_and_invalid_bounds():
+def test_training_config_accepts_supported_rates_and_rejects_invalid_bounds():
+    for policy_dt_s in (0.01, 0.02):
+        assert StructuredCollectionConfig(policy_dt_s=policy_dt_s).policy_dt_s == policy_dt_s
     with pytest.raises(ValueError):
-        StructuredCollectionConfig(policy_dt_s=0.02)
+        StructuredCollectionConfig(policy_dt_s=0.015)
     with pytest.raises(ValueError):
         StructuredCollectionConfig(action_bounds=(3, 3, 3, 3, 9, 0))
 

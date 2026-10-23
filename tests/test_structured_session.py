@@ -27,7 +27,7 @@ def seeded_cpu():
     torch.set_num_threads(threads)
 
 
-def session(tmp_path, monkeypatch, *, ready=True, implicit_source=False):
+def session(tmp_path, monkeypatch, *, ready=True, implicit_source=False, policy_config=None):
     import transformer_rl
     package = tmp_path / 'learner/transformer_rl'
     shutil.copytree(Path(transformer_rl.__file__).parent, package,
@@ -51,6 +51,14 @@ def runtime(recipe, components, configuration, *, control):
 '''
     (package / '_owned_test_runtime.py').write_text(fixture)
     recipe, _ = components()
+    if policy_config is not None:
+        from transformer_rl.formal.learning.checkpoint import StructuredCheckpointStore
+        from transformer_rl.formal.policy import StructuredActorCritic
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(recipe.training_seed)
+            initial = StructuredActorCritic(policy_config)
+        recipe = replace(recipe, policy=policy_config,
+                         initial_model_sha256=StructuredCheckpointStore.model_sha256(initial))
     recipe = replace(recipe, learner_source_sha256=StructuredTrainingSession.source_sha256(package))
     driver = tmp_path / 'driver'
     driver.mkdir()

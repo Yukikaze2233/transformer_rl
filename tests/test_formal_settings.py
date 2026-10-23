@@ -16,24 +16,25 @@ PROFILE = Path(__file__).resolve().parents[1] / 'configs/formal_training.json'
 
 def test_complete_plan_keeps_rollout_duration_and_accounts_all_three_training_seeds():
     settings = FormalTrainingSettings.load(PROFILE)
-    assert settings.num_envs == 8192 and settings.rollout_steps == 48
+    assert settings.num_envs == 4096 and settings.rollout_steps == 24
     assert settings.policy.history_length == 5
     assert settings.policy.body_width == 32 and settings.policy.temporal_width == 64
     assert settings.policy.leg_hidden_dims == settings.policy.wheel_hidden_dims == (64, 32)
     assert settings.policy.critic_input_dim == 185
     assert settings.policy.critic_hidden_dims == (256, 128, 64)
-    assert settings.collection.gamma**2 == pytest.approx(.99)
-    assert settings.collection.gae_lambda**2 == pytest.approx(.95)
+    assert settings.collection.gamma == pytest.approx(.99)
+    assert settings.collection.gae_lambda == pytest.approx(.95)
+    assert settings.ppo.kl_early_stop is False
     assert settings.budget() == {
-        'fresh_per_update': 393216, 'fresh_per_seed': 13762560000, 'total_fresh': 41287680000,
+        'fresh_per_update': 98304, 'fresh_per_seed': 3440640000, 'total_fresh': 10321920000,
         'rollout_duration_s': .48, 'logical_minibatch_endpoints': 24576,
-        'maximum_actor_steps_per_update': 64, 'maximum_actor_endpoint_uses_per_update': 1572864}
+        'maximum_actor_steps_per_update': 20, 'maximum_actor_endpoint_uses_per_update': 491520}
     for seed in settings.training_seeds:
         recipe = settings.recipe('formal_' + str(seed), seed, asset_manifest_sha256='a' * 64,
                                  learner_source_sha256='b' * 64, task_contract_sha256='c' * 64,
                                  initial_model_sha256='d' * 64)
         assert LearningRecipe.from_dict(recipe.to_dict()) == recipe
-        assert recipe.journal_spec().num_envs == 8192
+        assert recipe.journal_spec().num_envs == 4096
         assert recipe.journal_spec().target_rollouts == 35000
         assert recipe.checkpoint_interval == 100 and recipe.curriculum_promotion == 'exposure'
     assert FormalTrainingSettings.from_dict(settings.to_dict()) == settings
@@ -55,7 +56,7 @@ def test_invalid_formal_profile_does_not_silently_change_budget_or_timing(change
     elif change == 'chunk':
         value['ppo']['training_chunk'] = True
     elif change == 'clock':
-        value['collection']['policy_dt_s'] = .02
+        value['collection']['policy_dt_s'] = .03
     with pytest.raises(ValueError):
         FormalTrainingSettings.from_dict(value)
 
@@ -81,8 +82,8 @@ def test_settings_deployment_freezes_resolved_recipe_without_creating_an_attempt
         runtime_factory='transformer_rl.formal.runtime.worker:runtime', runtime_configuration={},
         resources=resources, device='cpu', learner_source=source)
     recipe = LearningRecipe.from_dict(json.loads((session.root / 'recipe.json').read_text()))
-    assert recipe.num_envs == session.spec['num_envs'] == 8192
-    assert recipe.rollout_steps == 48 and recipe.checkpoint_interval == 100
+    assert recipe.num_envs == session.spec['num_envs'] == 4096
+    assert recipe.rollout_steps == 24 and recipe.checkpoint_interval == 100
     assert recipe.learner_source_sha256 == StructuredTrainingSession.source_sha256(source)
     assert not list((session.root / 'attempts').iterdir())
     assert not session.spec['automatic_evaluation']

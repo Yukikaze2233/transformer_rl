@@ -241,7 +241,7 @@ class WheeledLabSceneCfg(InteractiveSceneCfg):
 class WheeledLabEnvCfg(DirectRLEnvCfg):
     """M1 平地 DirectRLEnv 配置；资产相关字段由 build_env_cfg 填充。"""
 
-    decimation = 2
+    decimation = 4
     episode_length_s = 30.0
     action_space = ACTION_DIM
     observation_space = ACTOR_DIM * HISTORY_LENGTH
@@ -263,7 +263,7 @@ class WheeledLabEnvCfg(DirectRLEnvCfg):
         ),
     )
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=8192,
+        num_envs=4096,
         env_spacing=4.0,
         replicate_physics=True,
     )
@@ -276,11 +276,11 @@ class WheeledLabEnvCfg(DirectRLEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
-        # 配置对象必须显式表达 100Hz 策略/200Hz 物理，不依赖后端默认。
-        if self.decimation != 2 or abs(self.sim.dt - PHYSICS_DT_S) > 1e-12:
-            raise ValueError("M1 固定 decimation=2、sim.dt=0.005")
+        # 配置对象必须显式表达 50Hz 策略/200Hz 物理，不依赖后端默认。
+        if self.decimation != 4 or abs(self.sim.dt - PHYSICS_DT_S) > 1e-12:
+            raise ValueError("M1 固定 decimation=4、sim.dt=0.005")
         if abs(self.decimation * self.sim.dt - POLICY_DT_S) > 1e-12:
-            raise ValueError("decimation*sim.dt 必须等于 0.01s")
+            raise ValueError("decimation*sim.dt 必须等于 0.02s")
         if self.observation_space != ACTOR_DIM * HISTORY_LENGTH or self.state_space != CRITIC182_DIM:
             raise ValueError("LabEnv 观测空间固定 5x35 actor / 182 critic")
         if self.action_space != ACTION_DIM:
@@ -289,7 +289,7 @@ class WheeledLabEnvCfg(DirectRLEnvCfg):
             raise ValueError("M1 固定 5 帧历史")
 
 
-def build_env_cfg(asset_directory: str, *, num_envs: int = 8192,
+def build_env_cfg(asset_directory: str, *, num_envs: int = 4096,
                   env_spacing_m: float = 4.0, device: str = "cuda:0",
                   response: ResponseParameters | None = None,
                   pair_domain: PairTargetDomain | None = None,

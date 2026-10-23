@@ -122,14 +122,16 @@ class TaskCommandProgram:
         for value, dtype in ((plan.base_mode, torch.long), (plan.task_horizon_s, torch.float64),
                                (plan.jump_height_m, torch.float32), (plan.request_interval_s, torch.float64)):
             self._tensor(value, dtype=dtype)
+        policy_dt_s = self.protocol.config.policy_dt_s
         if (((plan.base_mode < 0) | (plan.base_mode > int(CommandMode.RECOVERY))).any()
                 or not torch.isfinite(plan.task_horizon_s).all() or (plan.task_horizon_s <= 0).any()
-                or (plan.task_horizon_s / .01 - (plan.task_horizon_s / .01).round()).abs().gt(1e-7).any()
+                or (plan.task_horizon_s / policy_dt_s
+                    - (plan.task_horizon_s / policy_dt_s).round()).abs().gt(1e-7).any()
                 or not torch.isfinite(plan.jump_height_m).all()
                 or ((plan.jump_height_m != 0) & ((plan.jump_height_m < self.domain.jump_m[0])
                                                 | (plan.jump_height_m > self.domain.jump_m[1]))).any()
                 or not torch.isfinite(plan.request_interval_s).all() or (plan.request_interval_s < 0).any()
-                or ((plan.jump_height_m > 0) & (plan.request_interval_s < .01)).any()):
+                or ((plan.jump_height_m > 0) & (plan.request_interval_s < policy_dt_s)).any()):
             raise ValueError('task horizon, non-jump base mode or request schedule differs from the declared contract')
 
     @torch.no_grad()
@@ -171,7 +173,8 @@ class TaskCommandProgram:
         self._tensor(now_s, dtype=torch.float64)
         self._tensor(policy_ready, dtype=torch.bool)
         self.validate_requests(override)
-        if not self._bound.all() or (now_s - self._last_time - .01).abs().gt(1e-8).any():
+        if (not self._bound.all()
+                or (now_s - self._last_time - self.protocol.config.policy_dt_s).abs().gt(1e-8).any()):
             raise ValueError('request generation requires the next completed policy boundary')
         auto = (policy_ready & (self._rise > 0) & (self._period > 0) & (now_s >= self._next_request - 1e-9)
                 & (self.protocol.active_id < 0) & (override.request_id == -1) & (override.cancel_id == -1)
@@ -186,7 +189,7 @@ class TaskCommandProgram:
     def advance(self, now_s, condition: RequestCondition):
         self._tensor(now_s, dtype=torch.float64)
         if (not self._bound.all() or not isinstance(condition, RequestCondition)
-                or (now_s - self._last_time - .01).abs().gt(1e-8).any()
+                or (now_s - self._last_time - self.protocol.config.policy_dt_s).abs().gt(1e-8).any()
                 or not torch.equal(self.protocol.last_time_s, now_s)
                 or not torch.equal(condition.active_id, self.protocol.active_id)):
             raise ValueError('next commands require the actual once-per-boundary protocol result')

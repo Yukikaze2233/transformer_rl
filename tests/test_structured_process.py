@@ -89,11 +89,13 @@ def test_fresh_complete_worker_constructs_the_jump_stage_without_changing_initia
                for name, value in complete.model.state_dict().items())
 
 
-def test_runtime_fast_lab_collector_keeps_managed_stop_and_nonzero_consumption(tmp_path):
+@pytest.mark.parametrize('mlp', [False, True])
+def test_runtime_fast_lab_collector_keeps_managed_stop_and_nonzero_consumption(tmp_path, mlp):
     from transformer_rl.formal.lab_env.adapter import LabLabeledEnv
     from transformer_rl.formal.lab_env.collector import LabCollector
     from transformer_rl.formal.learning.checkpoint import StructuredCheckpointStore
     from transformer_rl.formal.policy import StructuredActorCritic
+    from transformer_rl.formal.mlp_policy import HistoryMLPConfig
 
     class FastLabFixture(SyntheticLabeledEnv, LabLabeledEnv):
         def __init__(self):
@@ -124,7 +126,7 @@ def test_runtime_fast_lab_collector_keeps_managed_stop_and_nonzero_consumption(t
     descriptor = os.open(root / 'run.lock', os.O_RDWR | os.O_CREAT, 0o600)
     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     recipe, _ = components()
-    policy = replace(recipe.policy, critic_input_dim=185)
+    policy = HistoryMLPConfig() if mlp else replace(recipe.policy, critic_input_dim=185)
     torch.manual_seed(recipe.training_seed)
     initial = StructuredActorCritic(policy)
     recipe = replace(recipe, policy=policy, target_rollouts=35000,

@@ -220,6 +220,6 @@ def evaluation_cost_bound():
         'challenges': evaluation_plan('challenges', 2101, checkpoint, selection=selection,
                                       challenge_manifest_sha256='3' * 64).planned_task_transitions,
     }
-    return {**values, 'total_task_transitions': sum(values.values()), 'policy_dt_s': .01,
+    return {**values, 'total_task_transitions': sum(values.values()), 'policy_dt_s': .02,
             'preparation_and_discarded_vector_rows_counted_separately': True,
             'physical_qualification': False}

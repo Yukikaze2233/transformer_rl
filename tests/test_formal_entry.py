@@ -46,7 +46,7 @@ def test_formal_plan_rejects_non_35k_or_unlisted_seed():
     with pytest.raises(ValueError):
         _validate_plan(settings, 9999)
     with pytest.raises(ValueError):
-        _validate_plan(replace(settings, num_envs=4096), 2102)
+        _validate_plan(replace(settings, num_envs=2048), 2102)
     with pytest.raises(ValueError):
         _validate_plan(replace(settings, training_seeds=(9999,)), 9999)
 

@@ -27,11 +27,11 @@ class RecoveryLifecycleConfig:
     def __post_init__(self):
         if (any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0
                 for v in vars(self).values())
-                or self.policy_dt_s != .01 or self.physics_dt_s != .005
+                or self.policy_dt_s not in (.01, .02) or self.physics_dt_s != .005
                 or not self.physics_dt_s <= self.policy_dt_s <= self.estimate_max_age_s
                 or self.stable_s >= self.timeout_s or not 0 < self.contact_probability < 1
                 or self.tilt_rad >= math.pi / 2):
-            raise ValueError('recovery lifecycle requires explicit 100/200Hz timing and ordered bounds')
+            raise ValueError('recovery lifecycle requires explicit 50/100Hz policy and 200Hz physics timing')
 
 
 @dataclass(frozen=True)

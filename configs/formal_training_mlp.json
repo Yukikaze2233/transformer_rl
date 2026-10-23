@@ -1,0 +1,92 @@
+{
+  "training_seeds": [
+    2101,
+    2102,
+    2103
+  ],
+  "updates_per_seed": 35000,
+  "num_envs": 4096,
+  "rollout_steps": 24,
+  "checkpoint_interval": 100,
+  "policy": {
+    "architecture": "history_mlp",
+    "history_length": 5,
+    "history_hidden_dims": [
+      256,
+      128
+    ],
+    "action_hidden_dim": 64,
+    "state_hidden_dim": 32,
+    "prediction_hidden_dim": 32,
+    "critic_input_dim": 185,
+    "critic_hidden_dims": [
+      256,
+      128,
+      64
+    ]
+  },
+  "ppo": {
+    "epochs": 5,
+    "minibatches": 4,
+    "training_chunk": 3072,
+    "learning_rate": 0.0001,
+    "clip_ratio": 0.2,
+    "value_clip": 0.2,
+    "entropy_coefficient": 0.005,
+    "value_coefficient": 4.0,
+    "max_gradient_norm": 1.0,
+    "target_kl": 0.01,
+    "reject_kl": 0.02,
+    "kl_early_stop": false,
+    "validate_behavior": false,
+    "probe_endpoints": 1024,
+    "evaluation_chunk": 3072,
+    "diagnostics_interval": 20,
+    "velocity_coefficient": 0.1,
+    "contact_coefficient": 0.02,
+    "prediction_coefficient": 0.05
+  },
+  "collection": {
+    "policy_dt_s": 0.02,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "action_bounds": [
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      9.0,
+      9.0
+    ]
+  },
+  "domain": {
+    "height_m": [
+      0.17,
+      0.4
+    ],
+    "forward_m_s": [
+      -2.7,
+      2.7
+    ],
+    "yaw_rad_s": [
+      -18.84955592153876,
+      18.84955592153876
+    ],
+    "jump_m": [
+      0.03,
+      0.4
+    ]
+  },
+  "protocol": {
+    "policy_dt_s": 0.02
+  },
+  "terrain": {
+    "nominal_friction": 0.7,
+    "material_friction_bounds": [
+      0.2,
+      1.1
+    ],
+    "rough_grid_spacing_m": 0.25,
+    "platform_tread_m": 0.8
+  }
+}

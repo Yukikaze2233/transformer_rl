@@ -1,8 +1,8 @@
 {
   "training_seeds": [2101, 2102, 2103],
   "updates_per_seed": 35000,
-  "num_envs": 8192,
-  "rollout_steps": 48,
+  "num_envs": 4096,
+  "rollout_steps": 24,
   "checkpoint_interval": 100,
   "policy": {
     "history_length": 5,
@@ -21,8 +21,8 @@
     "critic_hidden_dims": [256, 128, 64]
   },
   "ppo": {
-    "epochs": 4,
-    "minibatches": 16,
+    "epochs": 5,
+    "minibatches": 4,
     "training_chunk": 3072,
     "learning_rate": 0.0001,
     "clip_ratio": 0.2,
@@ -32,6 +32,8 @@
     "max_gradient_norm": 1.0,
     "target_kl": 0.01,
     "reject_kl": 0.02,
+    "kl_early_stop": false,
+    "validate_behavior": false,
     "probe_endpoints": 1024,
     "evaluation_chunk": 3072,
     "diagnostics_interval": 20,
@@ -40,9 +42,9 @@
     "prediction_coefficient": 0.05
   },
   "collection": {
-    "policy_dt_s": 0.01,
-    "gamma": 0.99498743710662,
-    "gae_lambda": 0.9746794344808963,
+    "policy_dt_s": 0.02,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
     "action_bounds": [3.0, 3.0, 3.0, 3.0, 9.0, 9.0]
   },
   "domain": {
@@ -51,7 +53,9 @@
     "yaw_rad_s": [-18.84955592153876, 18.84955592153876],
     "jump_m": [0.03, 0.40]
   },
-  "protocol": {},
+  "protocol": {
+    "policy_dt_s": 0.02
+  },
   "terrain": {
     "nominal_friction": 0.7,
     "material_friction_bounds": [0.2, 1.1],

@@ -23,7 +23,7 @@ from ...common.random_state import capture_rng, restore_rng, _validate_rng
 from .accounting import LearningJournal, LearningJournalSpec
 from .optimization import StructuredPPOConfig, StructuredPPOTrainer
 from ..contracts import StructuredCollectionConfig
-from ..policy import StructuredActorCritic, StructuredPolicyConfig
+from ..policy import POLICY_CONFIG_TYPES, PolicyConfig, StructuredActorCritic, policy_config_from_dict
 from ..tasks import curriculum as task_curriculum
 from ..tasks.curriculum import ContinuousTaskSampler, CurriculumBudget, TaskDomain
 from ..tasks.protocol import RequestProtocol, RequestProtocolConfig
@@ -47,7 +47,7 @@ class LearningRecipe:
     learner_source_sha256: str
     task_contract_sha256: str
     initial_model_sha256: str
-    policy: StructuredPolicyConfig
+    policy: PolicyConfig
     ppo: StructuredPPOConfig
     collection: StructuredCollectionConfig
     domain: TaskDomain
@@ -76,7 +76,7 @@ class LearningRecipe:
 
     @staticmethod
     def _config_types():
-        return {'policy': StructuredPolicyConfig, 'ppo': StructuredPPOConfig, 'collection': StructuredCollectionConfig,
+        return {'policy': POLICY_CONFIG_TYPES, 'ppo': StructuredPPOConfig, 'collection': StructuredCollectionConfig,
                 'domain': TaskDomain, 'protocol': RequestProtocolConfig, 'terrain': TerrainTuning}
 
     def to_dict(self):
@@ -96,6 +96,9 @@ class LearningRecipe:
         try:
             for name, config_type in cls._config_types().items():
                 raw = arguments[name]
+                if name == 'policy':
+                    arguments[name] = policy_config_from_dict(raw, complete=True)
+                    continue
                 if not isinstance(raw, dict) or set(raw) != {field.name for field in fields(config_type)}:
                     raise ValueError('learning configuration fields differ: ' + name)
                 arguments[name] = config_type(**raw)
@@ -238,7 +241,10 @@ class StructuredCheckpointStore:
     def _validate_adam(state, module, consumed_steps, learning_rate):
         _validate_optimizer_state(state, SimpleNamespace(policy_parameters=lambda: list(module.parameters())))
         group = state['param_groups'][0]
-        if (group['lr'] != learning_rate or tuple(group['betas']) != (.9, .999) or group['eps'] != 1e-8
+        minimum = min(learning_rate, StructuredPPOTrainer.MIN_LEARNING_RATE)
+        maximum = StructuredPPOTrainer.MAX_LEARNING_RATE
+        if (not minimum <= group['lr'] <= maximum
+                or tuple(group['betas']) != (.9, .999) or group['eps'] != 1e-8
                 or group['weight_decay'] != 0 or group['amsgrad'] or group['maximize']):
             raise ValueError('structured Adam settings differ from the selected optimizer')
         if any(float(entry['step']) > consumed_steps for entry in state['state'].values()):

@@ -67,11 +67,11 @@ class StructuredCollectionConfig:
     action_bounds: tuple[float, ...] = (3.0, 3.0, 3.0, 3.0, 9.0, 9.0)
 
     def __post_init__(self):
-        if (type(self.policy_dt_s) not in (int, float) or self.policy_dt_s != 0.01
+        if (self.policy_dt_s not in (0.01, 0.02)
                 or type(self.gamma) not in (int, float) or not 0 < self.gamma < 1
                 or type(self.gae_lambda) not in (int, float) or not 0 <= self.gae_lambda <= 1
                 or not isinstance(self.action_bounds, (tuple, list)) or len(self.action_bounds) != 6
                 or any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
                        for value in self.action_bounds)):
-            raise ValueError('collection requires the fixed 100Hz discount and six positive action bounds')
+            raise ValueError('collection requires a 50/100Hz discount and six positive action bounds')
         object.__setattr__(self, 'action_bounds', tuple(self.action_bounds))

@@ -61,7 +61,7 @@ def _parser():
     parser.add_argument('--python', type=Path, default=Path(sys.executable),
                         help='Worker interpreter; use the exact Isaac Lab environment validated by preflight')
     parser.add_argument('--action-delay-steps', type=_delay_steps, default=(0, 1),
-                        help='Whole policy-step transport delays; 0,1 means 0 or 10ms at 100Hz')
+                        help='Whole policy-step transport delays; at 50Hz 0,1 means 0 or 20ms')
     parser.add_argument('--action-delay-nominal-fraction', type=float, default=.5,
                         help='Fraction of reset episodes forced to zero transport delay')
     parser.add_argument('--no-action-transport', action='store_true',
@@ -109,16 +109,16 @@ def _with_control_timing(runtime, path):
 
 
 def _validate_plan(settings, seed):
-    if (settings.updates_per_seed != 35000 or settings.num_envs != 8192
-            or settings.rollout_steps != 48):
-        raise ValueError('formal entry requires the frozen 8192x48, 35k-update plan')
+    if (settings.updates_per_seed != 35000 or settings.num_envs != 4096
+            or settings.rollout_steps != 24):
+        raise ValueError('formal entry requires the frozen 4096x24, 35k-update plan')
     if (tuple(settings.training_seeds) != (2101, 2102, 2103)
             or type(seed) is not int or seed not in settings.training_seeds):
         raise ValueError('formal entry seed is not in the frozen training plan')
     if sum(COMPLETE_STAGE_BUDGETS) != 35000:
         raise ValueError('formal complete entry must use the four-stage 35k plan')
-    if settings.collection.policy_dt_s != .01:
-        raise ValueError('formal entry requires the 100Hz policy clock')
+    if settings.collection.policy_dt_s != .02:
+        raise ValueError('formal entry requires the 50Hz policy clock')
     if settings.checkpoint_interval < 1:
         raise ValueError('formal entry requires a positive checkpoint interval')
 

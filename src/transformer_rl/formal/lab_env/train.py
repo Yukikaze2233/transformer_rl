@@ -103,8 +103,8 @@ def _runtime_randomization(runtime, *, required):
         except (TypeError, ValueError) as error:
             raise ValueError(f'invalid diagnostic {name} configuration') from error
     sensors, dynamics = parsed
-    if sensors is not None and (sensors.physics_dt_s != .005 or sensors.policy_dt_s != .01):
-        raise ValueError('diagnostic sensors must share the 200Hz physical and 100Hz policy clock')
+    if sensors is not None and (sensors.physics_dt_s != .005 or sensors.policy_dt_s not in (.01, .02)):
+        raise ValueError('diagnostic sensors must share the 200Hz physical and 50/100Hz policy clock')
     return sensors, dynamics
 
 
@@ -205,7 +205,7 @@ def main(argv=None):
         from ...common.training_control import verify_pin
         from ...common.random_state import capture_rng, restore_rng
         from ..learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
-        from ..policy import StructuredActorCritic, StructuredPolicyConfig
+        from ..policy import StructuredActorCritic, StructuredPolicyConfig, policy_config_from_dict
         from ..simulation.health import NativePhysicsHealth
         from .adapter import LabLabeledEnv
         from .cfg import build_env_cfg
@@ -266,12 +266,12 @@ def main(argv=None):
             ppo = StructuredPPOConfig()
             update_index = 0
         elif "policy" in payload and "ppo" in payload:
-            policy = StructuredPolicyConfig(**payload["policy"])
+            policy = policy_config_from_dict(payload["policy"])
             ppo = StructuredPPOConfig(**payload["ppo"])
             update_index = int(payload.get("update", 0)) if args.resume else 0
         else:
             recipe = payload.get("recipe", {})
-            policy = StructuredPolicyConfig(**recipe["policy"])
+            policy = policy_config_from_dict(recipe["policy"])
             ppo = StructuredPPOConfig(**recipe["ppo"])
             update_index = 0
         model = StructuredActorCritic(policy).to(args.device)
@@ -301,7 +301,7 @@ def main(argv=None):
             limits = dict(limits)
             limits['forbidden_body_names'] = tuple(limits['forbidden_body_names'])
             termination_limits = NativeTaskLimits(**limits)
-        recover_spec = (RecoverTaskSpec(policy_dt_s=.01, action_hold_s=args.recover_hold_s,
+        recover_spec = (RecoverTaskSpec(policy_dt_s=.02, action_hold_s=args.recover_hold_s,
                                         height_command_m=args.recover_height)
                         if args.recover else None)
         cfg = build_env_cfg(asset, num_envs=args.num_envs, env_spacing_m=args.env_spacing,

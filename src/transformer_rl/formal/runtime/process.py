@@ -25,7 +25,7 @@ from ..learning.accounting import LearningJournal
 from ..learning.optimization import StructuredPPOTrainer
 from ..learning.checkpoint import LearningComponents, LearningRecipe, StructuredCheckpointStore
 from ..learning.collection import StructuredCollector
-from ..learning.loop import StructuredLearningLoop, load_stopped_attempt
+from ..learning.loop import StructuredLearningLoop, last_actor_zero_streak, load_stopped_attempt
 from ..policy import StructuredActorCritic
 from ..tasks.protocol import RequestProtocol
 from ..tasks.terrain import ContinuousTerrainGenerator
@@ -69,6 +69,7 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
             or (resume_attempt is None) != (parent_exit_pin is None)):
         raise ValueError('worker budget, boot or explicit cold-resume receipt differs')
     restored = None
+    initial_actor_zero_streak = 0
     try:
         if recipe.device == 'cuda:0':
             # parent已准入，TrainingControl已核对继承lease；恢复验收先需要CUDA上下文。
@@ -102,6 +103,7 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
                 previous = Path(resume_attempt).resolve(strict=True)
                 if previous.parent != attempt.parent or previous == attempt:
                     raise ValueError('cold resume must name a previous attempt of this same run')
+                initial_actor_zero_streak = last_actor_zero_streak(previous / 'train/metrics.jsonl')
                 prior_store = StructuredCheckpointStore(previous / 'train/checkpoints', recipe, journal)
                 restored, spent = load_stopped_attempt(prior_store, previous / 'control',
                                                        parent_exit_pin=parent_exit_pin,
@@ -134,7 +136,9 @@ def run_worker(recipe, control_directory, runtime_factory, runtime_configuration
                 restored.restore_global_rng_after_cold_setup()
             components.validate_binding(recipe, journal)
             with _StopBudget(max_active_seconds) as stop, (attempt / 'train/metrics.jsonl').open('x') as metrics_log:
-                loop = StructuredLearningLoop(recipe, components, collector, journal, store, control, stop)
+                loop = StructuredLearningLoop(
+                    recipe, components, collector, journal, store, control, stop,
+                    initial_actor_zero_streak=initial_actor_zero_streak)
                 while not loop._finished:
                     started = time.perf_counter()
                     metrics = loop.run_update()
