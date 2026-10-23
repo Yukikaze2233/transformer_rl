@@ -501,9 +501,14 @@ class LabTerrainCourse:
         blocked = self.stair_requests.active_id >= 0
         jump_packet = self._pending_requests['jump']
         self._pending_requests['jump'] = None
+        root_yaw = None
+        root_quaternion = getattr(env, '_root_link_quat', None)
+        if callable(root_quaternion):
+            x, y, z, w = root_quaternion().unbind(-1)
+            root_yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
         admission, mode, rise, _ = self.tasks.step(
             env._clock(), env._completed_estimate, env._ground_at_root,
-            command=jump_packet, blocked_by_stair=blocked)
+            command=jump_packet, blocked_by_stair=blocked, yaw_rad=root_yaw)
         env._command_base.copy_(admission.admitted)
         env._base_command_mode.copy_(mode)
         # One-shot manual/ToF stair requests; jump has arbitration priority.

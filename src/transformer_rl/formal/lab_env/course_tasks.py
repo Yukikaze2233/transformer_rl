@@ -202,11 +202,25 @@ class LabCourseTasks:
                  'request_end_counts', 'physical_outcome_counts')
 
     def __init__(self, num_envs, envelope: DriveEnvelope, *, seed=2102, device='cpu',
-                 policy_dt_s=0.01):
+                 policy_dt_s=0.01, heading_fraction=0.5, heading_gain=1.0,
+                 heading_yaw_limit_rad_s=math.pi):
         if policy_dt_s not in (.01, .02):
             raise ValueError('course task policy period must be 50 or 100Hz')
+        if (not isinstance(heading_fraction, (int, float)) or not math.isfinite(heading_fraction)
+                or not 0 <= heading_fraction <= 1
+                or type(heading_gain) not in (int, float) or not math.isfinite(heading_gain)
+                or heading_gain <= 0
+                or type(heading_yaw_limit_rad_s) not in (int, float)
+                or not math.isfinite(heading_yaw_limit_rad_s) or heading_yaw_limit_rad_s <= 0):
+            raise ValueError('heading controller requires a fraction, positive gain and yaw limit')
         self.num_envs, self.device = num_envs, torch.device(device)
         self.policy_dt_s = float(policy_dt_s)
+        self.heading_fraction = float(heading_fraction)
+        self.heading_gain = float(heading_gain)
+        self.heading_yaw_limit_rad_s = float(heading_yaw_limit_rad_s)
+        self.heading_enabled = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
+        self.heading_valid = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
+        self.heading_target_rad = torch.zeros(num_envs, device=self.device)
         self.generator = torch.Generator(device=self.device).manual_seed(seed)
         initial = torch.zeros(num_envs, 4, device=self.device)
         initial[:, 3] = .32
@@ -271,6 +285,17 @@ class LabCourseTasks:
         self.family[ids] = task.draw.family
         self.base_mode[ids] = torch.where(task.mode == int(CommandMode.JUMP),
                                          int(CommandMode.NORMAL), task.mode)
+        # SCUT-style heading outer loop: only ordinary, non-nominal rows may
+        # hold a world heading. Stairs/recovery/jump keep their explicit modes.
+        heading_eligible = ((task.mode == int(CommandMode.NORMAL))
+                            & ~task.draw.nominal
+                            & (task.draw.family != int(TaskFamily.ROTATION))
+                            & (task.draw.family != int(TaskFamily.TERRAIN)))
+        self.heading_enabled[ids] = (heading_eligible
+                                     & (torch.rand(len(ids), generator=self.generator,
+                                                   device=self.device) < self.heading_fraction))
+        self.heading_valid[ids] = False
+        self.heading_target_rad[ids] = 0.
         self.rise[ids] = task.request_height_m
         self.active_rise[ids] = 0
         self.elapsed[ids] = 0
@@ -316,15 +341,38 @@ class LabCourseTasks:
         self.phase[ids] = 0
         self.success_id[ids] = -1
 
+    @staticmethod
+    def _wrap_angle(angle):
+        return torch.remainder(angle + math.pi, 2 * math.pi) - math.pi
+
     def step(self, now, estimate, ground, *, command: RequestCommand | None = None,
-             blocked_by_stair=None):
+             blocked_by_stair=None, yaw_rad=None):
         self.success_id.fill_(-1)
         if command is not None:
             command.validate(self.num_envs, self.device)
+        if yaw_rad is not None:
+            if (not isinstance(yaw_rad, torch.Tensor) or yaw_rad.shape != (self.num_envs,)
+                    or yaw_rad.device != self.device or not yaw_rad.is_floating_point()
+                    or not torch.isfinite(yaw_rad).all()):
+                raise ValueError('heading controller requires finite [N] yaw on the policy device')
         self.elapsed.add_(self.policy_dt_s)
         cyclic = (self.trajectory.kind == 2) | (self.trajectory.kind == 3) | (self.trajectory.kind == 5)
         clock = torch.where(cyclic, self.elapsed.remainder(self.trajectory.duration_s), self.elapsed)
-        admission = self.stream.step(self.trajectory.at(clock))
+        target = self.trajectory.at(clock)
+        if yaw_rad is not None:
+            initialize = self.heading_enabled & ~self.heading_valid
+            if bool(initialize.any()):
+                sampled_heading = ((torch.rand(self.num_envs, generator=self.generator,
+                                                device=self.device) * 2 - 1) * math.pi)
+                self.heading_target_rad.copy_(torch.where(
+                    initialize, sampled_heading, self.heading_target_rad))
+                self.heading_valid |= self.heading_enabled
+            error = self._wrap_angle(self.heading_target_rad - yaw_rad)
+            heading_yaw = (self.heading_gain * error).clamp(
+                -self.heading_yaw_limit_rad_s, self.heading_yaw_limit_rad_s)
+            target = target.clone()
+            target[:, 2] = torch.where(self.heading_enabled, heading_yaw, target[:, 2])
+        admission = self.stream.step(target)
         command_values = torch.stack((admission.requested, admission.wheel_projected, admission.admitted))
         self.command_min.copy_(torch.minimum(self.command_min, command_values.amin(1)))
         self.command_max.copy_(torch.maximum(self.command_max, command_values.amax(1)))
@@ -480,6 +528,7 @@ class LabCourseTasks:
         self.supported_start.zero_()
         self._last_supported.zero_()
         self.success_id.fill_(-1)
+        self.heading_valid.zero_()
 
 
 def completed_policy_estimate(frame, raw_state, timestamp):

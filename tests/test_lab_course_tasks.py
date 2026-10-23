@@ -10,15 +10,33 @@ from transformer_rl.formal.tasks.protocol import CompletedEstimate, RequestRespo
 from transformer_rl.formal.tasks.trajectory import DriveEnvelope
 
 
-def fixture(kind=1):
+def fixture(kind=1, policy_dt_s=.01):
     curriculum = FormalTaskCurriculum(2, capabilities=FormalCurriculumCapabilities(True, True, True))
     sampler = LabTaskDrawSampler(curriculum)
     sample = sampler(torch.arange(2))
     draw = replace(sample.draw, trajectory_kind=torch.full((2,), kind), nominal=torch.zeros(2, dtype=torch.bool))
     sample = replace(sample, draw=draw, command=torch.tensor([[1., 0, 0, .35], [-1., 0, 0, .30]]))
-    tasks = LabCourseTasks(2, DriveEnvelope(.06, .4))
+    tasks = LabCourseTasks(2, DriveEnvelope(.06, .4), policy_dt_s=policy_dt_s)
     tasks.reset(torch.arange(2), sample, torch.zeros(2, dtype=torch.float64))
     return tasks, sample
+
+
+def test_trajectory_clock_uses_the_configured_policy_period():
+    tasks, _ = fixture(policy_dt_s=.02)
+    tasks.step(torch.full((2,), .02, dtype=torch.float64), None, torch.zeros(2))
+    torch.testing.assert_close(tasks.elapsed, torch.full((2,), .02))
+
+
+def test_heading_outer_loop_tracks_world_heading_error_with_yaw_rate_command():
+    tasks, _ = fixture(policy_dt_s=.01)
+    tasks.heading_enabled.fill_(True)
+    tasks.heading_valid.fill_(True)
+    tasks.heading_target_rad.fill_(.5)
+    admission, _, _, _ = tasks.step(
+        torch.full((2,), .01, dtype=torch.float64), None, torch.zeros(2),
+        yaw_rad=torch.zeros(2))
+    torch.testing.assert_close(admission.requested[:, 2], torch.full((2,), .5), atol=1e-6, rtol=0)
+    assert admission.requested[:, 1].eq(0).all()
 
 
 @pytest.mark.parametrize('kind', range(7))
