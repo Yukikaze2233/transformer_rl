@@ -29,6 +29,7 @@ _LEARNING_FIELDS = ('model', 'actor_adam', 'critic_adam', 'trainer', 'collection
                     'curriculum', 'sampler', 'terrain', 'protocol', 'global_rng', 'normalization')
 _REVIEWABLE = {
     'common/training_cli.py',
+    'common/training_control.py',
     'formal/tasks/terrain.py', 'formal/runtime/reset_coordinator.py',
     'formal/simulation/terrain_stream.py', 'formal/runtime/transition.py',
     'formal/runtime/session.py', 'formal/runtime/process.py',

@@ -153,6 +153,8 @@ def _lease_is_held(root):
 class ManagedSession:
     """Immutable recipe, detached attempts and commands scoped to one directory."""
 
+    requires_parent_exit = False
+
     def __init__(self, root):
         self.root = Path(root).expanduser().resolve(strict=True)
         recipe_pin = read_json(self.root / "session.pin.json")
@@ -224,7 +226,12 @@ class ManagedSession:
             if final:
                 result.update(phase="closing", result_phase=final["summary"]["phase"])
         elif final:
-            result["active"] = False
+            # The learner endpoint precedes the supervisor's real waitpid
+            # receipt. A cold start must not race that last publication gap.
+            if self.requires_parent_exit:
+                result.update(phase="closing", result_phase=final["summary"]["phase"], active=True)
+            else:
+                result["active"] = False
         elif not identity and time.time() - request["submitted_epoch"] < 30:
             result.update(phase="starting", active=True)
         else:
@@ -235,8 +242,8 @@ class ManagedSession:
             # flock. Do not report shutdown or permit a new attempt in that gap.
             result.update(phase="closing" if final else "ownership_pending", active=True)
         result["checkpoint_resume"] = bool(final and final["summary"].get("phase") == "stopped"
-                                           and (not exit_receipt or
-                                                (exit_identity_matches and exit_receipt.get("returncode") == 0)))
+                                           and (not exit_receipt and not self.requires_parent_exit
+                                                or exit_identity_matches and exit_receipt.get("returncode") == 0))
         return result
 
 

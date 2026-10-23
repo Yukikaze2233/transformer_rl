@@ -28,6 +28,7 @@ from ...common.training_control import (PROTOCOL, TrainingControl, ManagedSessio
 
 class StructuredTrainingSession(ManagedSession):
     _FORMAT = 'private_structured_training_session'
+    requires_parent_exit = True
 
     def __init__(self, root):
         self.root = Path(root).expanduser().resolve(strict=True)
