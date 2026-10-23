@@ -199,7 +199,8 @@ def test_critical_critic_failure_restores_both_models_without_refunding_consumpt
     assert not trainer.actor_optimizer.state and not trainer.critic_optimizer.state
     assert trainer.consumed['fresh_endpoints'] == len(batch)
     assert trainer.consumed['actor_optimizer_steps'] == 2
-    assert trainer.consumed['critic_optimizer_steps'] == 2
+    # A nonfinite critic gradient is rejected before any critic optimizer step.
+    assert trainer.consumed['critic_optimizer_steps'] == 0
 
 
 def test_script_only_rollout_supplies_no_actor_auxiliary_or_critic_updates():

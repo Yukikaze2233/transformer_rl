@@ -16,6 +16,7 @@ from torch.distributions import Normal
 from torch.nn import functional as F
 
 from ..common.types import ActionSample, HistoryBatch, PolicyEvaluation
+from .critic import PrivilegedValueNetwork
 
 
 @dataclass(frozen=True)
@@ -317,10 +318,7 @@ class StructuredActorCritic(nn.Module):
         super().__init__()
         self.config = config
         self.actor = StructuredGaussianActor(config)
-        first, second, third = config.critic_hidden_dims
-        self.critic = nn.Sequential(nn.Linear(config.critic_input_dim, first), nn.ELU(),
-                                    nn.Linear(first, second), nn.ELU(), nn.Linear(second, third), nn.ELU(),
-                                    nn.Linear(third, 1), nn.Flatten(0))
+        self.critic = PrivilegedValueNetwork(config.critic_input_dim, config.critic_hidden_dims)
 
     def critic_features(self, environment_features: torch.Tensor, raw_state: torch.Tensor) -> torch.Tensor:
         """182D环境特权量 + 本次Actor速度估计3D；价值梯度不进入Actor。"""

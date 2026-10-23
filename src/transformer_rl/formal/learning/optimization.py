@@ -402,8 +402,11 @@ class StructuredPPOTrainer:
                         loss_telemetry.observe_critic(loss, endpoints.numel(), self.config.value_coefficient)
                     self.critic_optimizer.zero_grad(set_to_none=True)
                     (0.5 * self.config.value_coefficient * loss).backward()
-                    critic_norms.append(nn.utils.clip_grad_norm_(
-                        self.model.critic.parameters(), self.config.max_gradient_norm).detach())
+                    critic_norm = nn.utils.clip_grad_norm_(
+                        self.model.critic.parameters(), self.config.max_gradient_norm)
+                    if not bool(torch.isfinite(critic_norm).item()):
+                        raise FloatingPointError('critic gradient became nonfinite before optimizer step')
+                    critic_norms.append(critic_norm.detach())
                     self.critic_optimizer.step()
                     metrics['critic_optimizer_steps'] += 1
                     metrics['critic_endpoint_uses'] += endpoints.numel()

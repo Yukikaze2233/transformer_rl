@@ -8,29 +8,12 @@ from __future__ import annotations
 
 import torch
 
+from ..critic import CRITIC182_SLICES
+
 
 CRITIC182_DIM = 182
 TERRAIN_SCAN_DIM = 77
 CRITIC_INPUT_CONTRACT = "lab_critic_physical_steps_relative_motion_issued_history_v2"
-CRITIC182_SLICES = {
-    "actor_frame": slice(0, 35),
-    "root_velocity_body_m_s": slice(35, 38),
-    "height_above_ground_m": slice(38, 39),
-    "stiffness": slice(39, 45),
-    "damping": slice(45, 51),
-    "active_torque": slice(51, 57),
-    "observation_delay_steps": slice(57, 61),
-    "action_delay_steps": slice(61, 63),
-    "wheel_velocity_body_m_s": slice(63, 69),
-    "wheel_contact": slice(69, 71),
-    "mass_scale": slice(71, 72),
-    "wheel_material": slice(72, 78),
-    "terrain_scan": slice(78, 155),
-    "previous_actions": slice(155, 167),
-    "joint_acceleration_rad_s2": slice(167, 173),
-    "com_offset_body_m": slice(173, 176),
-    "nominal_pose_delta_rad": slice(176, 182),
-}
 
 
 class CriticActionHistory:

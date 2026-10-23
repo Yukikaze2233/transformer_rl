@@ -28,12 +28,16 @@ _FORMAT = 'structured_source_transition'
 _LEARNING_FIELDS = ('model', 'actor_adam', 'critic_adam', 'trainer', 'collection',
                     'curriculum', 'sampler', 'terrain', 'protocol', 'global_rng', 'normalization')
 _REVIEWABLE = {
+    'common/training_cli.py',
     'formal/tasks/terrain.py', 'formal/runtime/reset_coordinator.py',
     'formal/simulation/terrain_stream.py', 'formal/runtime/transition.py',
     'formal/runtime/session.py', 'formal/runtime/process.py',
     'formal/learning/checkpoint.py', 'formal/learning/loop.py',
     'formal/learning/collection.py', 'formal/learning/optimization.py',
     'formal/simulation/task.py', 'formal/simulation/plant.py',
+}
+_OBSERVATION_REVIEWABLE = {
+    'formal/critic.py', 'formal/policy.py', 'formal/lab_env/critic_features.py',
 }
 
 
@@ -42,13 +46,14 @@ def source_table(package):
             for p in sorted(Path(package).rglob('*.py'))}
 
 
-def _review_sources(previous, candidate, review):
+def _review_sources(previous, candidate, review, *, observation_preprocessing=False):
     before, after = source_table(previous), source_table(candidate)
     actual = {name: {'before': before.get(name), 'after': after.get(name)}
               for name in sorted(before.keys() | after.keys()) if before.get(name) != after.get(name)}
-    if (not actual or actual != review or not set(actual).issubset(_REVIEWABLE)
+    allowed = _REVIEWABLE | (_OBSERVATION_REVIEWABLE if observation_preprocessing else set())
+    if (not actual or actual != review or not set(actual).issubset(allowed)
             or any(value['after'] is None for value in actual.values())):
-        raise ValueError('source transition differs from its exact reviewed performance/support changes')
+        raise ValueError('source transition differs from its exact reviewed supported changes')
     return actual
 
 
@@ -185,7 +190,8 @@ def _hold_resources(session, stack):
 
 
 def migrate_stopped_session(source_root, target_root, *, learner_source, reviewed_changes,
-                            approval_pin, authorized_boot, retry_unstarted_transition=False):
+                            approval_pin, authorized_boot, retry_unstarted_transition=False,
+                            observation_preprocessing=False):
     """仅准备新会话，不启动SDK/训练或切换registry；调用者负责明确授权。"""
     from .session import StructuredTrainingSession
 
@@ -196,13 +202,17 @@ def migrate_stopped_session(source_root, target_root, *, learner_source, reviewe
     if (approval.get('authorization') != 'approved_implementation_validation_then_switch'
             or approval.get('boot') != authorized_boot or not approval.get('human_answer')):
         raise ValueError('source transition lacks its explicit human approval')
+    if (type(observation_preprocessing) is not bool or observation_preprocessing
+            and approval.get('change_scope') != 'critic_input_preprocessing'):
+        raise ValueError('critic preprocessing migration requires its explicit reviewed scope')
     source = StructuredTrainingSession(source_root)
     candidate = Path(learner_source).resolve(strict=True)
     with command_lock(source.root), ExitStack() as stack:
         resources = _hold_resources(source, stack)
         for pin in source.spec['pins']:
             verify_pin(pin)
-        changes = _review_sources(source.root / 'source/transformer_rl', candidate, reviewed_changes)
+        changes = _review_sources(source.root / 'source/transformer_rl', candidate, reviewed_changes,
+                                  observation_preprocessing=observation_preprocessing)
         old_recipe = LearningRecipe.from_dict(read_json(source.root / 'recipe.json'))
         if old_recipe.learner_source_sha256 != source.source_sha256(source.root / 'source/transformer_rl'):
             raise ValueError('previous frozen source differs from its original recipe')
@@ -252,6 +262,8 @@ def migrate_stopped_session(source_root, target_root, *, learner_source, reviewe
                 'source_boundary': boundary, 'approval_pin': approval_pin,
                 'reviewed_changes': changes, 'learning_state_sha256': state_hash,
                 'physical_state_restored': False,
+                **({'critic_preprocessing_changed': True, 'value_function_preserved': False}
+                   if observation_preprocessing else {}),
                 **({'unstarted_transition_retry_pin': retry_marker} if retry_marker else {}),
             }
             migrated = dict(payload, recipe=new_recipe.to_dict(), boundary=journal.checkpoint_boundary(),
