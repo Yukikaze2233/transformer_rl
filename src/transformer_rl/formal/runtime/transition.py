@@ -88,6 +88,12 @@ def learning_state_sha256(payload):
     return digest.hexdigest()
 
 
+def _inherited_events_summary(events):
+    """Bound the control marker independently of the copied journal length."""
+    canonical = json.dumps(events, sort_keys=True, separators=(',', ':')).encode()
+    return {'count': len(events), 'sha256': hashlib.sha256(canonical).hexdigest()}
+
+
 class _AcceptedSourceStore(StructuredCheckpointStore):
     """复用原端点验收入口，保留其唯一一次反序列化的已接受payload。"""
 
@@ -282,7 +288,8 @@ def migrate_stopped_session(source_root, target_root, *, learner_source, reviewe
                 'boundary': journal.checkpoint_boundary(), 'update': boundary['ppo_updates'],
                 'active_elapsed_s': spent, 'returned_transitions': boundary['returned_transitions'],
                 'learning_state_sha256': state_hash, 'source': metadata,
-                'inherited_events_sha256': events, 'resources_at_validation': resources,
+                'inherited_events_sha256': _inherited_events_summary(events),
+                'resources_at_validation': resources,
                 'cold_physical_state_restored': False,
             }
             assert receipt['metadata']['learning_state_sha256'] == state_hash
