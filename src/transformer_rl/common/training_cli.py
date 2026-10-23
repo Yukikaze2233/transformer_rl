@@ -7,6 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import select
 import shutil
 import sys
@@ -16,6 +17,7 @@ import tty
 import unicodedata
 
 from .session_router import open_session
+from .training_control import read_json, verify_pin
 
 
 LABELS = {"ready": "待启动", "starting": "启动中", "initializing": "初始化环境", "collecting": "采样中",
@@ -53,6 +55,27 @@ def _duration(seconds):
     return f"{hours:02}:{minutes:02}:{seconds:02}"
 
 
+def _display_state(session, state=None):
+    """只补充冻结配置与公开状态；不读取模型、指标日志或修改控制请求。"""
+    state = dict(session.status() if state is None else state)
+    if not state.get("structured"):
+        return state
+    recipe_path = session.root / "recipe.json"
+    pin = next((item for item in session.spec["pins"]
+                if item["path"] == str(recipe_path)), None)
+    if pin is not None:
+        recipe = read_json(verify_pin(pin))
+        state.update(rollout_steps=recipe["rollout_steps"],
+                     policy_dt_s=recipe["collection"]["policy_dt_s"],
+                     ppo_epochs=recipe["ppo"]["epochs"],
+                     ppo_minibatches=recipe["ppo"]["minibatches"])
+    if state.get("checkpoint_update") is None and state.get("latest_checkpoint"):
+        match = re.fullmatch(r"update_(\d+)\.pt", Path(state["latest_checkpoint"]).name)
+        if match:
+            state["checkpoint_update"] = int(match[1])
+    return state
+
+
 def render(state, *, width=84, color=False, message=""):
     """Render from the bounded worker projection, without parsing training logs."""
     width = max(44, min(width, 108))
@@ -76,8 +99,27 @@ def render(state, *, width=84, color=False, message=""):
         lines[6] = f"预算  {budget_update:,} / {target:,} · 保留模型更新  {update:,}"
         lines.append(f"历史丢失更新仍计费  {state['retired_consumption']['ppo_updates']:,}")
     if state.get('structured'):
-        lines += [f"{state['num_envs']} 环境 · {state['history_length']} 帧含当前 · 策略 100Hz / 物理 200Hz",
-                  "闭链 12 / 6 · 按冻结配置保存 · 评估由人手动发起"]
+        layout = f"{state['num_envs']} 环境"
+        if state.get("rollout_steps") is not None:
+            layout += f" × {state['rollout_steps']} 步"
+        layout += f" · {state['history_length']} 帧含当前"
+        period = state.get("policy_dt_s")
+        if isinstance(period, (int, float)) and math.isfinite(period) and period > 0:
+            layout += f" · 策略 {1 / period:g}Hz"
+            lines.append(layout)
+            span_ms = (state['history_length'] - 1) * period * 1000
+            lines.append(f"历史跨度 {span_ms:g} ms · 评估由人手动发起")
+        else:
+            lines.append(layout)
+        if state.get("ppo_epochs") is not None and state.get("ppo_minibatches") is not None:
+            epochs, minibatches = state['ppo_epochs'], state['ppo_minibatches']
+            lines.append(f"PPO {epochs} epochs × {minibatches} minibatches = {epochs * minibatches} 步 / 更新")
+        position = state.get("solver_position_iterations")
+        velocity = state.get("solver_velocity_iterations")
+        if position is not None and velocity is not None:
+            lines.append(f"闭链迭代 {position} / {velocity} · 按冻结配置保存")
+        if state.get("curriculum_stage") is not None:
+            lines.append(f"课程阶段 {state['curriculum_stage']} · {_text(state.get('curriculum_status', ''))}")
     if state.get("queue_counts"):
         counts = state["queue_counts"]
         lines[6] = f"{'评估步' if state.get('stage') == 'evaluating' else '当前更新'}  {update:,} / {target:,}"
@@ -143,14 +185,14 @@ def _terminal():
 
 def watch(session, *, plain=False):
     if not (sys.stdin.isatty() and sys.stdout.isatty()) or os.environ.get("TERM") == "dumb":
-        print(render(session.status(), color=False))
+        print(render(_display_state(session), color=False))
         return
     message = ""
     color = not plain and "NO_COLOR" not in os.environ
     with _terminal():
         while True:
             columns, rows = shutil.get_terminal_size((84, 30))
-            state = session.status()
+            state = _display_state(session)
             screen = render(state, width=columns - 1, color=color, message=message)
             if rows < len(screen.splitlines()):
                 screen = "\n".join(screen.splitlines()[:max(1, rows - 1)])
@@ -262,7 +304,7 @@ def main(argv=None):
             if args.directory.is_dir():
                 for child in sorted(args.directory.iterdir()):
                     if child.is_dir() and any((child / item).is_file() for item in ("session.json", "queue.json", "structured.json")):
-                        states.append(open_session(child).status())
+                        states.append(_display_state(open_session(child)))
             if args.json:
                 print(json.dumps(states, ensure_ascii=False, indent=2))
             else:
@@ -302,6 +344,7 @@ def main(argv=None):
                 state = session.command(args.operation, wait_seconds=args.wait)
             else:
                 state = session.status()
+        state = _display_state(session, state)
         if getattr(args, "json", False):
             print(json.dumps(state, ensure_ascii=False, indent=2))
         else:
