@@ -22,6 +22,8 @@ class HistoryMLPConfig:
     mean_init_scale: float = 0.01
     estimate_log_std_min: float = -4.0
     estimate_log_std_max: float = 2.0
+    initial_leg_std: float = 0.3
+    initial_wheel_std: float = 0.5
 
     def __post_init__(self):
         if self.architecture != 'history_mlp':
@@ -42,6 +44,10 @@ class HistoryMLPConfig:
                 raise ValueError(f'{name} must be finite')
         if self.mean_init_scale < 0 or self.estimate_log_std_min >= self.estimate_log_std_max:
             raise ValueError('invalid mean initialization or estimation scale bounds')
+        for name in ('initial_leg_std', 'initial_wheel_std'):
+            value = getattr(self, name)
+            if type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= 2.7:
+                raise ValueError(f'{name} must be a finite positive action-unit std below exp(1)')
 
     @property
     def normalization_contract(self):

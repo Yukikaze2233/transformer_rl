@@ -40,6 +40,11 @@ class StructuredPolicyConfig:
     mean_init_scale: float = 0.01
     estimate_log_std_min: float = -4.0
     estimate_log_std_max: float = 2.0
+    # Share left/right weights in one physically mirrored frame. False keeps
+    # the original native-coordinate sharing for existing checkpoints.
+    mirror_canonical: bool = False
+    initial_leg_std: float = 0.3
+    initial_wheel_std: float = 0.5
 
     def __post_init__(self):
         for name in ("history_length", "body_width", "body_heads", "body_ffn",
@@ -63,6 +68,9 @@ class StructuredPolicyConfig:
                 raise ValueError(f"{name} must be finite")
         if self.mean_init_scale < 0 or self.estimate_log_std_min >= self.estimate_log_std_max:
             raise ValueError("invalid mean initialization or estimation scale bounds")
+        if type(self.mirror_canonical) is not bool:
+            raise ValueError("mirror_canonical must be an explicit bool")
+        validate_initial_std(self)
 
     @property
     def normalization_contract(self):
@@ -73,11 +81,16 @@ PolicyConfig = StructuredPolicyConfig | HistoryMLPConfig
 POLICY_CONFIG_TYPES = (StructuredPolicyConfig, HistoryMLPConfig)
 
 
+# Fields added after recipes were frozen; their absence means the legacy value.
+LEGACY_OPTIONAL_POLICY_FIELDS = frozenset({'mirror_canonical', 'initial_leg_std', 'initial_wheel_std'})
+
+
 def policy_config_from_dict(value, *, complete=False) -> PolicyConfig:
     """Absent discriminator retains the original Transformer serialization.
 
     Settings may omit default fields; source-bound checkpoint recipes must
-    contain the complete selected configuration, including its discriminator.
+    contain the complete selected configuration, including its discriminator,
+    except fields added later whose defaults reproduce the frozen behavior.
     """
     if not isinstance(value, dict):
         raise ValueError('policy configuration must be an object')
@@ -88,9 +101,16 @@ def policy_config_from_dict(value, *, complete=False) -> PolicyConfig:
     else:
         raise ValueError('unknown policy architecture')
     expected = {field.name for field in fields(config_type)}
-    if not set(value) <= expected or (complete and set(value) != expected):
+    if not set(value) <= expected or (complete and expected - set(value) - LEGACY_OPTIONAL_POLICY_FIELDS):
         raise ValueError('policy configuration fields differ')
     return config_type(**value)
+
+
+def validate_initial_std(config):
+    for name in ("initial_leg_std", "initial_wheel_std"):
+        value = getattr(config, name)
+        if type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= 2.7:
+            raise ValueError(f"{name} must be a finite positive action-unit std below exp(1)")
 
 
 class _GatedAttentionBlock(nn.Module):
@@ -148,8 +168,9 @@ class _CurrentReadout(nn.Module):
         self.norm = nn.LayerNorm(self.width)
 
     def forward(self, local: torch.Tensor, command: torch.Tensor, memory: torch.Tensor) -> torch.Tensor:
+        """``command`` is [B, 5, 11]: one (possibly mirrored) command per query."""
         batch, length = memory.shape[:2]
-        query = self.query(torch.cat((local, command[:, None].expand(-1, 5, -1)), -1))
+        query = self.query(torch.cat((local, command), -1))
         query = query + self.query_identity
         q = query.reshape(batch, 5, self.heads, self.head_width).transpose(1, 2)
         k = self.key(memory).reshape(batch, length, self.heads, self.head_width).transpose(1, 2)
@@ -167,7 +188,8 @@ class StructuredPolicy(nn.Module):
     if an upstream caller violates their required zero-valued wire semantics.
     """
 
-    __constants__ = ["history_length", "body_width", "time_width", "log_std_min", "log_std_max"]
+    __constants__ = ["history_length", "body_width", "time_width", "log_std_min", "log_std_max",
+                     "mirror_canonical"]
 
     def __init__(self, config=StructuredPolicyConfig(), *, prediction_head=True):
         super().__init__()
@@ -178,6 +200,18 @@ class StructuredPolicy(nn.Module):
         self.time_width = config.temporal_width
         self.log_std_min = float(config.estimate_log_std_min)
         self.log_std_max = float(config.estimate_log_std_max)
+        self.mirror_canonical = bool(config.mirror_canonical)
+        # Reflection y -> -y. Native right axes are mirrored (axis -y, nominal
+        # R = -L), so right joint angles, rates and actions change sign. In the
+        # context, vy and yaw commands, roll/yaw gyro rates, gravity y and the
+        # vy estimate change sign and the two contact probabilities swap.
+        # Non-persistent: older checkpoints keep their exact state_dict keys.
+        for name, values in (("command_mirror", [1., -1., -1.] + [1.] * 8),
+                             ("base_mirror", [-1., 1., -1., 1., -1., 1.]),
+                             ("state_mirror", [1., -1., 1., 1., 1., 1., 1., 1.]),
+                             ("side_sign", [[1.], [-1.]])):
+            self.register_buffer(name, torch.tensor(values), persistent=False)
+        self.register_buffer("state_mirror_order", torch.tensor([0, 1, 2, 3, 4, 5, 7, 6]), persistent=False)
         for name, indices in (
             ("command_indices", (0, 1, 2, 3, 28, 29, 30, 31, 32, 33, 34)),
             ("base_indices", (4, 5, 6, 7, 8, 9)),
@@ -253,9 +287,9 @@ class StructuredPolicy(nn.Module):
             self.command_projection(frames.index_select(-1, self.command_indices)),
             self.base_projection(frames.index_select(-1, self.base_indices)),
             self.leg_projection(frames.index_select(-1, self.left_leg_indices)),
-            self.leg_projection(frames.index_select(-1, self.right_leg_indices)),
+            self.leg_projection(self._right(frames.index_select(-1, self.right_leg_indices))),
             self.wheel_projection(frames.index_select(-1, self.left_wheel_indices)),
-            self.wheel_projection(frames.index_select(-1, self.right_wheel_indices)),
+            self.wheel_projection(self._right(frames.index_select(-1, self.right_wheel_indices))),
         ), dim=2) + self.body_identity
         body = self.spatial_block(body.reshape(batch * length, 6, self.body_width), self.body_allowed)
         body = self.body_norm(body).reshape(batch, length, 6, self.body_width)
@@ -263,6 +297,9 @@ class StructuredPolicy(nn.Module):
         for block in self.temporal_blocks:
             tokens = block(tokens, self.time_allowed)
         return self.time_norm(tokens), body[:, -1]
+
+    def _right(self, values: torch.Tensor) -> torch.Tensor:
+        return -values if self.mirror_canonical else values
 
     @torch.jit.export
     def encode(self, frames: torch.Tensor) -> torch.Tensor:
@@ -277,15 +314,30 @@ class StructuredPolicy(nn.Module):
         current = frames[:, -1]
         command = current.index_select(-1, self.command_indices)
         base = current.index_select(-1, self.base_indices)
-        queries = self.readout(current_body.index_select(1, self.query_body_indices), command, memory)
+        commands = command[:, None].expand(-1, 5, -1)
+        if self.mirror_canonical:
+            mirrored = command * self.command_mirror
+            # Query order: left leg, right leg, left wheel, right wheel, state.
+            commands = torch.stack((command, mirrored, command, mirrored, command), 1)
+        queries = self.readout(current_body.index_select(1, self.query_body_indices), commands, memory)
         raw_state = self.state_head(queries[:, 4])
-        shared = torch.cat((base, command, self.state_features(raw_state)), -1)
+        state = self.state_features(raw_state)
+        shared = torch.cat((base, command, state), -1)
+        right_shared = shared
+        if self.mirror_canonical:
+            right_shared = torch.cat((base * self.base_mirror, command * self.command_mirror,
+                                      state.index_select(-1, self.state_mirror_order) * self.state_mirror), -1)
+        context = torch.stack((shared, right_shared), 1)
         legs = torch.stack((current.index_select(-1, self.left_leg_indices),
-                            current.index_select(-1, self.right_leg_indices)), 1)
+                            self._right(current.index_select(-1, self.right_leg_indices))), 1)
         wheels = torch.stack((current.index_select(-1, self.left_wheel_indices),
-                              current.index_select(-1, self.right_wheel_indices)), 1)
-        legs = self.leg_decoder(torch.cat((queries[:, :2], legs, shared[:, None].expand(-1, 2, -1)), -1))
-        wheels = self.wheel_decoder(torch.cat((queries[:, 2:4], wheels, shared[:, None].expand(-1, 2, -1)), -1))
+                              self._right(current.index_select(-1, self.right_wheel_indices))), 1)
+        legs = self.leg_decoder(torch.cat((queries[:, :2], legs, context), -1))
+        wheels = self.wheel_decoder(torch.cat((queries[:, 2:4], wheels, context), -1))
+        if self.mirror_canonical:
+            # Canonical (left-frame) actions back to native right coordinates.
+            legs = legs * self.side_sign
+            wheels = wheels * self.side_sign
         return torch.cat((legs.flatten(1), wheels.flatten(1)), -1), raw_state, queries[:, 4]
 
     def forward(self, frames: torch.Tensor) -> torch.Tensor:
@@ -311,7 +363,8 @@ class StructuredGaussianActor(nn.Module):
         super().__init__()
         self.policy = (HistoryMLPPolicy(config) if isinstance(config, HistoryMLPConfig)
                        else StructuredPolicy(config))
-        self.log_std = nn.Parameter(torch.tensor([math.log(0.3)] * 4 + [math.log(0.5)] * 2))
+        self.log_std = nn.Parameter(torch.tensor([math.log(config.initial_leg_std)] * 4
+                                                 + [math.log(config.initial_wheel_std)] * 2))
 
     @staticmethod
     def _evaluation(mean, log_std, raw_action):
