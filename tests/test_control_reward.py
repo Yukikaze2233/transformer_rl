@@ -75,12 +75,12 @@ def cpu_threads():
 
 
 @pytest.mark.parametrize('period', [.005, .001])
-def test_perfect_support_reward_is_six_and_a_half_per_second_with_exactly_one_dt(period):
+def test_perfect_support_reward_is_five_per_second_with_exactly_one_dt(period):
     reward = fixture(period)
     result = step(reward)
-    torch.testing.assert_close(result.learning_reward, torch.full((2,), .065))
+    torch.testing.assert_close(result.learning_reward, torch.full((2,), .05))
     torch.testing.assert_close(torch.stack(tuple(result.raw_positive_densities.values())).sum(0),
-                               torch.full((2,), 6.5, dtype=torch.float64))
+                               torch.full((2,), 5., dtype=torch.float64))
     assert not torch.stack(tuple(result.raw_cost_densities.values())).any()
     assert result.timestamp_s.eq(.01).all()
     with pytest.raises(RuntimeError, match='every declared'):
@@ -103,15 +103,15 @@ def test_roll_pitch_rate_damping_is_mode_gated_and_separate_from_attitude():
     assert recovery.raw_cost_densities['roll_pitch_angular_velocity'].eq(0).all()
 
 
-def test_complete_jump_density_budget_is_seven_and_does_not_change_support_weights():
+def test_complete_jump_density_budget_does_not_change_support_weights():
     reward = fixture()
     result = step(reward, reference(CommandMode.JUMP, RewardPhase.FLIGHT))
-    torch.testing.assert_close(result.learning_reward, torch.full((2,), .07))
-    torch.testing.assert_close(result.raw_positive_densities['forward'], torch.full((2,), 2., dtype=torch.float64))
+    torch.testing.assert_close(result.learning_reward, torch.full((2,), .048))
+    torch.testing.assert_close(result.raw_positive_densities['forward'], torch.full((2,), .8, dtype=torch.float64))
     assert result.raw_positive_densities['jump_attitude'].eq(1).all()
     assert result.raw_positive_densities['attitude'].eq(0).all()
     normal = step(reward)
-    torch.testing.assert_close(normal.raw_positive_densities['forward'], torch.full((2,), 2.5, dtype=torch.float64))
+    torch.testing.assert_close(normal.raw_positive_densities['forward'], torch.full((2,), 1., dtype=torch.float64))
 
 
 def test_recovery_has_a_broad_orientation_signal_and_explicit_height_eligibility():
@@ -125,7 +125,7 @@ def test_recovery_has_a_broad_orientation_signal_and_explicit_height_eligibility
     assert inverted.raw_cost_densities['attitude'].gt(0).all()
     assert inverted.raw_positive_densities['height'].eq(0).all()
     assert upright.raw_positive_densities['recovery_upright'].eq(4).all()
-    torch.testing.assert_close(upright.learning_reward, torch.full((2,), .055))
+    torch.testing.assert_close(upright.learning_reward, torch.full((2,), .05))
     assert upright.learning_reward.gt(inverted.learning_reward).all()
 
 
@@ -140,8 +140,10 @@ def test_effort_power_geometric_margin_and_harmful_contact_keep_separate_physica
                        joint_boundary_shortfall_rad=torch.full((2, 6), .05), body_normal_load_n=loads)
 
     result = step(reward, change=change)
-    torch.testing.assert_close(result.raw_cost_densities['effort'], torch.full((2,), .002, dtype=torch.float64))
-    torch.testing.assert_close(result.raw_cost_densities['mechanical_power_proxy'], torch.full((2,), .032, dtype=torch.float64))
+    torch.testing.assert_close(result.raw_cost_densities['effort'], torch.full((2,), .0018, dtype=torch.float64))
+    # Wheel-only positive power (SCUT wheel_power): 1e-4 * 2 * (1 N·m * 4 rad/s).
+    torch.testing.assert_close(result.raw_cost_densities['mechanical_power_proxy'], torch.full((2,), .0008, dtype=torch.float64))
+    torch.testing.assert_close(result.raw_cost_densities['wheel_velocity'], torch.full((2,), 3.2e-4, dtype=torch.float64))
     assert result.raw_cost_densities['joint_boundary'].eq(12).all()
     assert result.raw_cost_densities['harmful_contact'].eq(2).all()
 
@@ -156,7 +158,7 @@ def test_large_errors_remain_visible_while_bounded_density_keeps_the_safe_return
     result = step(reward, change=extreme)
     density = torch.stack(tuple(result.component_densities.values())).sum(0)
     assert density.ge(-10 - 1e-5).all() and density.le(8).all()
-    assert torch.stack(tuple(result.raw_cost_densities.values())).sum(0).gt(100000).all()
+    assert torch.stack(tuple(result.raw_cost_densities.values())).sum(0).gt(10000).all()
     assert result.raw_error_means['forward_m_s'].eq(100).all()
     assert result.raw_error_mean_squares['forward_m_s'].eq(10000).all()
 
@@ -166,14 +168,14 @@ def test_standing_gate_uses_horizontal_speed_inside_the_reward_deadband():
     body = torch.tensor([[.02, 0., 0.], [0., .02, 0.]])
     creep = lambda value, _: replace(value, velocity_origin_body_m_s=body)
     result = step(reward, change=creep)
-    # 2 cm/s creep pays the L1 part 0.5*0.02/0.05 = 0.2/s plus a Huber part.
-    assert result.raw_cost_densities['stand_world_xy'].gt(.2).all()
+    # SCUT stand_still_lin_vel: |v_x| + |v_y| = 0.02 m/s per second.
+    torch.testing.assert_close(result.raw_cost_densities['stand_world_xy'], torch.full((2,), .02, dtype=torch.float64))
     small = reference()
     small.admitted_body_command[:, 0] = .05
     deadband = step(reward, small, change=creep)
     assert deadband.gate_fractions['exact_stationary'].eq(0).all()
     assert deadband.gate_fractions['stationary_deadband'].eq(1).all()
-    assert deadband.raw_cost_densities['stand_world_xy'].gt(.2).all()
+    torch.testing.assert_close(deadband.raw_cost_densities['stand_world_xy'], torch.full((2,), .02, dtype=torch.float64))
     moving = reference()
     moving.admitted_body_command[:, 0] = .5
     result = step(reward, moving, change=creep)
@@ -186,8 +188,8 @@ def test_fore_aft_wheel_split_is_paid_outside_recovery_only():
     split = torch.tensor([[[.16, .198, -.25], [-.18, -.199, -.21]]]).repeat(2, 1, 1)
     change = lambda value, _: replace(value, wheel_position_base_m=split)
     result = step(reward, change=change)
-    # dx = 0.34 m: 1.5 * (1 + (0.34 / 0.2)^2) = 5.835 per second.
-    torch.testing.assert_close(result.raw_cost_densities['leg_fork'], torch.full((2,), 5.835, dtype=torch.float64))
+    # dx = 0.34 m: 1 + (5 * 0.34)^2 = 3.89 per second (SCUT no_fork + no_fork_square).
+    torch.testing.assert_close(result.raw_cost_densities['leg_fork'], torch.full((2,), 3.89, dtype=torch.float64))
     torch.testing.assert_close(result.raw_error_means['leg_fork_m'], torch.full((2,), .34, dtype=torch.float64))
     recovery = step(reward, reference(CommandMode.RECOVERY, RewardPhase.RECOVERY), change=change)
     assert recovery.raw_cost_densities['leg_fork'].eq(0).all()
@@ -200,7 +202,7 @@ def test_acceleration_uses_each_physics_dt_and_endpoint_velocity_cannot_be_silen
     reward = fixture(period)
     initial = torch.zeros(2, 6)
     result = step(reward, change=lambda value, index: replace(value, policy_velocity_rad_s=initial + 2 * index * period))
-    torch.testing.assert_close(result.raw_cost_densities['leg_acceleration'], torch.full((2,), 1.6e-6, dtype=torch.float64),
+    torch.testing.assert_close(result.raw_cost_densities['leg_acceleration'], torch.full((2,), 8e-6, dtype=torch.float64),
                                rtol=1e-5, atol=1e-12)
     ref = reference()
     with pytest.raises(ValueError, match='PRE-reset'):
@@ -216,9 +218,9 @@ def test_issued_differences_are_at100Hz_once_and_selected_reset_does_not_clear_o
     second = step(reward, issued=torch.ones(2, 6))
     third = step(reward, issued=torch.zeros(2, 6))
     assert first.raw_cost_densities['issued_first_difference'].eq(0).all()
-    torch.testing.assert_close(second.raw_cost_densities['issued_first_difference'], torch.full((2,), .06, dtype=torch.float64))
+    torch.testing.assert_close(second.raw_cost_densities['issued_first_difference'], torch.full((2,), .03, dtype=torch.float64))
     assert second.raw_cost_densities['issued_second_difference'].eq(0).all()
-    torch.testing.assert_close(third.raw_cost_densities['issued_second_difference'], torch.full((2,), .56, dtype=torch.float64))
+    torch.testing.assert_close(third.raw_cost_densities['issued_second_difference'], torch.full((2,), .28, dtype=torch.float64))
     reward.reset(torch.tensor([True, False]), reward._time.clone(), torch.tensor([1, 0]), torch.tensor([1, 0]))
     result = step(reward, issued=torch.ones(2, 6))
     assert result.gate_fractions['first_action_difference'].tolist() == [0., 1.]
@@ -243,8 +245,8 @@ def test_slip_uses_named_contact_speed_and_force_gate_not_body_or_rolling_speed(
 def test_true_failure_pays_absorbing_tail_once_but_time_limit_does_not():
     reward = fixture()
     result = step(reward, failed=torch.tensor([True, False]), timeout=torch.tensor([True, True]))
-    expected = .065 - 4 + reward.tuning.gamma * reward.tuning.absorbing_value
-    torch.testing.assert_close(result.learning_reward, torch.tensor([expected, .065]))
+    expected = .05 - 4 + reward.tuning.gamma * reward.tuning.absorbing_value
+    torch.testing.assert_close(result.learning_reward, torch.tensor([expected, .05]))
     assert result.event_rewards['failure_absorbing_value_tail'][1] == 0
     assert result.timestamp_s.eq(.01).all()  # No absorbing physics was appended.
     with pytest.raises(ValueError, match='initialized'):
@@ -271,11 +273,11 @@ def test_each_subinterval_is_bounded_before_integration_rather_than_bounding_a_p
     reward = fixture(period)
     result = step(reward, change=lambda value, index: replace(value, joint_boundary_shortfall_rad=
                   torch.full((2, 6), .05 if index <= reward.substeps // 2 else 0.)))
-    expected = 6.5 - 5 * torch.tanh(torch.tensor(1.2, dtype=torch.float64))
+    expected = 5 - 5 * torch.tanh(torch.tensor(1.2, dtype=torch.float64))
     total_density = torch.stack(tuple(result.component_densities.values())).sum(0)
     torch.testing.assert_close(total_density, expected.expand(2), atol=1e-6, rtol=1e-6)
     assert result.raw_cost_densities['joint_boundary'].eq(6).all()
-    assert not torch.allclose(total_density, torch.full((2,), 6.5, dtype=torch.float64) - 10 * torch.tanh(torch.tensor(.6)))
+    assert not torch.allclose(total_density, torch.full((2,), 5., dtype=torch.float64) - 10 * torch.tanh(torch.tensor(.6)))
 
 
 def test_gae_does_not_bootstrap_an_already_included_failure_tail_but_time_limit_keeps_its_terminal_value():
