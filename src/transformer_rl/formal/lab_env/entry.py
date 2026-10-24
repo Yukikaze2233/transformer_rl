@@ -43,16 +43,6 @@ from .prepare import prepare_session
 from .settings import load_asset_description
 
 
-def _delay_steps(value: str) -> tuple[int, ...]:
-    try:
-        values = tuple(int(part.strip()) for part in value.split(',') if part.strip())
-    except ValueError as error:
-        raise argparse.ArgumentTypeError('delay steps must be comma-separated integers') from error
-    if not values or any(step < 0 or step > 16 for step in values) or len(set(values)) != len(values):
-        raise argparse.ArgumentTypeError('delay steps must be unique nonnegative integers <= 16')
-    return values
-
-
 def _parser():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -64,13 +54,6 @@ def _parser():
     parser.add_argument('--run-id')
     parser.add_argument('--python', type=Path, default=Path(sys.executable),
                         help='Worker interpreter; use the exact Isaac Lab environment validated by preflight')
-    parser.add_argument('--action-delay-steps', type=_delay_steps,
-                        help='Opt-in whole policy-step transport delays (20 ms each at 50 Hz); '
-                             'the substep action latch of the control preset is the default path')
-    parser.add_argument('--action-delay-nominal-fraction', type=float, default=.5,
-                        help='Fraction of reset episodes forced to zero transport delay')
-    parser.add_argument('--no-action-transport', action='store_true',
-                        help='Do not override/replace an existing action_transport field')
     parser.add_argument('--control-timing-json', type=Path,
                         help='Freeze an explicit control/sim2real preset (communication, randomization, '
                              'action latch, motor envelope, command pool, sensors, wheel material)')
@@ -81,24 +64,12 @@ def _parser():
     return parser
 
 
-def _with_transport(runtime, args):
-    if not isinstance(runtime, dict):
-        raise ValueError('runtime JSON must be an object')
-    value = dict(runtime)
-    if args.no_action_transport or args.action_delay_steps is None:
-        raw = value.get('action_transport')
-        if raw is not None:
-            ActionTransportConfig.from_dict(raw)
-        return value
-    transport = ActionTransportConfig(
-        enabled=True,
-        delays_steps=tuple(args.action_delay_steps),
-        nominal_fraction=float(args.action_delay_nominal_fraction),
-    )
-    value['action_transport'] = {'enabled': transport.enabled,
-                                 'delays_steps': list(transport.delays_steps),
-                                 'nominal_fraction': transport.nominal_fraction}
-    return value
+def _single_target_delay(runtime):
+    """The substep action latch is the only policy-target delay model."""
+    transport = runtime.get('action_transport')
+    if transport is not None and ActionTransportConfig.from_dict(transport).enabled:
+        raise ValueError('whole policy-step action transport is retired; freeze the action_latch preset instead')
+    return runtime
 
 
 _PRESET_REQUIRED = {'communication': CommunicationConfig, 'episode_randomization': EpisodeRandomizationConfig}
@@ -297,8 +268,7 @@ def main(argv=None):
         raise FileExistsError('formal entry requires a new session directory')
     settings = FormalTrainingSettings.load(args.settings)
     _validate_plan(settings, args.seed)
-    runtime = _with_control_timing(_with_transport(read_json(args.runtime_json), args),
-                                   args.control_timing_json)
+    runtime = _single_target_delay(_with_control_timing(read_json(args.runtime_json), args.control_timing_json))
     curriculum = _curriculum_report(settings, seed=args.seed)
     asset_report = _asset_report(runtime['asset_directory'])
     resources = read_json(args.resources_json)

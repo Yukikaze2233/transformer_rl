@@ -5,37 +5,13 @@ import json
 
 import pytest
 
-from transformer_rl.formal.lab_env.action_transport import ActionTransportConfig
-from transformer_rl.formal.lab_env.entry import _delay_steps, _validate_plan, _with_transport, _with_control_timing
+import torch
+
+from transformer_rl.formal.lab_env.entry import _validate_plan, _with_control_timing
 from transformer_rl.formal.learning.settings import FormalTrainingSettings
 
 
 SETTINGS = Path(__file__).resolve().parents[1] / 'configs' / 'formal_training.json'
-
-
-def test_delay_steps_are_whole_step_unique_and_bounded():
-    assert _delay_steps('0,1,2') == (0, 1, 2)
-    with pytest.raises(Exception):
-        _delay_steps('1,1')
-    with pytest.raises(Exception):
-        _delay_steps('-1')
-    with pytest.raises(Exception):
-        _delay_steps('17')
-
-
-def test_transport_override_is_explicit_and_keeps_other_runtime_fields():
-    runtime = {'format': 'managed_lab_runtime_v4', 'sensors': {'x': 1}}
-    result = _with_transport(runtime, type('Args', (), {
-        'no_action_transport': False, 'action_delay_steps': (0, 1),
-        'action_delay_nominal_fraction': .5})())
-    assert result['sensors'] == {'x': 1}
-    assert result['action_transport'] == {'enabled': True, 'delays_steps': [0, 1],
-                                          'nominal_fraction': .5}
-    ActionTransportConfig.from_dict(result['action_transport'])
-    original = {'action_transport': {'enabled': True, 'delays_steps': [2], 'nominal_fraction': 0.}}
-    untouched = _with_transport(original, type('Args', (), {'no_action_transport': True,
-        'action_delay_steps': (0,), 'action_delay_nominal_fraction': 0.})())
-    assert untouched == original
 
 
 def test_formal_plan_rejects_non_35k_or_unlisted_seed():
@@ -116,3 +92,27 @@ def test_start_resource_wait_is_not_reported_as_a_running_worker(tmp_path, monke
     result = json.loads(capsys.readouterr().out)
     assert result['start_requested'] is True and result['training_started'] is False
     assert result['state']['phase'] == 'waiting_resources'
+
+
+def test_preset_freezes_one_target_delay_model_and_a_bounded_delay_contract():
+    from dataclasses import asdict
+    from transformer_rl.formal.control.actuation import ResponseParameters
+    from transformer_rl.formal.control.sensors import SensorModelConfig
+    from transformer_rl.formal.lab_env.entry import _single_target_delay
+    from transformer_rl.formal.lab_env.runtime import control_delay_contract
+
+    legacy = {'sensors': asdict(SensorModelConfig(policy_dt_s=.02)),
+              'action_transport': {'enabled': True, 'delays_steps': [0, 1], 'nominal_fraction': .5}}
+    with pytest.raises(ValueError, match='retired'):
+        _single_target_delay(legacy)
+    runtime = _single_target_delay(_with_control_timing(legacy, SETTINGS.parent / 'control_timing.json'))
+    assert runtime['action_transport']['enabled'] is False and runtime['action_latch']['enabled'] is True
+    response = ResponseParameters((0.,) * 6, (0.,) * 6, (0.,) * 6,
+                                  (.00386, .00386, .00441, .00441, .0, .0))  # policy order
+    contract = control_delay_contract(runtime, response)
+    # SCUT: 5-15 ms observation lag in every episode, 5-10 ms target delay.
+    assert contract['observation_age_ms'] == [5.1, 17.0]
+    assert contract['target_latch_ms'] == [5.0, 10.0]
+    assert contract['torque_downlink_ms'] == [0.0, 0.0]
+    assert contract['whole_step_transport'] is False
+    torch.testing.assert_close(torch.tensor(contract['leg_drive_time_constant_ms']), torch.tensor([3.86, 11.025]))

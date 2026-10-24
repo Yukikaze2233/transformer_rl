@@ -66,6 +66,40 @@ def _close_runtime_resources(env, health, launcher, failure):
     return cleanup_failure
 
 
+def control_delay_contract(configuration, response):
+    """Full-exposure delay range of each control path, in ms (no simulation).
+
+    observation = shared sensor lag + PD-feedback uplink; target latch =
+    held-previous-target substeps; torque = downlink, then the identified
+    first-order leg drive lag tau scaled by its episode randomization.
+    """
+    def ms(low, high):
+        return [round(1000 * low, 6), round(1000 * high, 6)]
+
+    sensors = configuration['sensors']
+    communication = configuration.get('communication')
+    total = (0., 0.) if communication is None else tuple(communication['total_delay_range_s'])
+    up = 0. if communication is None else communication['uplink_fraction']
+    lags = sorted(sensors['observation_delays_s'])
+    always = sensors['extra_delay_probability'] == 1 and sensors['nominal_episode_fraction'] == 0
+    latch = configuration.get('action_latch')
+    latch_steps = (sorted(latch['delay_substeps']) if latch is not None and latch['enabled'] else [0])
+    zero_latch = latch is None or not latch['enabled'] or latch['nominal_fraction'] > 0
+    transport = configuration.get('action_transport') or {'enabled': False}
+    randomization = configuration.get('episode_randomization') or {}
+    tau = max(response.effective_time_constant_s[:4])
+    scale = randomization.get('leg_time_constant_scale', (1., 1.))
+    return {
+        'observation_age_ms': ms((lags[0] if always else 0.) + total[0] * up, lags[-1] + total[1] * up),
+        'target_latch_ms': ms(0. if zero_latch else latch_steps[0] * .005, latch_steps[-1] * .005),
+        'whole_step_transport': bool(transport['enabled']),
+        'pd_feedback_uplink_ms': ms(total[0] * up, total[1] * up),
+        'torque_downlink_ms': ms(total[0] * (1 - up), total[1] * (1 - up)),
+        'leg_drive_time_constant_ms': ms(min(response.effective_time_constant_s[:4]) * scale[0], tau * scale[1]),
+        'exposure': 'ranges at full exposure; reset-local draws scale toward zero before full_at_update',
+    }
+
+
 def parse_configuration(recipe, configuration, authorized_boot):
     """Validate the frozen private runtime before opening a simulator."""
     expected = {'format', 'authorized_boot', 'asset_directory', 'response_source_pin',
@@ -116,6 +150,9 @@ def parse_configuration(recipe, configuration, authorized_boot):
                         ('command_pool', CommandPoolConfig)):
         if configuration.get(key) is not None:
             parser.from_dict(configuration[key])
+    latch_raw = configuration.get('action_latch')
+    if transport.enabled and latch_raw is not None and ActionLatchConfig.from_dict(latch_raw).enabled:
+        raise ValueError('policy-target delay needs one model: whole-step transport and the substep latch both enabled')
     if (tuple(task.action_bounds) != tuple(recipe.collection.action_bounds)
             or task.nominal_height_m != recipe.domain.nominal_height_m):
         raise ValueError('managed Lab task differs from the collector action bounds or nominal height')
@@ -279,6 +316,7 @@ def runtime(recipe, components, configuration, *, control):
                 'scope': 'datasheet-derived linear back-EMF limit on true shaft speed; not identified under load'},
             'command_pool': None if configuration.get('command_pool') is None else asdict(CommandPoolConfig()),
             'reward_version': REWARD_VERSION,
+            'control_delay_contract': control_delay_contract(configuration, response),
             'wheel_material': env.wheel_material_receipt,
             'collision_isolation': env.collision_isolation_receipt,
             'cold_physical_state_restored': False, 'automatic_evaluation': False,
