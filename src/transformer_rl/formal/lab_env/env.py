@@ -53,6 +53,11 @@ from .joint_coordinates import ContinuousJointCoordinates
 from .mechanics import NativeLoopTelemetry
 
 
+def _yaw(quaternion_xyzw):
+    x, y, z, w = quaternion_xyzw.unbind(-1)
+    return torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+
+
 def _select_targets(mask, held, current):
     """Row-wise choice between two decoded target packets of the same layout."""
     values = []
@@ -216,6 +221,8 @@ class WheeledLabEnv(DirectRLEnv):
         self._action_latch = (None if latch_configuration is None or not latch_configuration.enabled
             else SubstepActionLatch(self.num_envs, latch_configuration,
                                     seed=int(getattr(cfg, 'seed', 0) or 0) + 15485863, device=self._device))
+        if self._action_latch is not None and transport_configuration is not None and transport_configuration.enabled:
+            raise ValueError('policy-target delay needs one model: whole-step transport and the substep latch both enabled')
         self._latch_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
         self._held_targets = None
         self._held_generated_at_s = torch.zeros(self.num_envs, dtype=torch.float64, device=self._device)
@@ -922,6 +929,13 @@ class WheeledLabEnv(DirectRLEnv):
             self._action_latch.held.copy_(owned)
         self._substep = 0
 
+    def _reset_targets(self, mask, q):
+        """Neutral targets for reset rows only; other rows keep their latched targets."""
+        neutral = self._control.decode(
+            torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32, device=self._device),
+            q, self._clock())
+        self._targets = neutral if self._targets is None else _select_targets(mask, neutral, self._targets)
+
     def _apply_action(self) -> None:
         if self._targets is None:
             raise RuntimeError("必须先由 _pre_physics_step 生成输出目标")
@@ -1060,7 +1074,7 @@ class WheeledLabEnv(DirectRLEnv):
         if self._communication is not None:
             self._communication.push(encoder.policy_position_rad, encoder.policy_velocity_rad_s)
         if self._sensor_model is not None:
-            self._sensor_model.push(encoder, self._physical_tick)
+            self._sensor_model.push(encoder, self._physical_tick, heading_rad=_yaw(sample.root_link_orientation_xyzw))
         boundary = None
         mount, pressure = self._observe_spring_state()
         if self._failure_latch is not None:
@@ -1473,10 +1487,7 @@ class WheeledLabEnv(DirectRLEnv):
                 self._control.drive.set_time_constant_scale(mask, self._episode_randomization.time_constant_scale)
         # Controller and preparation work in encoder coordinates.
         q = self._encoder_position(self._joint_positions().index_select(1, self._active_indices))
-        self._targets = self._control.decode(
-            torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32, device=self._device),
-            q, self._clock(),
-        )
+        self._reset_targets(mask, q)
         if self._recovery_preparation is not None:
             self._recovery_preparation.reset_rows(
                 ids, q, self._base_command_mode == int(CommandMode.RECOVERY), self._clock())
@@ -1486,7 +1497,8 @@ class WheeledLabEnv(DirectRLEnv):
         if self._sensor_model is not None:
             self._sensor_model.reset(mask, self._clock(), difficulty=difficulty)
             current = self._observations.assembler.measure(self._sample())
-            self._sensor_model.seed_after_reset(mask, self._encoder_state(current))
+            self._sensor_model.seed_after_reset(mask, self._encoder_state(current),
+                                                heading_rad=_yaw(self._root_link_quat()))
         if self._action_transport is not None:
             self._action_transport.reset(mask, difficulty=difficulty)
         if self._action_latch is not None:
@@ -1575,6 +1587,12 @@ class WheeledLabEnv(DirectRLEnv):
                 'pooled_rollout_statistics': False,
                 'values': {key: dict(zip(('min', 'mean', 'max'), value))
                            for key, value in zip(keys, summaries)}}
+
+    def heading_estimate(self):
+        """Deployable heading for the command outer loop (delayed like the IMU)."""
+        if self._sensor_model is None:
+            return _yaw(self._root_link_quat())
+        return self._sensor_model.delayed_heading()
 
     def _sensor_packet(self, state):
         return (self._observations.assembler.clean_sensors(state) if self._sensor_model is None

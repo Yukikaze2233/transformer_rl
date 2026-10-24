@@ -22,7 +22,7 @@ class LabSensorModel(SensorModel):
         self.reset_projection_rows_consumed = 0
 
     @torch.no_grad()
-    def seed_after_reset(self, mask, state: MeasuredState):
+    def seed_after_reset(self, mask, state: MeasuredState, *, heading_rad=None):
         if (not isinstance(state, MeasuredState) or mask.shape != (self.num_envs,)
                 or mask.dtype != torch.bool or mask.device != self.device
                 or state.timestamp_s.shape != (self.num_envs,)
@@ -42,6 +42,8 @@ class LabSensorModel(SensorModel):
         slot = self.physical_tick % self.capacity
         self.values[slot, rows] = raw[rows]
         self.times[slot, rows] = state.timestamp_s[rows]
+        if heading_rad is not None:
+            self.write_heading(slot, rows, heading_rad)
         self.count[rows] = 1
         packet = self._read_rows(rows, self.reset_generator)
         if cached:

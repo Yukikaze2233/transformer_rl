@@ -75,6 +75,9 @@ class SensorModel:
         self.uplink_delay_s, self.maximum_uplink_s = uplink_delay_s, maximum_uplink_s
         self.capacity += math.ceil(maximum_uplink_s / config.physics_dt_s)
         self.values = torch.empty(self.capacity, num_envs, 18, device=self.device)
+        # Heading (EKF yaw) as cos/sin, delayed with the attitude group; it is
+        # not an actor input but the heading outer loop's measurement.
+        self.heading = torch.zeros(self.capacity, num_envs, 2, device=self.device)
         self.times = torch.empty(self.capacity, num_envs, dtype=torch.float64, device=self.device)
         self.count = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         self.initialized = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
@@ -120,7 +123,7 @@ class SensorModel:
         # 回合抽样不推进噪声RNG，避免一行reset改变其他行后续噪声序列。
 
     @torch.no_grad()
-    def push(self, state: MeasuredState, physical_tick):
+    def push(self, state: MeasuredState, physical_tick, *, heading_rad=None):
         if (not isinstance(state, MeasuredState) or type(physical_tick) is not int
                 or physical_tick != self.physical_tick + 1):
             raise ValueError('sensor history appends once after the next actual physical step')
@@ -141,8 +144,31 @@ class SensorModel:
             raise ValueError('sensor source needs finite same-tick measurements after explicit reset')
         self.values[physical_tick % self.capacity] = raw
         self.times[physical_tick % self.capacity] = time
+        if heading_rad is not None:
+            self.write_heading(physical_tick % self.capacity, self._rows, heading_rad)
         self.count = (self.count + 1).clamp_max(self.capacity)
         self.physical_tick = physical_tick
+
+    def write_heading(self, slot, rows, heading_rad):
+        if (not isinstance(heading_rad, torch.Tensor) or heading_rad.shape != (self.num_envs,)
+                or not torch.isfinite(heading_rad).all()):
+            raise ValueError('heading requires one finite yaw per environment')
+        self.heading[slot, rows] = torch.stack((heading_rad.cos(), heading_rad.sin()), -1)[rows].float()
+
+    def delayed_heading(self):
+        """Yaw seen with the attitude (gravity) group lag plus the shared uplink."""
+        lag = self.lags[:, 3]
+        latest = (self.count - 1).clamp_min(0)
+        if self.uplink_delay_s is None:
+            value = self.heading[(self.physical_tick - lag.minimum(latest)) % self.capacity, self._rows]
+        else:
+            age = (lag.double() + self.uplink_delay_s / self.config.physics_dt_s).minimum(latest)
+            recent = age.floor().long()
+            older = (recent + 1).minimum(latest)
+            a = self.heading[(self.physical_tick - recent) % self.capacity, self._rows]
+            b = self.heading[(self.physical_tick - older) % self.capacity, self._rows]
+            value = a + (age - recent).float()[:, None] * (b - a)
+        return torch.atan2(value[:, 1], value[:, 0])
 
     @staticmethod
     def _owned(sample):
