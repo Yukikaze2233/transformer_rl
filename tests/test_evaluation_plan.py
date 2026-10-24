@@ -65,6 +65,6 @@ def test_costs_use_complete_horizons_instead_of_early_failure_or_probe_substitut
     assert evaluation_cost_bound() == {
         'probes': 19200000, 'stage_candidates': 72960000, 'final_validation': 21120000,
         'heldout': 21120000, 'challenges': 5760000, 'total_task_transitions': 140160000,
-        'policy_dt_s': .01, 'preparation_and_discarded_vector_rows_counted_separately': True,
+        'policy_dt_s': .02, 'preparation_and_discarded_vector_rows_counted_separately': True,
         'physical_qualification': False,
     }

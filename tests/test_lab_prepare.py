@@ -19,6 +19,8 @@ def preparation_inputs(tmp_path, monkeypatch):
                         lambda _path: type('SelectedAsset', (), {'manifest_sha256': recipe.asset_manifest_sha256})())
     settings = FormalTrainingSettings.load(Path(__file__).parents[1] / 'configs/formal_training.json')
     settings = replace(settings, num_envs=4, rollout_steps=8)
+    # The frozen runtime shares the formal collection clock (50 Hz policy).
+    config['sensors'] = {**config['sensors'], 'policy_dt_s': settings.collection.policy_dt_s}
     locks = []
     for index in range(4):
         path = tmp_path / f'lease_{index}.lock'
