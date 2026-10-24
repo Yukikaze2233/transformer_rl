@@ -159,7 +159,8 @@ def test_native_action_history_keeps_issuance_separate_from_transport_arrival():
         _as_torch=lambda value: value,
         robot=SimpleNamespace(data=SimpleNamespace(joint_vel=torch.zeros(1, 6))),
         _episode_id=torch.ones(1, dtype=torch.long), _control_epoch=torch.ones(1, dtype=torch.long),
-        _command=torch.zeros(1, 4), _command_mode=torch.zeros(1, dtype=torch.long))
+        _command=torch.zeros(1, 4), _command_mode=torch.zeros(1, dtype=torch.long),
+        _apply_push=lambda: None, _encoder_position=lambda q: q, _targets=None, _action_latch=None)
     namespace['_pre_physics_step'](env, torch.ones(1, 6))
     namespace['_pre_physics_step'](env, torch.full((1, 6), 2.))
     assert arrivals[0].eq(0).all() and arrivals[1].eq(1).all()

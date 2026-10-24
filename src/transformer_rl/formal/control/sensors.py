@@ -21,6 +21,9 @@ class SensorModelConfig:
     wheel_velocity_halfwidth_rad_s: float = 1.
     gyro_halfwidth_rad_s: float = .25
     gravity_halfwidth: float = .05
+    # SCUT draws one delay for the whole observation; False keeps four
+    # independent group lags (position, velocity, gyro, gravity).
+    shared_delay: bool = False
 
     def __post_init__(self):
         if (self.physics_dt_s not in (.005, .001) or self.policy_dt_s not in (.01, .02)
@@ -36,6 +39,8 @@ class SensorModelConfig:
                                     'wheel_velocity_halfwidth_rad_s', 'gyro_halfwidth_rad_s',
                                     'gravity_halfwidth'))):
             raise ValueError('sensor model requires physical-unit noise and past-only physical-grid delays')
+        if type(self.shared_delay) is not bool:
+            raise ValueError('shared_delay must be an explicit bool')
         object.__setattr__(self, 'observation_delays_s', tuple(self.observation_delays_s))
 
 
@@ -104,6 +109,8 @@ class SensorModel:
         extra = torch.rand(rows.numel(), generator=self.reset_generator, device=self.device)
         choices = torch.randint(len(self.delay_choices), (rows.numel(), 4),
                                 generator=self.reset_generator, device=self.device)
+        if self.config.shared_delay:
+            choices[:] = choices[:, :1]
         self.nominal[rows] = nominal < self.config.nominal_episode_fraction
         enabled = ~self.nominal[rows] & (extra < self.config.extra_delay_probability)
         self.lags[rows] = (self.delay_choices[choices] * enabled[:, None] * difficulty).round().long()

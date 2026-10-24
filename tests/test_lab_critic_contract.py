@@ -56,6 +56,7 @@ def critic_env(count=3):
     env._last_joint_acceleration = torch.full((count, 6), 3.)
     env._last_policy_velocity = env._last_state.policy_velocity_rad_s - .02
     env._action_transport = SimpleNamespace(critic_steps=lambda: torch.ones(count, 2))
+    env._episode_randomization = None
     env._startup_dynamics = SimpleNamespace(mass_scale=torch.ones(count, 1),
                                             base_com_delta_local_m=torch.full((count, 3), .01))
     env._control = SimpleNamespace(controller=SimpleNamespace(nominal=assembler._nominal + .02))

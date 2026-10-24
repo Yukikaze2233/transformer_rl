@@ -35,13 +35,46 @@ class CommunicationConfig:
         return cls(**value)
 
 
+_LEGACY_EPISODE_FIELDS = frozenset({'enabled', 'full_at_update', 'spring_force_scale'})
+
+
+def _scale_bounds(value, *, maximum=None):
+    return (isinstance(value, (tuple, list)) and len(value) == 2
+            and all(type(v) in (int, float) and math.isfinite(v) for v in value)
+            and 0 < value[0] <= value[1] and (maximum is None or value[1] <= maximum))
+
+
 @dataclass(frozen=True)
 class EpisodeRandomizationConfig:
-    """Expand reset-local noise/lag/pressure; startup mass and materials stay fixed."""
+    """Reset-local actuator, encoder, spring and push randomization.
+
+    Startup mass and materials stay fixed. Each draw is blended toward its
+    nominal value by the shared exposure scale. Strength is a torque-gain
+    derating (<= 1) of command and cap; the encoder bias b is added to the
+    measured leg angles used by the actor and the PD loop (rad), so the
+    physical pose settles at target - b, as a mis-zeroed encoder would; the
+    no-load scale multiplies the motor back-EMF speed (battery voltage); the
+    time-constant scale multiplies the identified leg drive lag; pushes add
+    a world-frame horizontal velocity and yaw-rate step every interval.
+    Defaults disable every term added after the spring scale.
+    """
 
     enabled: bool = False
     full_at_update: int = 5000
     spring_force_scale: tuple[float, float] = (.9, 1.1)
+    leg_strength: tuple[float, float] = (1., 1.)
+    wheel_strength: tuple[float, float] = (1., 1.)
+    leg_encoder_bias_rad: float = 0.
+    no_load_speed_scale: tuple[float, float] = (1., 1.)
+    leg_time_constant_scale: tuple[float, float] = (1., 1.)
+    push_interval_s: tuple[float, float] = (5., 10.)
+    push_linear_m_s: float = 0.
+    push_yaw_rad_s: float = 0.
+    # SCUT base_external_force_torque_xyz: per-axis base-frame force (N) and
+    # torque (N·m), redrawn every interval and held between draws.
+    wrench_interval_s: tuple[float, float] = (5., 10.)
+    external_force_n: float = 0.
+    external_torque_nm: float = 0.
 
     def __post_init__(self):
         bounds = self.spring_force_scale
@@ -51,11 +84,23 @@ class EpisodeRandomizationConfig:
                 or any(type(v) not in (int, float) or not math.isfinite(v) for v in bounds)
                 or not 0 < bounds[0] <= 1 <= bounds[1]):
             raise ValueError('episode randomization needs an exposure horizon and positive force bounds')
-        object.__setattr__(self, 'spring_force_scale', tuple(bounds))
+        if (not _scale_bounds(self.leg_strength, maximum=1) or not _scale_bounds(self.wheel_strength, maximum=1)
+                or not _scale_bounds(self.no_load_speed_scale) or not _scale_bounds(self.leg_time_constant_scale)
+                or not _scale_bounds(self.push_interval_s) or not _scale_bounds(self.wrench_interval_s)
+                or any(type(getattr(self, name)) not in (int, float) or not math.isfinite(getattr(self, name))
+                       or getattr(self, name) < 0
+                       for name in ('leg_encoder_bias_rad', 'push_linear_m_s', 'push_yaw_rad_s',
+                                    'external_force_n', 'external_torque_nm'))
+                or self.leg_encoder_bias_rad > .1):
+            raise ValueError('actuator/encoder/push randomization bounds are invalid')
+        for name in ('spring_force_scale', 'leg_strength', 'wheel_strength', 'no_load_speed_scale',
+                     'leg_time_constant_scale', 'push_interval_s', 'wrench_interval_s'):
+            object.__setattr__(self, name, tuple(float(v) for v in getattr(self, name)))
 
     @classmethod
     def from_dict(cls, value):
-        if not isinstance(value, dict) or set(value) != set(asdict(cls())):
+        # Frozen pre-actuator runtimes contain only the legacy fields.
+        if (not isinstance(value, dict) or not _LEGACY_EPISODE_FIELDS <= set(value) <= set(asdict(cls()))):
             raise ValueError('episode randomization requires its complete frozen configuration')
         return cls(**value)
 
@@ -194,14 +239,36 @@ class PhysicalCommunication:
 
 
 class EpisodeRandomization:
-    """Reset-local spring scaling shares exposure, but owns its independent RNG."""
+    """Reset-local randomization shares exposure, but owns its independent RNG."""
 
     def __init__(self, num_envs, config, *, seed, device='cpu'):
         self.config, self.device = config, torch.device(device)
         self.generator = torch.Generator(device=self.device).manual_seed(seed)
         self.strength = torch.ones(num_envs, 1, device=self.device)
         self.scale = torch.ones(num_envs, device=self.device)
+        self.motor_strength = torch.ones(num_envs, 6, device=self.device)
+        self.encoder_bias_rad = torch.zeros(num_envs, 6, device=self.device)
+        self.no_load_scale = torch.ones(num_envs, 6, device=self.device)
+        self.time_constant_scale = torch.ones(num_envs, 6, device=self.device)
+        self.push_timer_s = torch.full((num_envs,), float('inf'), device=self.device)
+        self.wrench_timer_s = torch.full((num_envs,), float('inf'), device=self.device)
+        self.base_wrench = torch.zeros(num_envs, 6, device=self.device)
         self.reset_rows_consumed = 0
+
+    def _blend(self, bounds, count, width, scale):
+        low, high = bounds
+        unit = torch.rand(count, width, device=self.device, generator=self.generator)
+        return 1 + scale * (low + (high - low) * unit - 1)
+
+    def _interval(self, count, bounds=None):
+        low, high = self.config.push_interval_s if bounds is None else bounds
+        return low + (high - low) * torch.rand(count, device=self.device, generator=self.generator)
+
+    def _wrench(self, rows):
+        unit = torch.rand(len(rows), 6, device=self.device, generator=self.generator) * 2 - 1
+        limit = unit.new_tensor([self.config.external_force_n] * 3 + [self.config.external_torque_nm] * 3)
+        self.base_wrench[rows] = unit * limit * self.scale[rows, None]
+        self.wrench_timer_s[rows] = self._interval(len(rows), self.config.wrench_interval_s)
 
     def reset(self, mask, update):
         rows = mask.nonzero().flatten()
@@ -210,8 +277,40 @@ class EpisodeRandomization:
         low, high = self.config.spring_force_scale
         self.strength[rows] = 1 + scale * (low + (high - low) * unit - 1)
         self.scale[rows] = scale
+        c, count = self.config, len(rows)
+        # Spring draws come first so legacy configurations keep their stream.
+        self.motor_strength[rows] = torch.cat((self._blend(c.leg_strength, count, 1, scale).expand(-1, 4),
+                                               self._blend(c.wheel_strength, count, 1, scale).expand(-1, 2)), -1)
+        bias = (torch.rand(count, 4, device=self.device, generator=self.generator) * 2 - 1) * c.leg_encoder_bias_rad
+        self.encoder_bias_rad[rows] = torch.cat((scale * bias, torch.zeros(count, 2, device=self.device)), -1)
+        self.no_load_scale[rows] = self._blend(c.no_load_speed_scale, count, 1, scale).expand(-1, 6)
+        self.time_constant_scale[rows] = torch.cat((self._blend(c.leg_time_constant_scale, count, 1, scale)
+                                                    .expand(-1, 4), torch.ones(count, 2, device=self.device)), -1)
+        self.push_timer_s[rows] = self._interval(count) if (c.push_linear_m_s or c.push_yaw_rad_s) else float('inf')
+        self.base_wrench[rows] = 0
+        self.wrench_timer_s[rows] = (self._interval(count, c.wrench_interval_s)
+                                     if (c.external_force_n or c.external_torque_nm) else float('inf'))
         self.reset_rows_consumed += len(rows)
         return scale
+
+    def advance_wrench(self, dt_s):
+        """Redraw due base wrenches; returns the held [N,6] base-frame force/torque."""
+        self.wrench_timer_s.sub_(dt_s)
+        rows = (self.wrench_timer_s <= 0).nonzero().flatten()
+        if rows.numel():
+            self._wrench(rows)
+        return self.base_wrench
+
+    def push(self, dt_s, eligible):
+        """Rows due for a push and their world [vx, vy, wz] velocity steps."""
+        self.push_timer_s.sub_(dt_s)
+        due = (self.push_timer_s <= 0) & eligible
+        rows = due.nonzero().flatten()
+        delta = (torch.rand(len(rows), 3, device=self.device, generator=self.generator) * 2 - 1)
+        delta *= delta.new_tensor((self.config.push_linear_m_s, self.config.push_linear_m_s,
+                                   self.config.push_yaw_rad_s)) * self.scale[rows, None]
+        self.push_timer_s[rows] = self._interval(len(rows))
+        return rows, delta
 
     def state_dict(self):
         return {'configuration': asdict(self.config), 'rng': self.generator.get_state().clone(),
@@ -226,3 +325,10 @@ class EpisodeRandomization:
         self.reset_rows_consumed = state['reset_rows_consumed']
         self.strength.fill_(1)
         self.scale.zero_()
+        self.motor_strength.fill_(1)
+        self.encoder_bias_rad.zero_()
+        self.no_load_scale.fill_(1)
+        self.time_constant_scale.fill_(1)
+        self.push_timer_s.fill_(float('inf'))
+        self.wrench_timer_s.fill_(float('inf'))
+        self.base_wrench.zero_()

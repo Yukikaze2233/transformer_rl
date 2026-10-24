@@ -179,3 +179,86 @@ class DelayedActionTransport:
         self._stamp_history.zero_()
         self.arrived_generated_at_s.zero_()
         self.index = 0
+
+
+@dataclass(frozen=True)
+class ActionLatchConfig:
+    """Controller target latch delay in whole physics substeps (5 ms each).
+
+    SCUT holds the previous action for randint(1, 3) physics steps (5-10 ms);
+    measured command-to-drive-report latency here is about 2-3 ms and one
+    executor miss about 10 ms. ``nominal_fraction`` is the zero-delay probability.
+    """
+
+    enabled: bool = False
+    delay_substeps: tuple[int, ...] = (1, 2)
+    nominal_fraction: float = 0.
+
+    def __post_init__(self):
+        if (type(self.enabled) is not bool or not isinstance(self.delay_substeps, (tuple, list))
+                or not self.delay_substeps or len(set(self.delay_substeps)) != len(self.delay_substeps)
+                or any(type(value) is not int or not 0 <= value <= 3 for value in self.delay_substeps)
+                or type(self.nominal_fraction) not in (int, float) or not math.isfinite(self.nominal_fraction)
+                or not 0 <= self.nominal_fraction <= 1):
+            raise ValueError('action latch requires 0..3 substep delays inside one 4-substep interval')
+        object.__setattr__(self, 'delay_substeps', tuple(self.delay_substeps))
+
+    @classmethod
+    def from_dict(cls, value):
+        if not isinstance(value, dict) or set(value) != {'enabled', 'delay_substeps', 'nominal_fraction'}:
+            raise ValueError('action latch configuration fields differ')
+        return cls(**value)
+
+
+class SubstepActionLatch:
+    """Per-row latch lag drawn at reset; rows without a held target never lag."""
+
+    def __init__(self, num_envs, config, *, seed, device='cpu'):
+        if (type(num_envs) is not int or num_envs < 1 or not isinstance(config, ActionLatchConfig)
+                or type(seed) is not int or not 0 <= seed < 2**63):
+            raise ValueError('action latch requires explicit batch, config and seed')
+        self.num_envs, self.config, self.device = num_envs, config, torch.device(device)
+        self.generator = torch.Generator(device=self.device).manual_seed(seed)
+        self.choices = torch.tensor(config.delay_substeps, dtype=torch.long, device=self.device)
+        self.lags = torch.zeros(num_envs, dtype=torch.long, device=self.device)
+        # A held target exists only after one complete policy-owned interval.
+        self.held = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
+        self.reset_rows_consumed = 0
+
+    @torch.no_grad()
+    def reset(self, mask, *, difficulty=1.):
+        if type(difficulty) not in (int, float) or not math.isfinite(difficulty) or not 0 <= difficulty <= 1:
+            raise ValueError('action latch difficulty must be a finite [0,1] scale')
+        rows = mask.nonzero().flatten()
+        self.held[rows] = False
+        if not rows.numel():
+            return
+        choice = self.choices[torch.randint(len(self.choices), (rows.numel(),),
+                                            generator=self.generator, device=self.device)]
+        nominal = torch.rand(rows.numel(), generator=self.generator, device=self.device) < self.config.nominal_fraction
+        lags = torch.where(nominal, 0, choice) if self.config.enabled else torch.zeros_like(choice)
+        self.lags[rows] = (lags.double() * difficulty).round().long()
+        self.reset_rows_consumed += rows.numel()
+
+    def use_previous(self, substep):
+        """Rows still applying the previous target during this substep."""
+        return self.held & (substep < self.lags)
+
+    def critic_steps(self):
+        value = self.lags.to(torch.float32)
+        return torch.stack((value, value), -1)
+
+    def state_dict(self):
+        return {'format': 'lab_action_latch_v1', 'configuration': asdict(self.config),
+                'rng': self.generator.get_state().clone(), 'reset_rows_consumed': self.reset_rows_consumed}
+
+    def restore_after_physical_reset(self, state):
+        if (not isinstance(state, dict) or set(state) != {'format', 'configuration', 'rng', 'reset_rows_consumed'}
+                or state['format'] != 'lab_action_latch_v1' or state['configuration'] != asdict(self.config)
+                or type(state['reset_rows_consumed']) is not int or state['reset_rows_consumed'] < 0):
+            raise ValueError('action latch checkpoint contract differs')
+        generator = torch.Generator(device=self.device)
+        generator.set_state(state['rng'].cpu())
+        self.generator, self.reset_rows_consumed = generator, state['reset_rows_consumed']
+        self.lags.zero_()
+        self.held.zero_()

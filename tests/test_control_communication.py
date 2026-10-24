@@ -206,7 +206,9 @@ def test_native_control_hook_applies_delayed_feedback_then_exact_response_once()
             set_joint_effort_target=lambda value: applied.append(value.clone())),
         _clock=lambda: now, _policy_generated_at_s=now,
         _control=SimpleNamespace(controller=controller, drive=drive),
-        _spring_force=None, num_envs=1, _device=torch.device('cpu'), _last_effort=torch.zeros(1, 6))
+        _spring_force=None, num_envs=1, _device=torch.device('cpu'), _last_effort=torch.zeros(1, 6),
+        _action_latch=None, _encoder_position=lambda q: q, _episode_randomization=None, _motor_envelope=None,
+        _substep=0)
     namespace['_apply_action'](env)
     assert len(applied) == 1 and applied[0][:, 6:].eq(0).all()
     # Uplink2ms -> q=.12,dq=.6 -> requested leg torque=-20.7Nm.

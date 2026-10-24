@@ -1,12 +1,71 @@
 {
   "communication": {
     "enabled": true,
-    "total_delay_range_s": [0.0001, 0.005],
-    "uplink_fraction": 0.5
+    "total_delay_range_s": [
+      0.0001,
+      0.002
+    ],
+    "uplink_fraction": 1.0
   },
   "episode_randomization": {
     "enabled": true,
     "full_at_update": 5000,
-    "spring_force_scale": [0.9, 1.1]
+    "spring_force_scale": [
+      0.9,
+      1.1
+    ],
+    "leg_strength": [
+      0.8,
+      1.0
+    ],
+    "wheel_strength": [
+      0.9,
+      1.0
+    ],
+    "leg_encoder_bias_rad": 0.035,
+    "no_load_speed_scale": [
+      0.92,
+      1.05
+    ],
+    "leg_time_constant_scale": [
+      1.0,
+      2.5
+    ],
+    "push_interval_s": [
+      5.0,
+      10.0
+    ],
+    "push_linear_m_s": 0.25,
+    "push_yaw_rad_s": 0.0,
+    "wrench_interval_s": [
+      5.0,
+      10.0
+    ],
+    "external_force_n": 10.0,
+    "external_torque_nm": 1.0
+  },
+  "action_latch": {
+    "enabled": true,
+    "delay_substeps": [
+      1,
+      2
+    ],
+    "nominal_fraction": 0.0
+  },
+  "motor_envelope": {
+    "enabled": true
+  },
+  "command_pool": {
+    "enabled": true
+  },
+  "sensors": {
+    "nominal_episode_fraction": 0.0,
+    "extra_delay_probability": 1.0,
+    "observation_delays_s": [
+      0.005,
+      0.01,
+      0.015
+    ],
+    "shared_delay": true
   }
 }

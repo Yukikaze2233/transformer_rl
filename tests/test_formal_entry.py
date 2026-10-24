@@ -52,13 +52,20 @@ def test_formal_plan_rejects_non_35k_or_unlisted_seed():
 
 
 def test_timing_preset_is_explicit_complete_and_does_not_mutate_input(tmp_path):
+    from dataclasses import asdict
+    from transformer_rl.formal.control.sensors import SensorModelConfig
+
     path = SETTINGS.parent / 'control_timing.json'
-    runtime = {'format': 'managed_lab_runtime_v4', 'sensors': {'example': True}}
+    sensors = asdict(SensorModelConfig(policy_dt_s=.02))
+    runtime = {'format': 'managed_lab_runtime_v4', 'sensors': dict(sensors)}
     assert _with_control_timing(runtime, None) == runtime
     value = _with_control_timing(runtime, path)
-    assert value['communication']['total_delay_range_s'] == [.0001, .005]
+    assert value['communication']['total_delay_range_s'] == [.0001, .002]
     assert value['episode_randomization']['full_at_update'] == 5000
-    assert 'communication' not in runtime and runtime['sensors'] == {'example': True}
+    # SCUT: one shared 5-15 ms observation lag in every episode; runtime clocks are kept.
+    assert value['sensors']['shared_delay'] is True and value['sensors']['policy_dt_s'] == .02
+    assert value['action_latch']['delay_substeps'] == [1, 2]
+    assert 'communication' not in runtime and runtime['sensors'] == sensors
     bad = tmp_path / 'partial.json'
     bad.write_text(json.dumps({'communication': {'enabled': True}}))
     with pytest.raises(ValueError, match='preset'):

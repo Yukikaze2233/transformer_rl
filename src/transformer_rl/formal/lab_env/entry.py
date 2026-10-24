@@ -33,8 +33,12 @@ from ..tasks.curriculum import (
     COMPLETE_STAGE_BUDGETS, COMPLETE_STAGE_NAMES, COMPLETE_STAGE_WEIGHTS,
     STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS, ContinuousTaskSampler, RotationMode, TaskFamily,
 )
-from .action_transport import ActionTransportConfig
+from .action_transport import ActionLatchConfig, ActionTransportConfig
+from .materials import WheelMaterialConfig
+from ..control.actuation import MotorEnvelope
 from ..control.communication import CommunicationConfig, EpisodeRandomizationConfig
+from ..control.sensors import SensorModelConfig
+from ..tasks.command_pool import CommandContext, CommandPool, CommandPoolConfig, SegmentKind
 from .prepare import prepare_session
 from .settings import load_asset_description
 
@@ -60,14 +64,16 @@ def _parser():
     parser.add_argument('--run-id')
     parser.add_argument('--python', type=Path, default=Path(sys.executable),
                         help='Worker interpreter; use the exact Isaac Lab environment validated by preflight')
-    parser.add_argument('--action-delay-steps', type=_delay_steps, default=(0, 1),
-                        help='Whole policy-step transport delays; at 50Hz 0,1 means 0 or 20ms')
+    parser.add_argument('--action-delay-steps', type=_delay_steps,
+                        help='Opt-in whole policy-step transport delays (20 ms each at 50 Hz); '
+                             'the substep action latch of the control preset is the default path')
     parser.add_argument('--action-delay-nominal-fraction', type=float, default=.5,
                         help='Fraction of reset episodes forced to zero transport delay')
     parser.add_argument('--no-action-transport', action='store_true',
                         help='Do not override/replace an existing action_transport field')
     parser.add_argument('--control-timing-json', type=Path,
-                        help='Freeze an explicit communication and reset-local randomization preset')
+                        help='Freeze an explicit control/sim2real preset (communication, randomization, '
+                             'action latch, motor envelope, command pool, sensors, wheel material)')
     parser.add_argument('--start', action='store_true',
                         help='Start the worker after creating and validating the session')
     parser.add_argument('--paused', action='store_true',
@@ -79,7 +85,7 @@ def _with_transport(runtime, args):
     if not isinstance(runtime, dict):
         raise ValueError('runtime JSON must be an object')
     value = dict(runtime)
-    if args.no_action_transport:
+    if args.no_action_transport or args.action_delay_steps is None:
         raw = value.get('action_transport')
         if raw is not None:
             ActionTransportConfig.from_dict(raw)
@@ -95,17 +101,60 @@ def _with_transport(runtime, args):
     return value
 
 
+_PRESET_REQUIRED = {'communication': CommunicationConfig, 'episode_randomization': EpisodeRandomizationConfig}
+_PRESET_OPTIONAL = {'action_latch': ActionLatchConfig, 'motor_envelope': MotorEnvelope,
+                    'command_pool': CommandPoolConfig, 'wheel_material': WheelMaterialConfig}
+
+
 def _with_control_timing(runtime, path):
+    """Merge a reviewed preset; every section is parsed by its own contract."""
     value = dict(runtime)
     if path is None:
         return value
     preset = read_json(path)
-    if not isinstance(preset, dict) or set(preset) != {'communication', 'episode_randomization'}:
-        raise ValueError('control timing preset must bind communication and episode randomization')
-    CommunicationConfig.from_dict(preset['communication'])
-    EpisodeRandomizationConfig.from_dict(preset['episode_randomization'])
+    allowed = set(_PRESET_REQUIRED) | set(_PRESET_OPTIONAL) | {'sensors'}
+    if not isinstance(preset, dict) or not set(_PRESET_REQUIRED) <= set(preset) <= allowed:
+        raise ValueError('control preset must bind communication and episode randomization')
+    for name, parser in {**_PRESET_REQUIRED, **_PRESET_OPTIONAL}.items():
+        if name in preset:
+            parser.from_dict(preset[name])
+    if 'sensors' in preset:
+        # Sensor overrides keep the runtime's clock fields and are re-parsed whole.
+        if not isinstance(preset['sensors'], dict) or not isinstance(value.get('sensors'), dict):
+            raise ValueError('sensor override requires a runtime sensor block')
+        preset = {**preset, 'sensors': {**value['sensors'], **preset['sensors']}}
+        SensorModelConfig(**preset['sensors'])
+    if 'action_latch' in preset and preset['action_latch'].get('enabled'):
+        # The substep latch replaces whole policy-step transport.
+        value['action_transport'] = {'enabled': False, 'delays_steps': [0], 'nominal_fraction': 1.0}
     value.update(preset)
     return value
+
+
+def _command_pool_report(settings, *, seed, sample_count=20000):
+    """CPU coverage of the within-episode command pool at full exposure."""
+    pool = CommandPool()
+    generator = torch.Generator().manual_seed(seed)
+    count = sample_count
+    families = torch.full((count,), int(TaskFamily.MOTION))
+    draw = pool.sample(families, torch.zeros(count, dtype=torch.long), torch.full((count,), 10.),
+                       torch.ones(count), CommandContext(settings.domain, 35000), generator)
+    shares = (torch.bincount(draw.kind, minlength=len(SegmentKind)).float() / count).tolist()
+    kinds = {kind.name.lower(): draw.command[draw.kind == kind] for kind in SegmentKind}
+    checks = {
+        'all_modes_present': all(share > 0 for share in shares),
+        'forward_both_directions': bool((kinds['normal'][:, 0] > 2.).any() and (kinds['normal'][:, 0] < -2.).any()),
+        'normal_yaw_within_2pi': bool(kinds['normal'][:, 2].abs().max() <= 2 * torch.pi + 1e-6),
+        'spin_mid_reaches_domain': bool(kinds['spin_mid'][:, 2].abs().max() >= .95 * min(
+            4.5 * torch.pi, -settings.domain.yaw_rad_s[0], settings.domain.yaw_rad_s[1])),
+        'dash_forward_band': bool((kinds['dash'][:, 0].abs() >= 2. - 1e-6).all()),
+        'heights_cover_domain': bool(draw.command[:, 3].min() <= settings.domain.height_m[0] + .01
+                                     and draw.command[:, 3].max() >= settings.domain.height_m[1] - .01),
+        'heading_share': bool(.4 < draw.heading_enabled[draw.kind == SegmentKind.NORMAL].float().mean() < .6),
+    }
+    if not all(checks.values()):
+        raise ValueError('command pool coverage failed: ' + ', '.join(k for k, v in checks.items() if not v))
+    return {'shares': dict(zip((kind.name.lower() for kind in SegmentKind), shares)), 'checks': checks}
 
 
 def _validate_plan(settings, seed):
@@ -196,8 +245,10 @@ def _curriculum_report(settings, *, seed, sample_count=12000):
         'declared_yaw_abs_max': float(6 * torch.pi),
         'covered_yaw_abs_max': float(rotation[:, 2].abs().max()),
         'checks': checks,
-        'notice': 'declared yaw is +/-6pi; normal +/-2pi, spin low 2pi-3.25pi, spin mid 3.25pi-6pi',
+        'notice': ('birth draws only; spin/dash births stand first and the within-episode '
+                   'command pool owns special modes'),
     }
+    report['command_pool'] = _command_pool_report(settings, seed=seed)
     return report
 
 

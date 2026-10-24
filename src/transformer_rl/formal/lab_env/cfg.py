@@ -302,6 +302,7 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 4096,
                   communication: CommunicationConfig | None = None,
                   episode_randomization: EpisodeRandomizationConfig | None = None,
                   wheel_material: WheelMaterialConfig | None = None,
+                  action_latch=None, motor_envelope=None, command_pool=None,
                   recover: RecoverTaskSpec | None = None,
                   height_scanner: bool = False,
                   terrain_scan: bool = False,
@@ -349,6 +350,10 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 4096,
     object.__setattr__(cfg, 'communication_spec', communication)
     object.__setattr__(cfg, 'episode_randomization_spec', episode_randomization)
     object.__setattr__(cfg, 'wheel_material_spec', wheel_material)
+    # Optional locomotion contracts; None keeps the frozen pre-rework behavior.
+    object.__setattr__(cfg, 'action_latch_spec', action_latch)
+    object.__setattr__(cfg, 'motor_envelope_spec', motor_envelope)
+    object.__setattr__(cfg, 'command_pool_spec', command_pool)
     object.__setattr__(cfg, "recover_spec", recover)
     object.__setattr__(cfg, "course_manifest", terrain_atlas_manifest)
     object.__setattr__(cfg, 'static_plane_height_m', 0. if terrain_profile == 'plane' else None)

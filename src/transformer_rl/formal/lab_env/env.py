@@ -47,10 +47,20 @@ from .settings import LabEnvSettings, load_asset_description
 from .terrain_collision import partition_static_collision
 from .dynamics import LabStartupDynamics
 from .sensors import LabSensorModel
-from .action_transport import DelayedActionTransport
+from .action_transport import DelayedActionTransport, SubstepActionLatch
 from ..control.communication import EpisodeRandomization, PhysicalCommunication
 from .joint_coordinates import ContinuousJointCoordinates
 from .mechanics import NativeLoopTelemetry
+
+
+def _select_targets(mask, held, current):
+    """Row-wise choice between two decoded target packets of the same layout."""
+    values = []
+    for name in ('issued_action', 'raw_leg_position_rad', 'admitted_leg_position_rad', 'wheel_velocity_rad_s',
+                 'pair_projected', 'common_turns', 'controller_issued_at_s', 'control_source'):
+        a, b = getattr(held, name), getattr(current, name)
+        values.append(torch.where(mask.view(-1, *([1] * (b.ndim - 1))), a, b))
+    return type(current)(*values)
 
 
 class WheeledLabEnv(DirectRLEnv):
@@ -202,6 +212,15 @@ class WheeledLabEnv(DirectRLEnv):
         self._action_transport = (None if transport_configuration is None else DelayedActionTransport(
             self.num_envs, ACTION_DIM, transport_configuration,
             seed=int(getattr(cfg, 'seed', 0) or 0) + 32452843, device=self._device))
+        latch_configuration = getattr(cfg, 'action_latch_spec', None)
+        self._action_latch = (None if latch_configuration is None or not latch_configuration.enabled
+            else SubstepActionLatch(self.num_envs, latch_configuration,
+                                    seed=int(getattr(cfg, 'seed', 0) or 0) + 15485863, device=self._device))
+        self._latch_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
+        self._held_targets = None
+        self._held_generated_at_s = torch.zeros(self.num_envs, dtype=torch.float64, device=self._device)
+        self._substep = 0
+        self._motor_envelope = getattr(cfg, 'motor_envelope_spec', None)
         formal_config = getattr(cfg, "formal_reward_spec", None)
         self._formal_reward = None
         self._boundary_geometry = None
@@ -683,8 +702,12 @@ class WheeledLabEnv(DirectRLEnv):
             previous_actions=self._critic_action_history.older_actions(),
             joint_acceleration_rad_s2=joint_acceleration,
             com_offset_body_m=com_offset,
-            nominal_pose_delta_rad=(self._control.controller.nominal - self._observations.assembler._nominal
-                                    )[None].expand(self.num_envs, -1),
+            # Encoder zero offset of each output axis (privileged), plus any
+            # controller/observation nominal mismatch.
+            nominal_pose_delta_rad=((self._control.controller.nominal - self._observations.assembler._nominal
+                                     )[None].expand(self.num_envs, -1)
+                                    + (0 if self._episode_randomization is None
+                                       else self._episode_randomization.encoder_bias_rad)),
         )
 
     def _capture_terminal(self):
@@ -831,9 +854,14 @@ class WheeledLabEnv(DirectRLEnv):
                 or actions.shape != (self.num_envs, action_width)
                 or actions.device != self._device or not torch.isfinite(actions).all()):
             raise ValueError(f"actions 需要有限 [N,{action_width}] 张量")
+        self._apply_push()
         self._before_action.copy_(self._previous_action)
         self._issued_action.copy_(actions.clamp(-self._action_bounds, self._action_bounds))
-        q = self._joint_positions().index_select(1, self._active_indices)
+        self._held_targets = self._targets
+        self._held_generated_at_s = (self._policy_generated_at_s.clone()
+                                     if isinstance(getattr(self, '_policy_generated_at_s', None), torch.Tensor)
+                                     else self._clock().clone())
+        q = self._encoder_position(self._joint_positions().index_select(1, self._active_indices))
         communication = getattr(self, '_communication', None)
         if communication is not None:
             q, _, _ = communication.feedback(self._clock())
@@ -886,23 +914,40 @@ class WheeledLabEnv(DirectRLEnv):
         if communication is not None:
             communication.begin_interval(transport_owned &
                 (self._targets.control_source == int(ControlSource.POLICY)), self._clock())
+        if self._action_latch is not None:
+            # Lag only between two consecutive policy-owned targets; resets,
+            # scripts and handoffs latch their first target immediately.
+            owned = self._targets.control_source == int(ControlSource.POLICY)
+            self._latch_active = self._action_latch.held & owned
+            self._action_latch.held.copy_(owned)
+        self._substep = 0
 
     def _apply_action(self) -> None:
         if self._targets is None:
             raise RuntimeError("必须先由 _pre_physics_step 生成输出目标")
-        q = self._joint_positions().index_select(1, self._active_indices)
+        targets, generated_at = self._targets, self._policy_generated_at_s
+        if self._action_latch is not None and self._held_targets is not None:
+            lagging = self._latch_active & (self._substep < self._action_latch.lags)
+            targets = _select_targets(lagging, self._held_targets, self._targets)
+            generated_at = torch.where(lagging, self._held_generated_at_s, self._policy_generated_at_s)
+        self._substep += 1
+        q = self._encoder_position(self._joint_positions().index_select(1, self._active_indices))
         dq = self._as_torch(self.robot.data.joint_vel).index_select(1, self._active_indices)
+        shaft_velocity = dq
         now = self._clock()
         communication = getattr(self, '_communication', None)
         if communication is not None:
             q, dq, feedback_sample_s = communication.feedback(now)
-        feedback = self._control.controller.effort(self._targets, q, dq, now)
+        randomization = self._episode_randomization
+        feedback = self._control.controller.effort(
+            targets, q, dq, now, strength=None if randomization is None else randomization.motor_strength,
+            envelope=self._motor_envelope, motor_velocity_rad_s=shaft_velocity,
+            no_load_scale=None if randomization is None else randomization.no_load_scale)
         if communication is not None:
-            generated = torch.where(self._targets.control_source == int(ControlSource.POLICY),
-                                    self._policy_generated_at_s, now)
+            generated = torch.where(targets.control_source == int(ControlSource.POLICY), generated_at, now)
             effort = communication.deliver(feedback.capped_effort, feedback.effort_bounds,
                 now, generated, feedback_sample_s, response=self._control.drive,
-                target_arrived_at_s=self._targets.controller_issued_at_s)
+                target_arrived_at_s=targets.controller_issued_at_s)
         elif self._control.drive is not None:
             effort = self._control.drive.advance(
                 feedback.capped_effort, self._physics_dt_tensor, feedback.effort_bounds,
@@ -924,6 +969,13 @@ class WheeledLabEnv(DirectRLEnv):
                 torques=frame.torques_about_com_world.contiguous(),
                 body_ids=list(self._spring_force.body_ids), is_global=True,
             )
+        randomization = self._episode_randomization
+        if randomization is not None and (randomization.config.external_force_n
+                                          or randomization.config.external_torque_nm):
+            wrench = randomization.advance_wrench(float(self.physics_dt))
+            self.robot.instantaneous_wrench_composer.add_forces_and_torques_index(
+                forces=wrench[:, None, :3].contiguous(), torques=wrench[:, None, 3:].contiguous(),
+                body_ids=[self._base_body_index], is_global=False)
         command = torch.zeros(self.num_envs, 18, dtype=torch.float32, device=self._device)
         command.index_copy_(1, self._active_indices, effort)
         self.robot.set_joint_effort_target(command)
@@ -1004,10 +1056,11 @@ class WheeledLabEnv(DirectRLEnv):
                 self._as_torch(self.robot.data.joint_vel))
         sample = self._sample()
         state = self._observations.assembler.measure(sample)
+        encoder = self._encoder_state(state)
         if self._communication is not None:
-            self._communication.push(state.policy_position_rad, state.policy_velocity_rad_s)
+            self._communication.push(encoder.policy_position_rad, encoder.policy_velocity_rad_s)
         if self._sensor_model is not None:
-            self._sensor_model.push(state, self._physical_tick)
+            self._sensor_model.push(encoder, self._physical_tick)
         boundary = None
         mount, pressure = self._observe_spring_state()
         if self._failure_latch is not None:
@@ -1409,14 +1462,6 @@ class WheeledLabEnv(DirectRLEnv):
         if self._recover_task is not None and recover_plan is not None:
             self._recover_initial_leg[ids] = joint_position[
                 :, self._active_indices[:4]]
-        q = self._joint_positions().index_select(1, self._active_indices)
-        self._targets = self._control.decode(
-            torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32, device=self._device),
-            q, self._clock(),
-        )
-        if self._recovery_preparation is not None:
-            self._recovery_preparation.reset_rows(
-                ids, q, self._base_command_mode == int(CommandMode.RECOVERY), self._clock())
         mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
         mask[ids] = True
         difficulty = 1.
@@ -1424,23 +1469,40 @@ class WheeledLabEnv(DirectRLEnv):
             sampler = getattr(self, '_task_sampler', None)
             update = 0 if sampler is None else sampler.curriculum.budget.total_updates
             difficulty = self._episode_randomization.reset(mask, update)
+            if self._control.drive is not None:
+                self._control.drive.set_time_constant_scale(mask, self._episode_randomization.time_constant_scale)
+        # Controller and preparation work in encoder coordinates.
+        q = self._encoder_position(self._joint_positions().index_select(1, self._active_indices))
+        self._targets = self._control.decode(
+            torch.zeros(self.num_envs, ACTION_DIM, dtype=torch.float32, device=self._device),
+            q, self._clock(),
+        )
+        if self._recovery_preparation is not None:
+            self._recovery_preparation.reset_rows(
+                ids, q, self._base_command_mode == int(CommandMode.RECOVERY), self._clock())
         if self._communication is not None:
             dq = self._as_torch(self.robot.data.joint_vel).index_select(1, self._active_indices)
             self._communication.reset(mask, q, dq, self._clock(), difficulty=difficulty)
         if self._sensor_model is not None:
             self._sensor_model.reset(mask, self._clock(), difficulty=difficulty)
             current = self._observations.assembler.measure(self._sample())
-            self._sensor_model.seed_after_reset(mask, current)
+            self._sensor_model.seed_after_reset(mask, self._encoder_state(current))
         if self._action_transport is not None:
             self._action_transport.reset(mask, difficulty=difficulty)
+        if self._action_latch is not None:
+            self._action_latch.reset(mask, difficulty=difficulty)
+            self._latch_active[mask] = False
 
     def control_timing_state_dict(self):
-        if self._communication is None and self._episode_randomization is None:
+        if self._communication is None and self._episode_randomization is None and self._action_latch is None:
             return None
-        return {'format': 'lab_control_timing_v1',
-                'communication': (None if self._communication is None else self._communication.state_dict()),
-                'episode_randomization': (None if self._episode_randomization is None
-                    else self._episode_randomization.state_dict())}
+        state = {'format': 'lab_control_timing_v1',
+                 'communication': (None if self._communication is None else self._communication.state_dict()),
+                 'episode_randomization': (None if self._episode_randomization is None
+                     else self._episode_randomization.state_dict())}
+        if self._action_latch is not None:
+            state['action_latch'] = self._action_latch.state_dict()
+        return state
 
     def restore_control_timing(self, state):
         if self._physical_tick != 0:
@@ -1459,6 +1521,36 @@ class WheeledLabEnv(DirectRLEnv):
             self._communication.restore_after_physical_reset(state['communication'])
         if self._episode_randomization is not None:
             self._episode_randomization.restore_after_physical_reset(state['episode_randomization'])
+        if self._action_latch is not None:
+            self._action_latch.restore_after_physical_reset(state['action_latch'])
+
+    def _encoder_position(self, q):
+        """True output positions to encoder coordinates (randomized zero bias)."""
+        if self._episode_randomization is None:
+            return q
+        return q + self._episode_randomization.encoder_bias_rad
+
+    def _encoder_state(self, state):
+        if self._episode_randomization is None:
+            return state
+        return replace(state, policy_position_rad=self._encoder_position(state.policy_position_rad))
+
+    def _apply_push(self):
+        """World-frame velocity steps on ordinary policy-owned rows (SCUT push events)."""
+        randomization = self._episode_randomization
+        if randomization is None or not (randomization.config.push_linear_m_s or randomization.config.push_yaw_rad_s):
+            return
+        eligible = ((self._command_mode == int(CommandMode.NORMAL)) | (self._command_mode == int(CommandMode.SLOPE))
+                    | (self._command_mode == int(CommandMode.STAIR)))
+        if self._recovery_preparation is not None:
+            eligible &= ~self._recovery_preparation.active
+        rows, delta = randomization.push(self.step_dt, eligible)
+        if not rows.numel():
+            return
+        velocity = self._as_torch(self.robot.data.root_com_vel_w).index_select(0, rows).clone()
+        velocity[:, :2] += delta[:, :2]
+        velocity[:, 5] += delta[:, 2]
+        self.robot.write_root_com_velocity_to_sim_index(root_velocity=velocity, env_ids=rows)
 
     def control_timing_metrics(self):
         values = {} if self._communication is None else self._communication.metrics()

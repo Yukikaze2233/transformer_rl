@@ -87,6 +87,47 @@ class OutputTargets:
 
 
 @dataclass(frozen=True)
+class MotorEnvelope:
+    """Wheel torque-speed limit (SCUT M3508 curve form), N·m; legs unlimited.
+
+    tau_max(w) = clip(tau_sat (1 - w/w0), 0, cap), tau_min(w) = clip(tau_sat (-1 - w/w0), -cap, 0),
+    with w the wheel output speed in rad/s and w0 the no-load speed; braking
+    keeps the full cap. M3508 with the measured 15.62 reduction and 0.244 N·m/A
+    at the wheel: 24 V stall about 30.2 N·m and no-load about 62 rad/s; the C620
+    20 A limit (4.88 N·m) and the 4.5 N·m cap bind below about 53 rad/s. The
+    leg drives keep SCUT's ideal PD (no envelope); their curve is unidentified.
+    """
+
+    saturation_nm: tuple[float, float] = (30.2, 30.2)
+    no_load_rad_s: tuple[float, float] = (62., 62.)
+
+    def __post_init__(self):
+        for name in ('saturation_nm', 'no_load_rad_s'):
+            value = getattr(self, name)
+            if (not isinstance(value, (tuple, list)) or len(value) != 2
+                    or any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in value)):
+                raise ValueError('motor envelope requires two positive finite wheel values per field')
+            object.__setattr__(self, name, tuple(float(v) for v in value))
+
+    @classmethod
+    def from_dict(cls, value):
+        if not isinstance(value, dict) or set(value) != {'enabled'} or value['enabled'] is not True:
+            raise ValueError('motor envelope configuration is {"enabled": true}; constants are frozen in code')
+        return cls()
+
+    def limits(self, speed_rad_s, no_load_scale=None):
+        """[N,6] lower/upper limits; the four leg axes are unbounded here."""
+        saturation = speed_rad_s.new_tensor(self.saturation_nm)
+        no_load = speed_rad_s.new_tensor(self.no_load_rad_s)
+        if no_load_scale is not None:
+            no_load = no_load * no_load_scale[:, 4:]
+        ratio = speed_rad_s[:, 4:] / no_load
+        unbounded = torch.full_like(speed_rad_s[:, :4], float('inf'))
+        return (torch.cat((-unbounded, (saturation * (-1 - ratio)).clamp_max(0)), -1),
+                torch.cat((unbounded, (saturation * (1 - ratio)).clamp_min(0)), -1))
+
+
+@dataclass(frozen=True)
 class FeedbackEffort:
     requested_effort: torch.Tensor
     capped_effort: torch.Tensor
@@ -262,7 +303,8 @@ class OutputFeedbackController:
 
     @torch.no_grad()
     def effort(self, targets: OutputTargets, feedback_position_rad, feedback_velocity_rad_s,
-               pd_computed_at_s, *, strength=None):
+               pd_computed_at_s, *, strength=None, envelope: MotorEnvelope | None = None,
+               motor_velocity_rad_s=None, no_load_scale=None):
         if not isinstance(targets, OutputTargets):
             raise TypeError('feedback requires decoded named output targets')
         self._matrix('feedback_position_rad', feedback_position_rad, 6)
@@ -286,7 +328,14 @@ class OutputFeedbackController:
         bounds = self.effort_bounds * scale
         if not torch.isfinite(requested).all() or not torch.isfinite(bounds).all():
             raise ValueError('feedback effort or its scaled envelope overflowed before saturation')
-        capped = requested.clamp(-bounds, bounds)
+        lower, upper = -bounds, bounds
+        if envelope is not None:
+            # Back-EMF depends on the true shaft speed, not delayed feedback.
+            speed = feedback_velocity_rad_s if motor_velocity_rad_s is None else motor_velocity_rad_s
+            self._matrix('motor_velocity_rad_s', speed, 6)
+            low, high = envelope.limits(speed, no_load_scale)
+            lower, upper = torch.maximum(lower, low * scale), torch.minimum(upper, high * scale)
+        capped = torch.maximum(torch.minimum(requested, upper), lower)
         return FeedbackEffort(requested, capped, bounds, requested != capped,
                                targets.controller_issued_at_s.clone(), pd_computed_at_s.clone(), targets.control_source.clone())
 
@@ -317,6 +366,15 @@ class EffectiveDriveResponse:
         self.state = torch.zeros(num_envs, 6, device=self.device)
         self._tau = torch.tensor(parameters.effective_time_constant_s, dtype=torch.float64, device=self.device)[None]
         self._direct = self._tau == 0
+        self._tau_scale = torch.ones(num_envs, 6, dtype=torch.float64, device=self.device)
+
+    @torch.no_grad()
+    def set_time_constant_scale(self, mask, scale):
+        """Per-row multiplier of the identified lag; zero-lag axes stay direct."""
+        if (not isinstance(scale, torch.Tensor) or scale.shape != self.state.shape
+                or not torch.isfinite(scale).all() or (scale <= 0).any()):
+            raise ValueError('drive time-constant scale requires positive finite [N,6] values')
+        self._tau_scale[mask] = scale[mask].double()
 
     @torch.no_grad()
     def advance(self, command, duration_s, effort_bounds):
@@ -333,7 +391,7 @@ class EffectiveDriveResponse:
         seconds, bound = duration_s[:, None], effort_bounds.double()
         initial = self.state.double().clamp(-bound, bound)
         held = command.double().clamp(-bound, bound)
-        ratio = seconds / torch.where(self._direct, 1., self._tau)
+        ratio = seconds / torch.where(self._direct, 1., self._tau * self._tau_scale)
         beta = -torch.expm1(-ratio)
         small_weight = ratio * (.5 + ratio * (-1 / 6 + ratio * (1 / 24 + ratio * (-1 / 120 + ratio / 720))))
         ratio_nonzero = torch.where(ratio == 0, 1., ratio)
