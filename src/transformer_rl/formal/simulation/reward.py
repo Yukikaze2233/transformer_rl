@@ -13,7 +13,7 @@ import torch
 
 from ..control.ownership import ControlSource
 
-from ..tasks.reward import PhysicalRewardComposer, RewardPhysics, RewardTuning
+from ..tasks.reward import PhysicalRewardComposer, RewardPhysics, RewardTuning, wheel_positions_in_base
 from ..control.joints import JointBoundaryState, LegBoundaryGeometry
 from .plant import NativePhysicsPlant, PhysicalTick
 from ..tasks.skills import SkillMeasurement
@@ -198,7 +198,10 @@ class NativeRewardBridge:
                                  state.height_above_ground_m.clone(), attitude, state.gravity_body.clone(),
                                  state.angular_velocity_body_rad_s.clone(), state.policy_velocity_rad_s.clone(),
                                  tick.explicit_actuator_buffer['active_output_effort_nm'].clone(),
-                                 tick.contacts.normal_load_n.clone(), slip.tangent_speed_rms_m_s.clone(), boundary.shortfall_rad.clone())
+                                 tick.contacts.normal_load_n.clone(), slip.tangent_speed_rms_m_s.clone(), boundary.shortfall_rad.clone(),
+                                 wheel_position_base_m=wheel_positions_in_base(
+                                     poses, bridge.binding.native_body_names.index('base_link'),
+                                     bridge.binding.wheel_body_indices).float())
         bridge.before_state_read()
         if bridge.physical_tick != tick.physical_tick or bridge.model_epoch != self._epoch:
             raise RuntimeError('native reward sampling crossed a physical or mechanical model epoch')

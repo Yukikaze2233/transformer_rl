@@ -11,6 +11,10 @@ from transformer_rl.formal.lab_env.formal_reward import (
 )
 from transformer_rl.formal.tasks.reward import RewardPhase
 
+# Symmetric base-frame wheel origins (m); the 50 Hz interval has four 200 Hz samples.
+WHEELS = torch.tensor([[[-.011, .198, -.26], [-.011, -.199, -.26]]]).repeat(2, 1, 1)
+SUBSTEPS = range(1, 5)
+
 
 def enabled_fixture():
     _, binding, assembler, sample, command = fixture()
@@ -33,14 +37,14 @@ def test_lab_formal_reward_keeps_formal_terms_and_omits_unavailable_ones():
     reward.begin(issued, torch.zeros(2, 6), now_s=torch.zeros(2, dtype=torch.float64),
                  episode_id=episode, control_epoch=control,
                  command=command.admitted_body_command, mode=command.mode)
-    for step in (1, 2):
+    for step in SUBSTEPS:
         value = replace(sample, timestamp_s=torch.full((2,), step * .005, dtype=torch.float64))
         current = replace(state, timestamp_s=value.timestamp_s.clone())
         reward.observe(value, current, effort_nm=torch.zeros(2, 6), episode_id=episode,
                        control_epoch=control, command=command.admitted_body_command,
                        mode=command.mode, phase=torch.full((2,), int(RewardPhase.SUPPORT),
                                                           dtype=torch.long),
-                       wheel_contact_tangent_speed_m_s=torch.zeros(2, 2))
+                       wheel_contact_tangent_speed_m_s=torch.zeros(2, 2), wheel_position_base_m=WHEELS)
     result = reward.finish(terminated=torch.zeros(2, dtype=torch.bool),
                            truncated=torch.zeros(2, dtype=torch.bool))
     assert torch.isfinite(result.learning_reward).all()
@@ -86,12 +90,13 @@ def test_intentional_base_contact_changes_only_harmful_cost_not_measured_force()
         reward.reset(torch.ones(2, dtype=torch.bool), torch.zeros(2, dtype=torch.float64), ids, ids)
         reward.begin(torch.zeros(2, 6), torch.zeros(2, 6), now_s=torch.zeros(2, dtype=torch.float64),
                      episode_id=ids, control_epoch=ids, command=command.admitted_body_command, mode=mode)
-        for tick in (1, 2):
+        for tick in SUBSTEPS:
             current = replace(physical, timestamp_s=torch.full((2,), tick * .005, dtype=torch.float64))
             reward.observe(current, replace(state, timestamp_s=current.timestamp_s),
                            effort_nm=torch.zeros(2, 6), episode_id=ids, control_epoch=ids,
                            command=command.admitted_body_command, mode=mode,
-                           body_contact_allowed=torch.full((2,), allowed, dtype=torch.bool))
+                           body_contact_allowed=torch.full((2,), allowed, dtype=torch.bool),
+                           wheel_position_base_m=WHEELS)
         return reward.finish(terminated=torch.zeros(2, dtype=torch.bool),
                              truncated=torch.zeros(2, dtype=torch.bool))
 
@@ -112,4 +117,5 @@ def test_intentional_base_contact_does_not_allow_other_modes():
     with pytest.raises(ValueError):
         reward.observe(current, replace(state, timestamp_s=current.timestamp_s), effort_nm=torch.zeros(2, 6),
                        episode_id=ids, control_epoch=ids, command=command.admitted_body_command,
-                       mode=command.mode, body_contact_allowed=torch.ones(2, dtype=torch.bool))
+                       mode=command.mode, body_contact_allowed=torch.ones(2, dtype=torch.bool),
+                       wheel_position_base_m=WHEELS)

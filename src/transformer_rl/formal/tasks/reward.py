@@ -17,17 +17,39 @@ from ..control.ownership import ControlSource, validate_issued_control
 from ..control.observation import CommandMode, MechanicalBinding
 
 
+REWARD_VERSION = 'locomotion_v2'
 REWARD_POSITIVE_TERMS = (
-    'forward', 'yaw', 'height', 'jump_vertical', 'jump_attitude', 'recovery_upright',
+    'forward', 'yaw', 'height', 'attitude', 'jump_vertical', 'jump_attitude', 'recovery_upright',
 )
 REWARD_COST_TERMS = (
-    'forward', 'yaw', 'height', 'attitude', 'stand_world_xy', 'lateral_velocity',
-    'ordinary_vertical', 'jump_vertical', 'effort', 'mechanical_power_proxy',
+    'forward', 'yaw', 'height', 'attitude', 'stand_world_xy', 'stand_yaw', 'lateral_velocity',
+    'ordinary_vertical', 'jump_vertical', 'leg_fork', 'effort', 'mechanical_power_proxy',
     'leg_velocity', 'leg_acceleration', 'issued_first_difference',
     'issued_second_difference', 'harmful_contact', 'contact_slip', 'joint_boundary',
     'roll_pitch_angular_velocity', 'flight_wheel_effort', 'landing_impact',
 )
 REWARD_TERMS = REWARD_POSITIVE_TERMS + REWARD_COST_TERMS
+# Reward-side command deadband (SCUT): smaller requests are tracked as zero and
+# open the standing gates. The actor still observes the admitted command.
+DEADBAND_FORWARD_M_S = .1
+DEADBAND_YAW_RAD_S = .1
+# Fore-aft wheel split (SCUT no_fork): base-frame x(L) - x(R), metres.
+FORK_TOLERANCE_M = .05
+
+
+def wheel_positions_in_base(link_pose_world_xyzw, base_index, wheel_indices):
+    """Left/right wheel link origins in the base_link frame, metres.
+
+    ``link_pose_world_xyzw`` is the native [N, bodies, 7] world pose with an
+    xyzw quaternion. The inverse root rotation is v + 2w(c x v) + 2c x (c x v)
+    with c = -xyz, i.e. the conjugate quaternion.
+    """
+    base = link_pose_world_xyzw[:, base_index]
+    offset = link_pose_world_xyzw[:, list(wheel_indices), :3] - base[:, None, :3]
+    q = base[:, None, 3:7] / base[:, None, 3:7].norm(dim=-1, keepdim=True).clamp_min(1e-12)
+    conjugate, scalar = (-q[..., :3]).expand_as(offset), q[..., 3:]
+    cross = torch.linalg.cross(conjugate, offset)
+    return offset + 2 * (scalar * cross + torch.linalg.cross(conjugate, cross))
 
 
 class RewardPhase(IntEnum):
@@ -113,6 +135,8 @@ class RewardPhysics:
     body_normal_load_n: torch.Tensor
     wheel_contact_tangent_speed_m_s: torch.Tensor
     joint_boundary_shortfall_rad: torch.Tensor
+    # [N,2,3] wheel link origins in the base frame; required by ``leg_fork``.
+    wheel_position_base_m: torch.Tensor | None = None
     # None preserves the original full formal reward. A tuple names the terms
     # whose physical producers exist; unavailable terms are not silently faked.
     available_terms: tuple[str, ...] | None = None
@@ -239,9 +263,12 @@ class PhysicalRewardComposer:
                    | (admitted_body_command[:, 3] <= 0) | (command_mode < 0) | (command_mode > 4))
         if invalid.any():
             raise ValueError('reward interval needs an initialized same-time PRE-reset episode and validated issued control')
-        first = .04 * (issued_action - self._previous).square().sum(-1)
+        # SCUT action_rate/smoothness per second, converted from its 0.5 rad
+        # leg unit to our 0.25 rad unit and doubled: legs 0.005/0.025, wheels 0.02/0.02.
+        first = (issued_action - self._previous).square()
+        first = .005 * first[:, :4].sum(-1) + .02 * first[:, 4:].sum(-1)
         second = (issued_action - 2 * self._previous + self._previous2).square()
-        second = .8 * second[:, :4].sum(-1) + .16 * second[:, 4:].sum(-1)
+        second = .025 * second[:, :4].sum(-1) + .02 * second[:, 4:].sum(-1)
         self._window = {'start': now_s.clone(), 'episode': episode_id.clone(), 'control': control_epoch.clone(),
                         'issued': issued_action.clone(), 'dq': initial_policy_velocity_rad_s.clone(),
                         'control_source': control_source.detach().clone(),
@@ -286,6 +313,13 @@ class PhysicalRewardComposer:
                     or len(set(sample.available_terms)) != len(sample.available_terms)
                     or any(name not in REWARD_TERMS for name in sample.available_terms)):
                 raise ValueError('reward available term list is unknown or duplicated')
+        fork_paid = sample.available_terms is None or 'leg_fork' in sample.available_terms
+        if sample.wheel_position_base_m is not None or fork_paid:
+            value = sample.wheel_position_base_m
+            if (not isinstance(value, torch.Tensor) or value.shape != (self.num_envs, 2, 3)
+                    or value.dtype != torch.float32 or value.device != self.device):
+                raise ValueError('leg_fork requires [N,2,3] base-frame wheel positions')
+            invalid |= ~torch.isfinite(value).reshape(self.num_envs, -1).all(-1)
         if reference.intentional_base_contact is not None:
             self._tensor('intentional base contact', reference.intentional_base_contact, dtype=torch.bool)
             invalid |= reference.intentional_base_contact & (reference.mode != int(CommandMode.STAIR))
@@ -316,7 +350,21 @@ class PhysicalRewardComposer:
                     | (recovery & (phase != int(RewardPhase.RECOVERY)))
                     | (ordinary & (phase != int(RewardPhase.SUPPORT))))
         velocity, command = sample.velocity_origin_body_m_s, reference.admitted_body_command
-        ev, ew = velocity[:, 0] - command[:, 0], sample.angular_velocity_body_rad_s[:, 2] - command[:, 2]
+        # Heading frame from the measured up axis u = -g_body: forward f is
+        # body x projected normal to u, left = u x f. Velocities in m/s, yaw
+        # rate about the world vertical in rad/s; pitching cannot leak v_up.
+        up = -sample.gravity_body
+        forward = torch.zeros_like(up)
+        forward[:, 0] = 1
+        forward = forward - (forward * up).sum(-1, keepdim=True) * up
+        forward = forward / forward.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+        left = torch.linalg.cross(up, forward)
+        v_forward, v_left = (velocity * forward).sum(-1), (velocity * left).sum(-1)
+        v_up = (velocity * up).sum(-1)
+        yaw_rate = (sample.angular_velocity_body_rad_s * up).sum(-1)
+        target_v = torch.where(command[:, 0].abs() < DEADBAND_FORWARD_M_S, 0., command[:, 0])
+        target_w = torch.where(command[:, 2].abs() < DEADBAND_YAW_RAD_S, 0., command[:, 2])
+        ev, ew = v_forward - target_v, yaw_rate - target_w
         support_eh = sample.height_above_ground_m - command[:, 3]
         jump_eh = sample.root_world_z_m - reference.jump_height_world_z_m
         eh = torch.where(jump, jump_eh, support_eh)
@@ -324,26 +372,49 @@ class PhysicalRewardComposer:
         pose = sample.roll_pitch_rad - reference.target_roll_pitch_rad
         upright = (-sample.gravity_body[:, 2]).clamp(-1, 1)
         height_gate = torch.where(recovery, upright.clamp_min(0), torch.ones_like(upright))
-        # Jump locomotion2+2 plus height2/vertical1/attitude1 is at most8.
-        positive = {'forward': torch.where(ordinary, 3., torch.where(jump, 2., 0.)) * torch.exp(-(ev / .35).square()),
-                    'yaw': torch.where(recovery, 0., 2.) * torch.exp(-(ew / .5).square()),
-                    'height': 2 * height_gate * torch.exp(-(eh / .025).square()),
+        # Wide kernels keep a gradient at large error; tight kernels resolve
+        # low-speed error. Yaw widths grow with |command| for spin rates.
+        tight_v = .12 + .05 * target_v.abs()
+        wide_w, tight_w = .5 + .1 * target_w.abs(), .15 + .05 * target_w.abs()
+        locomotion = torch.where(ordinary, 1., torch.where(jump, .8, 0.))
+        # Densities per second. Ordinary <= 2.5+1.5+1.5+1 = 6.5; jump <= 2+1.5+1.5+1+1 = 7;
+        # recovery <= 1.5+4; all below the composer's 8/s bound.
+        positive = {'forward': locomotion * (1.5 * torch.exp(-(ev / .4).square())
+                                             + torch.exp(-(ev / tight_v).square())),
+                    'yaw': (~recovery) * (torch.exp(-(ew / wide_w).square())
+                                          + .5 * torch.exp(-(ew / tight_w).square())),
+                    'height': 1.5 * height_gate * torch.exp(-(eh / .03).square()),
+                    'attitude': ordinary * (.5 * torch.exp(-(pose[:, 1] / .14).square())
+                                            + .5 * torch.exp(-(pose[:, 0] / .10).square())),
                     'jump_vertical': jump * torch.exp(-(evz / .35).square()),
                     'jump_attitude': jump * torch.exp(-(pose / .25).square().sum(-1)),
                     'recovery_upright': recovery * (2 * (1 + upright))}
         h = self._huber
         effort, dq = sample.active_explicit_effort_nm, sample.policy_velocity_rad_s
         ddq = (dq - window['dq']) / self.physics_dt_s
-        still = ordinary & command[:, :3].eq(0).all(-1)
+        exact_still = ordinary & command[:, :3].eq(0).all(-1)
+        still = ordinary & (target_v == 0)
+        still_yaw = still & (target_w == 0)
+        horizontal = torch.stack((v_forward, v_left), -1)
+        # SCUT speed relief of the attitude penalty: c(v) = (exp(-v^2/3) + 1)/2,
+        # 1 at rest and 0.54 at 2.7 m/s; slope/stair attitude is halved.
+        relief = .5 * (torch.exp(-target_v.square() / 3) + 1)
+        terrain_relief = torch.where((reference.mode == int(CommandMode.SLOPE))
+                                     | (reference.mode == int(CommandMode.STAIR)), .5, 1.)
+        fork = (torch.zeros_like(v_forward) if sample.wheel_position_base_m is None
+                else sample.wheel_position_base_m[:, 0, 0] - sample.wheel_position_base_m[:, 1, 0])
         wheel_load = sample.body_normal_load_n[:, self._wheels]
         slip = wheel_load > 5
         landing = jump & ((phase == int(RewardPhase.LANDING)) | (phase == int(RewardPhase.SETTLING)))
         weight_n = self._mass_kg * self.tuning.gravity_m_s2
         excess_landing = (wheel_load.sum(-1) / weight_n - self.tuning.landing_load_multiple).clamp_min(0)
-        cost = {'forward': (~recovery) * h(ev / .5), 'yaw': (~recovery) * h(ew),
+        cost = {'forward': (~recovery) * h(ev / .5),
+                'yaw': (~recovery) * h(ew / (1 + .1 * target_w.abs())),
                 'height': 2 * height_gate * h(eh / .04),
                 'attitude': torch.where(recovery, 2 * h(pose / .8).sum(-1),
-                                         torch.where(jump, .25 * h(pose / .5).sum(-1), (pose / .2).square().sum(-1))),
+                                         torch.where(jump, .25 * h(pose / .5).sum(-1),
+                                                     25 * (relief.square() * terrain_relief)
+                                                     * pose.square().sum(-1))),
                 # Roll/pitch rate damping is distinct from static attitude
                 # error; recovery flips need low gating, jump uses its own gain.
                 'roll_pitch_angular_velocity': torch.where(
@@ -351,13 +422,21 @@ class PhysicalRewardComposer:
                     torch.where(jump, self.tuning.angular_damping_jump,
                                 self.tuning.angular_damping_ordinary))
                     * sample.angular_velocity_body_rad_s[:, :2].square().sum(-1),
-                'stand_world_xy': still * 1.5 * h(sample.velocity_origin_world_m_s[:, :2].norm(dim=-1) / .05),
-                'lateral_velocity': .5 * (velocity[:, 1] / .25).square(),
-                'ordinary_vertical': ordinary * .2 * (velocity[:, 2] / .3).square(),
+                # L1 plus Huber: a constant gradient removes slow creep at
+                # cm/s that a quadratic-near-zero kernel leaves unpaid.
+                'stand_world_xy': still * (.5 * horizontal.abs().sum(-1) / .05
+                                           + h(horizontal.norm(dim=-1) / .05)),
+                'stand_yaw': still_yaw * .3 * yaw_rate.abs() / .1,
+                'lateral_velocity': .5 * (v_left / .25).square(),
+                'ordinary_vertical': ordinary * .2 * (v_up / .3).square(),
                 'jump_vertical': jump * h(evz / .5),
-                'effort': 1e-4 * effort[:, :4].square().sum(-1) + 1e-3 * effort[:, 4:].square().sum(-1),
-                'mechanical_power_proxy': .002 * (effort * dq).abs().sum(-1),
-                'leg_velocity': 1e-4 * dq[:, :4].square().sum(-1),
+                # Fore-aft wheel split dx = x_L - x_R: 1.5[1(|dx|>0.05 m) + (dx/0.2 m)^2].
+                'leg_fork': (~recovery) * 1.5 * ((fork.abs() > FORK_TOLERANCE_M).float()
+                                                 + (fork / .2).square()),
+                'effort': 1e-4 * effort[:, :4].square().sum(-1) + 2e-4 * effort[:, 4:].square().sum(-1),
+                # Positive mechanical power only, W; regenerative braking is unpaid.
+                'mechanical_power_proxy': .001 * (effort * dq).clamp_min(0).sum(-1),
+                'leg_velocity': 1e-3 * dq[:, :4].square().sum(-1),
                 'leg_acceleration': 1e-7 * ddq[:, :4].square().sum(-1),
                 'issued_first_difference': window['action_cost'], 'issued_second_difference': window['action2_cost'],
                 'harmful_contact': 2 * (sample.body_normal_load_n[:, self._harmful] > 3).sum(-1),
@@ -384,14 +463,15 @@ class PhysicalRewardComposer:
                     | ~torch.isfinite(torch.stack(tuple(components.values()))).all(0))
         if invalid.any():
             raise ValueError('reward input, PRE-reset identity, timing, phase or finite density bound differs')
-        gates = {'ordinary': ordinary, 'jump': jump, 'recovery': recovery, 'exact_stationary': still,
+        gates = {'ordinary': ordinary, 'jump': jump, 'recovery': recovery, 'exact_stationary': exact_still,
+                 'stationary_deadband': still,
                  'slip_left': slip[:, 0], 'slip_right': slip[:, 1], 'landing': landing,
                  'height_reference_weight': height_gate,
                  'first_action_difference': self._action_count > 0, 'second_action_difference': self._action_count > 1}
         errors = {'forward_m_s': ev, 'yaw_rad_s': ew, 'support_height_m': support_eh,
                   'jump_world_height_m': jump_eh, 'jump_world_vertical_m_s': evz,
                   'roll_rad': pose[:, 0], 'pitch_rad': pose[:, 1],
-                  'stationary_world_xy_speed_m_s': sample.velocity_origin_world_m_s[:, :2].norm(dim=-1)}
+                  'stationary_world_xy_speed_m_s': horizontal.norm(dim=-1), 'leg_fork_m': fork}
         for key, values in (('positive', positive), ('raw_cost', cost), ('components', components), ('gates', gates),
                             ('errors', errors), ('error_squares', {key: value.double().square() for key, value in errors.items()})):
             for name, value in values.items():

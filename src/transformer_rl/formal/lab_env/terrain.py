@@ -600,7 +600,8 @@ class LabTerrainCourse:
             control_epoch=env._control_epoch, command=env._command, mode=env._command_mode,
             policy_owned=getattr(env, '_interval_policy_owned', None),
             phase=self.tasks.phase, jump_height_world_z_m=target, jump_velocity_world_z_m_s=speed,
-            joint_boundary_shortfall_rad=boundary, body_contact_allowed=self.body_contact_allowed)
+            joint_boundary_shortfall_rad=boundary, body_contact_allowed=self.body_contact_allowed,
+            wheel_position_base_m=env._wheel_position_base())
 
     def termination(self, terminated, state, tilt, base_contact):
         # BODY_BUMP exempts only the intentional base-contact criterion. Height

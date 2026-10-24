@@ -75,6 +75,7 @@ def reward_physics_from_lab(sample: NativePhysicalSample, state: MeasuredState, 
                             available_terms: tuple[str, ...],
                             joint_boundary_shortfall_rad: torch.Tensor | None = None,
                             wheel_contact_tangent_speed_m_s: torch.Tensor | None = None,
+                            wheel_position_base_m: torch.Tensor | None = None,
                             normal_load_source: str = "contact_force_world_z_abs") -> RewardPhysics:
     """构造正式 reward 的物理端点；不推断缺失的 slip/boundary。"""
     if not isinstance(sample, NativePhysicalSample) or not isinstance(state, MeasuredState):
@@ -124,6 +125,7 @@ def reward_physics_from_lab(sample: NativePhysicalSample, state: MeasuredState, 
         state.gravity_body.clone(), state.angular_velocity_body_rad_s.clone(),
         state.policy_velocity_rad_s.clone(), effort_nm.clone(), body_load.clone(),
         wheel_speed.clone(), boundary,
+        wheel_position_base_m=None if wheel_position_base_m is None else wheel_position_base_m.clone(),
         available_terms=available_terms,
     )
 
@@ -196,7 +198,7 @@ class LabFormalReward:
                 command, mode, policy_owned=None, phase=None, jump_height_world_z_m=None,
                 jump_velocity_world_z_m_s=None, target_roll_pitch_rad=None,
                 joint_boundary_shortfall_rad=None, wheel_contact_tangent_speed_m_s=None,
-                body_contact_allowed=None):
+                body_contact_allowed=None, wheel_position_base_m=None):
         owned = (torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
                  if policy_owned is None else policy_owned)
         if "joint_boundary" in self.config.available_terms and joint_boundary_shortfall_rad is None:
@@ -209,6 +211,7 @@ class LabFormalReward:
             available_terms=self.config.available_terms,
             joint_boundary_shortfall_rad=joint_boundary_shortfall_rad,
             wheel_contact_tangent_speed_m_s=wheel_contact_tangent_speed_m_s,
+            wheel_position_base_m=wheel_position_base_m,
             normal_load_source=self.config.normal_load_source)
         if body_contact_allowed is not None:
             if (body_contact_allowed.shape != (self.num_envs,)

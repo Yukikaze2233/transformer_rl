@@ -109,7 +109,9 @@ class RewardEpisodeEnv:
                                    self.robot.data.root_link_pose_w.torch[:, 2], state.height_above_ground_m,
                                    pose, gravity, state.angular_velocity_body_rad_s, state.policy_velocity_rad_s,
                                    tick.explicit_actuator_buffer['active_output_effort_nm'], tick.contacts.normal_load_n,
-                                   torch.zeros(2, 2), torch.zeros(2, 6))
+                                   torch.zeros(2, 2), torch.zeros(2, 6),
+                                   wheel_position_base_m=torch.tensor([[[-.011, .198, -.26],
+                                                                        [-.011, -.199, -.26]]]).repeat(2, 1, 1))
             self.reward.observe(sample, ref)
             self.sample_count += 1
 

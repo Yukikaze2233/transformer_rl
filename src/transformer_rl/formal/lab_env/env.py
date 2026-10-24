@@ -35,7 +35,7 @@ from .critic_features import CriticActionHistory, TERRAIN_SCAN_DIM, environment_
 from .warp_scan import miss_histograms
 from .forward_scan import ForwardStepDetector
 from .skill_fsm import JumpFSMConfig, JumpState, SkillFSM, StairFSMConfig
-from ..tasks.reward import RewardPhase
+from ..tasks.reward import RewardPhase, wheel_positions_in_base
 from ..tasks.termination import NativeTaskLimits, PhysicalFailureLatch
 from .recover import LabRecoverTask, RecoverTaskSpec
 from .recovery import LabRecoveryReset, _RecoveryPreparation
@@ -623,6 +623,11 @@ class WheeledLabEnv(DirectRLEnv):
         height = root_z[:, None] - hits[..., 2] - self._task.nominal_height_m
         return (5 * height).clamp(-1, 1), center
 
+    def _wheel_position_base(self):
+        """Wheel link origins in the base_link frame for the leg-fork reward."""
+        return wheel_positions_in_base(self._as_torch(self.robot.data.body_link_pose_w),
+                                       self._base_body_index, self._binding.wheel_body_indices)
+
     def _wheel_velocity_body(self):
         # Relative COM velocities expressed in the base frame. This is neither
         # contact-point slip nor the derivative of rotating-frame coordinates.
@@ -1065,6 +1070,7 @@ class WheeledLabEnv(DirectRLEnv):
                     jump_height_world_z_m=torch.where(jump, jump_height_world, zero),
                     jump_velocity_world_z_m_s=zero,
                     joint_boundary_shortfall_rad=boundary,
+                    wheel_position_base_m=self._wheel_position_base(),
                 )
         if self._recover_task is not None:
             base_load = sample.terrain_contact_force_world_n[:, self._base_body_index].norm(dim=-1)
