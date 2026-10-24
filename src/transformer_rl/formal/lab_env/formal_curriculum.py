@@ -13,6 +13,7 @@ import math
 import torch
 
 from ..control.observation import CommandMode
+from ..tasks.command_pool import CommandContext
 from ..tasks.curriculum import (
     COMPLETE_STAGE_BUDGETS, COMPLETE_STAGE_NAMES, COMPLETE_STAGE_WEIGHTS,
     INITIAL_DOMAIN, JUMP_BUDGET, JUMP_WEIGHTS, STAGE_BUDGETS, STAGE_NAMES,
@@ -152,6 +153,10 @@ class FormalTaskCurriculum:
         fraction = self._smooth_fraction(self.budget.total_updates,
                                          sum(self.stage_budgets[:2]))
         domain = interpolate_domain(self.initial_domain, self.domain, fraction)
+        # SCUT trains the full command box from the first update; only terrain
+        # and jump parameters follow exposure.
+        domain = replace(domain, forward_m_s=self.domain.forward_m_s, yaw_rad_s=self.domain.yaw_rad_s,
+                         height_m=self.domain.height_m)
         # Jump tasks are absent before the final stage. Their envelope must
         # therefore follow the jump stage's own exposure, not total progress;
         # otherwise the first sampled jump is already near the final ceiling.
@@ -197,16 +202,25 @@ class FormalTaskCurriculum:
             posture[rows] = order[choice]
         command = draw.requested_command.clone()
         if self.include_jump and self.stage_name == 'jump':
-            budget = self.stage_budgets[self.stage]
-            # First learn a stationary jump during the mixture transition;
-            # then expand simultaneous motion, with the last 20% at full range.
-            combined = self._smooth_fraction(self.budget.consumed[self.stage] - .25 * budget,
-                                              .55 * budget)
+            combined = self._request_motion_scale()
             rows = draw.family == int(TaskFamily.REQUEST)
             command[rows, :3] *= combined
             command[rows, 3] = (self.domain.nominal_height_m
                                 + combined * (command[rows, 3] - self.domain.nominal_height_m))
         return replace(draw, recovery_posture=posture, requested_command=command)
+
+    def _request_motion_scale(self) -> float:
+        """Jump episodes first jump in place, then add simultaneous motion."""
+        if not (self.include_jump and self.stage_name == 'jump'):
+            return 1.
+        budget = self.stage_budgets[self.stage]
+        # Last 20% of the jump stage uses the full motion range.
+        return self._smooth_fraction(self.budget.consumed[self.stage] - .25 * budget, .55 * budget)
+
+    def command_context(self) -> CommandContext:
+        """Inputs of the within-episode command pool at the current exposure."""
+        domain = self._effective_domain() if self.continuous else self.domain
+        return CommandContext(domain, self.budget.total_updates, self._request_motion_scale())
 
     @property
     def status(self) -> str:

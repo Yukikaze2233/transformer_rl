@@ -12,6 +12,16 @@ from transformer_rl.formal.tasks.curriculum import (
 )
 
 
+# Sampler-mechanics fixtures keep a mixture with every family active; the
+# formal weights (recovery family reserved, zero) are checked separately.
+MIXED_WEIGHTS = (
+    (0.60, 0.20, 0.10, 0.00, 0.00, 0.10),
+    (0.15, 0.25, 0.15, 0.35, 0.00, 0.10),
+    (0.15, 0.15, 0.15, 0.35, 0.00, 0.20),
+)
+MIXED_COMPLETE_WEIGHTS = (*MIXED_WEIGHTS, (0.20, 0.10, 0.10, 0.10, 0.50, 0.00))
+
+
 def assert_draw_equal(left, right):
     for field in fields(TaskDraw):
         assert torch.equal(getattr(left, field.name), getattr(right, field.name)), field.name
@@ -30,7 +40,7 @@ def charge_to(budget, total):
 
 
 def test_final_mixture_contains_full_continuous_domains_and_both_endpoints():
-    sampler = ContinuousTaskSampler(2101)
+    sampler = ContinuousTaskSampler(2101, stage_weights=MIXED_WEIGHTS)
     draw = sampler.sample(10000, 2)
     assert torch.bincount(draw.family, minlength=6).tolist() == [1500, 1500, 1500, 3500, 0, 2000]
     assert torch.count_nonzero(draw.requested_command[:, 1]) == 0
@@ -73,7 +83,7 @@ def test_jump_stage_samples_full_confirmed_rise_range_without_changing_quota_or_
 
     sampler = ContinuousTaskSampler(2102, stage_weights=COMPLETE_STAGE_WEIGHTS)
     draw = sampler.sample(10000, 3)
-    assert torch.bincount(draw.family, minlength=6).tolist() == [2000, 1000, 1000, 1000, 5000, 0]
+    assert torch.bincount(draw.family, minlength=6).tolist() == [round(10000 * w) for w in COMPLETE_STAGE_WEIGHTS[3]]
     rise = draw.jump_height_m[draw.family == TaskFamily.REQUEST]
     torch.testing.assert_close(rise.min(), torch.tensor(.03))
     torch.testing.assert_close(rise.max(), torch.tensor(.40))
@@ -86,7 +96,7 @@ def test_jump_stage_samples_full_confirmed_rise_range_without_changing_quota_or_
 
 
 def test_strata_are_70_15_15_and_not_a_discrete_command_grid():
-    draw = ContinuousTaskSampler(2102).sample(10000, 2)
+    draw = ContinuousTaskSampler(2102, stage_weights=MIXED_WEIGHTS).sample(10000, 2)
     for family, count in enumerate((1500, 1500, 1500, 3500, 0, 2000)):
         if count == 0:
             continue
@@ -101,7 +111,7 @@ def test_strata_are_70_15_15_and_not_a_discrete_command_grid():
 
 
 def test_one_row_reset_batches_do_not_starve_rare_families_or_strata():
-    sampler = ContinuousTaskSampler(2103)
+    sampler = ContinuousTaskSampler(2103, stage_weights=MIXED_WEIGHTS)
     family_counts = torch.zeros(6, dtype=torch.long)
     strata_counts = torch.zeros(6, 3, dtype=torch.long)
     for _ in range(1000):
@@ -122,11 +132,13 @@ def test_stage_introduction_preserves_rehearsal_floors(stage):
     draw = ContinuousTaskSampler(2101).sample(10000, stage)
     actual = torch.bincount(draw.family, minlength=6).float() / 10000
     torch.testing.assert_close(actual, torch.tensor(STAGE_WEIGHTS[stage]))
-    assert actual[TaskFamily.HEIGHT] >= 0.1
+    # Ordinary families share the command pool; together they keep the flat
+    # rehearsal floor. The posture-catalogue recovery family is reserved.
+    ordinary = actual[[TaskFamily.HEIGHT, TaskFamily.MOTION, TaskFamily.ROTATION]].sum()
+    assert ordinary >= 0.5
+    assert actual[TaskFamily.RECOVERY] == 0
     if stage >= 1:
-        assert actual[TaskFamily.MOTION] >= 0.1
-    if stage >= 2:
-        assert actual[TaskFamily.ROTATION] >= 0.1
+        assert actual[TaskFamily.TERRAIN] >= 0.4
     assert not draw.jump_height_m[draw.family != TaskFamily.REQUEST].any()
 
 
@@ -299,18 +311,18 @@ def test_dynamic_disable_retires_fractional_credit_and_roundtrips():
     from copy import deepcopy
     from transformer_rl.formal.tasks.curriculum import COMPLETE_STAGE_WEIGHTS
 
-    sampler = ContinuousTaskSampler(2102, stage_weights=COMPLETE_STAGE_WEIGHTS, continuous=True)
+    sampler = ContinuousTaskSampler(2102, stage_weights=MIXED_COMPLETE_WEIGHTS, continuous=True)
     for _ in range(12):
-        sampler.sample(1000, 2, weights=COMPLETE_STAGE_WEIGHTS[2])
+        sampler.sample(1000, 2, weights=MIXED_COMPLETE_WEIGHTS[2])
     # The jump-stage target disables recovery at the boundary.
-    sampler.sample(1000, 3, weights=COMPLETE_STAGE_WEIGHTS[3])
+    sampler.sample(1000, 3, weights=MIXED_COMPLETE_WEIGHTS[3])
     state = sampler.state_dict()
     assert state['dynamic_family_credit'][5] == 0
     assert abs(sum(state['dynamic_family_credit'])) < 1e-6
-    restored = ContinuousTaskSampler(7, stage_weights=COMPLETE_STAGE_WEIGHTS, continuous=True)
+    restored = ContinuousTaskSampler(7, stage_weights=MIXED_COMPLETE_WEIGHTS, continuous=True)
     restored.load_state_dict(state)
-    assert_draw_equal(sampler.sample(97, 3, weights=COMPLETE_STAGE_WEIGHTS[3]),
-                      restored.sample(97, 3, weights=COMPLETE_STAGE_WEIGHTS[3]))
+    assert_draw_equal(sampler.sample(97, 3, weights=MIXED_COMPLETE_WEIGHTS[3]),
+                      restored.sample(97, 3, weights=MIXED_COMPLETE_WEIGHTS[3]))
 
     # A pre-fix checkpoint may carry a residual deficit for a now-disabled
     # family. Loading it must retire that credit rather than fail or carry it.

@@ -1,5 +1,9 @@
 {
-  "training_seeds": [2101, 2102, 2103],
+  "training_seeds": [
+    2101,
+    2102,
+    2103
+  ],
   "updates_per_seed": 35000,
   "num_envs": 4096,
   "rollout_steps": 24,
@@ -14,11 +18,24 @@
     "temporal_layers": 2,
     "temporal_ffn": 128,
     "state_hidden_dim": 32,
-    "leg_hidden_dims": [64, 32],
-    "wheel_hidden_dims": [64, 32],
+    "leg_hidden_dims": [
+      64,
+      32
+    ],
+    "wheel_hidden_dims": [
+      64,
+      32
+    ],
     "prediction_hidden_dim": 32,
     "critic_input_dim": 185,
-    "critic_hidden_dims": [256, 128, 64]
+    "critic_hidden_dims": [
+      256,
+      128,
+      64
+    ],
+    "mirror_canonical": true,
+    "initial_leg_std": 0.75,
+    "initial_wheel_std": 0.35
   },
   "ppo": {
     "epochs": 5,
@@ -45,20 +62,42 @@
     "policy_dt_s": 0.02,
     "gamma": 0.99,
     "gae_lambda": 0.95,
-    "action_bounds": [3.0, 3.0, 3.0, 3.0, 9.0, 9.0]
+    "action_bounds": [
+      3.0,
+      3.0,
+      3.0,
+      3.0,
+      9.0,
+      9.0
+    ]
   },
   "domain": {
-    "height_m": [0.17, 0.40],
-    "forward_m_s": [-2.7, 2.7],
-    "yaw_rad_s": [-18.84955592153876, 18.84955592153876],
-    "jump_m": [0.03, 0.40]
+    "height_m": [
+      0.23,
+      0.4
+    ],
+    "forward_m_s": [
+      -2.7,
+      2.7
+    ],
+    "yaw_rad_s": [
+      -14.137166941154069,
+      14.137166941154069
+    ],
+    "jump_m": [
+      0.03,
+      0.4
+    ]
   },
   "protocol": {
     "policy_dt_s": 0.02
   },
   "terrain": {
     "nominal_friction": 0.7,
-    "material_friction_bounds": [0.2, 1.1],
+    "material_friction_bounds": [
+      0.2,
+      1.1
+    ],
     "rough_grid_spacing_m": 0.25,
     "platform_tread_m": 0.8
   }

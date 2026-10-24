@@ -24,8 +24,10 @@ def test_requested_height_envelope_and_rough_terrain_cap_expand_before_hard():
     curriculum = FormalTaskCurriculum(128, include_jump=True, continuous=True,
                                      capabilities=all_capabilities())
     initial = curriculum._effective_domain()
-    assert initial.height_m == (.28, .32)
-    assert initial.forward_m_s == (-.5, .5)
+    # SCUT trains the full command box from the first update; terrain ramps.
+    assert initial.height_m == curriculum.domain.height_m
+    assert initial.forward_m_s == curriculum.domain.forward_m_s
+    assert initial.slope_rad != curriculum.domain.slope_rad
     assert curriculum.terrain_level_cap(10) == 0
     curriculum.budget.stage = 1
     curriculum.budget.consumed = [5000, 0, 0, 0]
@@ -33,7 +35,7 @@ def test_requested_height_envelope_and_rough_terrain_cap_expand_before_hard():
     curriculum.budget.consumed[1] = 16000
     assert curriculum.terrain_level_cap(10) == 9
     curriculum.budget.consumed[1] = 20000
-    assert curriculum._effective_domain().height_m == (.17, .40)
+    assert curriculum._effective_domain().slope_rad == curriculum.domain.slope_rad
     assert curriculum.weights[int(TaskFamily.REQUEST)] == 0
 
 
@@ -48,10 +50,12 @@ def test_stage_weights_and_budgets_are_exactly_the_frozen_course():
     assert plan.jump()["budget"] == JUMP_BUDGET
 
 
-def test_default_capabilities_refuse_recovery_stage_zero_instead_of_faking_it():
+def test_default_capabilities_refuse_terrain_stage_instead_of_faking_it():
     curriculum = FormalTaskCurriculum(8)
-    assert curriculum.missing_capabilities(0) == ("recovery",)
-    with pytest.raises(UnsupportedCurriculumTask, match="recovery"):
+    assert curriculum.missing_capabilities(0) == ()
+    assert curriculum.missing_capabilities(1) == ("terrain",)
+    curriculum.budget.stage = 1
+    with pytest.raises(UnsupportedCurriculumTask, match="terrain"):
         curriculum.sample(torch.arange(8))
 
 
@@ -100,7 +104,10 @@ def test_checkpoint_rejects_capability_or_domain_mismatch():
 def test_task_draw_sampler_maps_recovery_to_mode_and_phase():
     curriculum = FormalTaskCurriculum(64, capabilities=FormalCurriculumCapabilities(recovery=True), seed=5)
     sampler = LabTaskDrawSampler(curriculum)
-    sample = sampler(torch.arange(64))
+    draw = sampler(torch.arange(64)).draw
+    family = draw.family.clone()
+    family[::2] = int(TaskFamily.RECOVERY)  # the reserved catalogue keeps its mode mapping
+    sample = sampler.map_draw(replace(draw, family=family))
     recovery = sample.draw.family == 5
     assert recovery.any()
     assert (sample.mode[recovery] == int(CommandMode.RECOVERY)).all()
@@ -130,7 +137,7 @@ def test_task_draw_sampler_maps_terrain_and_request_metadata():
 
 def test_request_course_is_separate_and_does_not_change_main_phase_weights():
     assert JUMP_BUDGET == 5000
-    assert JUMP_WEIGHTS[TaskFamily.REQUEST] == .5
+    assert JUMP_WEIGHTS[TaskFamily.REQUEST] == .45
     only_recovery = FormalCurriculumCapabilities(recovery=True)
     terrain = FormalTaskCurriculum(4, capabilities=only_recovery)
     assert terrain.missing_capabilities(1) == ("terrain",)
@@ -178,17 +185,21 @@ def test_jump_envelope_follows_jump_stage_exposure_not_total_progress():
     assert final == (.03, .40)
 
 
-def test_continuous_recovery_starts_easy_and_keeps_full_catalogue_before_rough():
+def test_reserved_recovery_catalogue_is_absent_from_formal_stages_but_keeps_its_progression():
     curriculum = FormalTaskCurriculum(4096, capabilities=all_capabilities(), seed=12,
                                       include_jump=True, continuous=True)
     early = curriculum.sample(torch.arange(4096))
-    rows = early.family == int(TaskFamily.RECOVERY)
-    assert set(early.recovery_posture[rows].tolist()) == {0, 1}
-    assert int(rows.sum()) in (409, 410)
-    curriculum.budget.consumed[0] = 4000
-    later = curriculum.sample(torch.arange(4096))
-    assert set(later.recovery_posture[later.family == int(TaskFamily.RECOVERY)].tolist()) == set(range(16))
+    assert not (early.family == int(TaskFamily.RECOVERY)).any()
     assert curriculum.stage_weights == COMPLETE_STAGE_WEIGHTS
+    only_recovery = (0., 0., 0., 0., 0., 1.)
+
+    def catalogue():
+        draw = curriculum.sampler.sample(4096, 0, weights=only_recovery, domain=curriculum._effective_domain())
+        return set(curriculum._condition_task_difficulty(draw).recovery_posture.tolist())
+
+    assert catalogue() == {0, 1}
+    curriculum.budget.consumed[0] = 4000
+    assert catalogue() == set(range(16))
 
 
 def test_full_domain_has_rehearsal_before_budget_exhaustion():

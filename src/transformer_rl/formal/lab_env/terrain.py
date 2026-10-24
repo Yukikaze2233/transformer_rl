@@ -13,6 +13,7 @@ from ..tasks.geometry import TerrainKind
 from ..tasks.curriculum import TaskFamily
 from ..tasks.terrain_courses import TerrainCourseRouter
 from ..tasks.terrain_query import StaticTerrainQuery, wheel_lookahead_points
+from ..tasks.command_pool import CommandPool
 from ..tasks.trajectory import DriveEnvelope
 from .course_tasks import LabCourseTasks, RequestCommand, StairRequestProtocol, StairRequestConfig
 from .recovery_lifecycle import RecoveryLifecycle, RecoveryLifecycleConfig
@@ -31,13 +32,17 @@ class LabTerrainCourse:
         indices = list(kin.binding.wheel_body_indices)
         centers = nominal.body_position_m[0, indices] + torch.einsum(
             'nij,nj->ni', nominal.body_rotation[0, indices], nominal.body_position_m.new_tensor(wheels.local_xyz_m))
+        pool_config = getattr(env.cfg, 'command_pool_spec', None)
+        pool = None if pool_config is None else CommandPool(pool_config)
         envelope = DriveEnvelope(wheels.radius_m[0], abs(float(centers[0, 1] - centers[1, 1])))
         nominal_spawn = env._recovery_reset.pose(torch.tensor([0]), torch.tensor([0]),
                                                 torch.zeros(1, dtype=torch.float64),
                                                 torch.zeros(1, 3, dtype=torch.float64))
         self.nominal_spawn_height_m = float(nominal_spawn.root_pose_xyzw[0, 2])
         self.tasks = LabCourseTasks(env.num_envs, envelope, seed=int(env.cfg.seed or 0),
-                                    device=env._device, policy_dt_s=float(env.step_dt))
+                                    device=env._device, policy_dt_s=float(env.step_dt),
+                                    command_pool=pool,
+                                    command_context=None if pool is None else self._command_context)
         self.recovery = RecoveryLifecycle(
             env.num_envs, device=env._device,
             config=RecoveryLifecycleConfig(policy_dt_s=float(env.step_dt), physics_dt_s=float(env.physics_dt)))
@@ -88,6 +93,12 @@ class LabTerrainCourse:
         self._course_stair_pending = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
         self._course_stair_height = torch.zeros(env.num_envs, device=env._device)
         self._last_stair_response = torch.zeros(env.num_envs, dtype=torch.long, device=env._device)
+
+    def _command_context(self):
+        curriculum = getattr(self.env._task_sampler, 'curriculum', None)
+        if curriculum is None:
+            raise RuntimeError('command segments require the formal curriculum sampler')
+        return curriculum.command_context()
 
     @staticmethod
     def _rotate_xyzw(quaternion, vector):
@@ -490,7 +501,7 @@ class LabTerrainCourse:
             env._clock(), env._completed_estimate,
             policy_owned=env._interval_policy_owned, failed=env._terminated)
         self.tasks.base_mode.masked_fill_(boundary.handoff, int(CommandMode.NORMAL))
-        self.tasks.family.masked_fill_(boundary.handoff, int(TaskFamily.HEIGHT))
+        self.tasks.begin_tracking(boundary.handoff)
         return boundary.timeout
 
     def advance_skill(self):

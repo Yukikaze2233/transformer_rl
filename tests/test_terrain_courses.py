@@ -6,7 +6,7 @@ import pytest
 import torch
 from transformer_rl.formal.lab_env.recovery_lifecycle import RecoveryLifecycle
 
-from transformer_rl.formal.tasks.curriculum import COMPLETE_STAGE_BUDGETS, TaskFamily
+from transformer_rl.formal.tasks.curriculum import COMPLETE_STAGE_BUDGETS, COMPLETE_STAGE_WEIGHTS, TaskFamily
 from transformer_rl.formal.lab_env.formal_curriculum import FormalCurriculumCapabilities, FormalTaskCurriculum
 from transformer_rl.formal.tasks.terrain_courses import TerrainCourseRouter, build_atlas
 
@@ -136,7 +136,7 @@ def test_complete_course_reaches_jump_without_reinitializing_sampler():
     assert curriculum.status == 'training_budget_complete'
     assert curriculum.sampler is sampler
     draw = curriculum.sample(torch.arange(100))
-    assert (draw.family == int(TaskFamily.REQUEST)).sum() == 50
+    assert (draw.family == int(TaskFamily.REQUEST)).sum() == round(100 * COMPLETE_STAGE_WEIGHTS[-1][TaskFamily.REQUEST])
     restored = FormalTaskCurriculum(100, capabilities=FormalCurriculumCapabilities(True, True, True), include_jump=True)
     restored.load_state_dict(curriculum.state_dict())
     assert restored.snapshot() == curriculum.snapshot()

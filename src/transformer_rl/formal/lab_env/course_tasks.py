@@ -11,13 +11,14 @@ import math
 import torch
 
 from ..control.observation import CommandMode
+from ..tasks.command_pool import CommandPool, SegmentKind
 from ..tasks.curriculum import TaskFamily
 from ..tasks.jump import JumpReferenceProgram
 from ..tasks.protocol import (
     CompletedEstimate, RequestEnd, RequestProtocol, RequestProtocolConfig, RequestResponse,
 )
 from ..tasks.reward import RewardPhase
-from ..tasks.trajectory import CommandRates, CommandStream, CommandTrajectory, DriveEnvelope
+from ..tasks.trajectory import CommandRates, CommandStream, CommandTrajectory, DriveEnvelope, TrajectoryKind
 
 
 @dataclass(frozen=True)
@@ -203,7 +204,8 @@ class LabCourseTasks:
 
     def __init__(self, num_envs, envelope: DriveEnvelope, *, seed=2102, device='cpu',
                  policy_dt_s=0.01, heading_fraction=0.5, heading_gain=1.0,
-                 heading_yaw_limit_rad_s=math.pi):
+                 heading_yaw_limit_rad_s=math.pi, command_pool: CommandPool | None = None,
+                 command_context=None):
         if policy_dt_s not in (.01, .02):
             raise ValueError('course task policy period must be 50 or 100Hz')
         if (not isinstance(heading_fraction, (int, float)) or not math.isfinite(heading_fraction)
@@ -213,6 +215,10 @@ class LabCourseTasks:
                 or type(heading_yaw_limit_rad_s) not in (int, float)
                 or not math.isfinite(heading_yaw_limit_rad_s) or heading_yaw_limit_rad_s <= 0):
             raise ValueError('heading controller requires a fraction, positive gain and yaw limit')
+        if (command_pool is None) != (command_context is None) or (
+                command_pool is not None and (not isinstance(command_pool, CommandPool)
+                                              or not callable(command_context))):
+            raise ValueError('segment resampling requires a CommandPool and a curriculum context source')
         self.num_envs, self.device = num_envs, torch.device(device)
         self.policy_dt_s = float(policy_dt_s)
         self.heading_fraction = float(heading_fraction)
@@ -221,11 +227,21 @@ class LabCourseTasks:
         self.heading_enabled = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         self.heading_valid = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         self.heading_target_rad = torch.zeros(num_envs, device=self.device)
+        self.heading_offset_rad = torch.zeros(num_envs, device=self.device)
+        self.command_pool, self.command_context = command_pool, command_context
+        # Segment state: trajectory clock since the segment began, the episode
+        # time at which the next segment is drawn, and the course direction.
+        self.segment_clock = torch.zeros(num_envs, device=self.device)
+        self.segment_end_s = torch.full((num_envs,), float('inf'), device=self.device)
+        self.segment_kind = torch.zeros(num_envs, dtype=torch.long, device=self.device)
+        self.segment_counts = torch.zeros(len(SegmentKind), dtype=torch.long, device=self.device)
+        self.terrain_kind = torch.zeros(num_envs, dtype=torch.long, device=self.device)
+        self.approach_sign = torch.ones(num_envs, device=self.device)
         self.generator = torch.Generator(device=self.device).manual_seed(seed)
         initial = torch.zeros(num_envs, 4, device=self.device)
         initial[:, 3] = .32
-        self.stream = CommandStream(initial, envelope, CommandRates(2., 3., .2),
-                                    policy_dt_s=policy_dt_s)
+        # Same admitted-command slew as the RMCS deployment (command_rate_limits).
+        self.stream = CommandStream(initial, envelope, CommandRates(2., 3., .2), policy_dt_s=policy_dt_s)
         self.trajectory = CommandTrajectory(initial, initial, torch.ones(num_envs, device=self.device),
                                              torch.zeros(num_envs, dtype=torch.long, device=self.device))
         self.protocol = RequestProtocol(num_envs, self.device,
@@ -285,6 +301,41 @@ class LabCourseTasks:
         self.family[ids] = task.draw.family
         self.base_mode[ids] = torch.where(task.mode == int(CommandMode.JUMP),
                                          int(CommandMode.NORMAL), task.mode)
+        self.rise[ids] = task.request_height_m
+        self.active_rise[ids] = 0
+        self.elapsed[ids] = 0
+        self.next_request_s[ids] = 3 + 5 * torch.rand(len(ids), generator=self.generator, device=self.device)
+        self.terrain_kind[ids] = task.terrain_kind
+        # place_reset turns a reversed approach around, so the course is
+        # crossed along the initial forward-command sign.
+        self.approach_sign[ids] = torch.where(task.command[:, 0] < 0, -1., 1.)
+        self.heading_valid[ids] = False
+        self.heading_target_rad[ids] = 0.
+        if self.command_pool is not None:
+            self._begin_episode_segments(ids, task)
+        else:
+            self._begin_episode_trajectory(ids, task)
+        mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        mask[ids] = True
+        aborted = self.protocol.reset(mask, now)
+        self.request_end_counts[int(RequestEnd.RESET)].add_((aborted >= 0).sum())
+        self.active_id[ids] = -1
+        self.physical_id[ids] = -1
+        self._physical_accepted_at_s[ids] = 0
+        self._physical_cancelled[ids] = False
+        self.request_clock[ids] = 0
+        self.flight_seen[ids] = False
+        self.air_ticks[ids] = 0
+        self.ascent_seen[ids] = False
+        self.supported_start[ids] = False
+        self._last_supported[ids] = False
+        self.peak_rise[ids] = 0
+        self.landed_s[ids] = 0
+        self.phase[ids] = 0
+        self.success_id[ids] = -1
+
+    def _begin_episode_trajectory(self, ids, task):
+        """Legacy single trajectory per episode (no command pool)."""
         # SCUT-style heading outer loop: only ordinary, non-nominal rows may
         # hold a world heading. Stairs/recovery/jump keep their explicit modes.
         heading_eligible = ((task.mode == int(CommandMode.NORMAL))
@@ -294,12 +345,9 @@ class LabCourseTasks:
         self.heading_enabled[ids] = (heading_eligible
                                      & (torch.rand(len(ids), generator=self.generator,
                                                    device=self.device) < self.heading_fraction))
-        self.heading_valid[ids] = False
-        self.heading_target_rad[ids] = 0.
-        self.rise[ids] = task.request_height_m
-        self.active_rise[ids] = 0
-        self.elapsed[ids] = 0
-        self.next_request_s[ids] = 3 + 5 * torch.rand(len(ids), generator=self.generator, device=self.device)
+        self.heading_offset_rad[ids] = (torch.rand(len(ids), generator=self.generator, device=self.device)
+                                        * 2 - 1) * math.pi
+        self.segment_clock[ids] = 0
         target = task.command.clone()
         target[task.draw.nominal] = target.new_tensor((0., 0., 0., .32))
         start = torch.zeros_like(target)
@@ -322,24 +370,73 @@ class LabCourseTasks:
         self.trajectory.frequency_end_hz[ids] = 2 / duration
         self.trajectory.kind[ids] = task.draw.trajectory_kind
         self.stream.current[ids] = self.stream.envelope.project(start)[0]
-        mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        mask[ids] = True
-        aborted = self.protocol.reset(mask, now)
-        self.request_end_counts[int(RequestEnd.RESET)].add_((aborted >= 0).sum())
-        self.active_id[ids] = -1
-        self.physical_id[ids] = -1
-        self._physical_accepted_at_s[ids] = 0
-        self._physical_cancelled[ids] = False
-        self.request_clock[ids] = 0
-        self.flight_seen[ids] = False
-        self.air_ticks[ids] = 0
-        self.ascent_seen[ids] = False
-        self.supported_start[ids] = False
-        self._last_supported[ids] = False
-        self.peak_rise[ids] = 0
-        self.landed_s[ids] = 0
-        self.phase[ids] = 0
-        self.success_id[ids] = -1
+
+    def _begin_episode_segments(self, ids, task):
+        """First segment from the same pool path as every later segment.
+
+        The episode clock is zero, so spin/dash stay locked (SCUT: special
+        modes only after 5 s). A recovery birth holds still at its height.
+        """
+        draw = self._draw_segments(ids)
+        command = draw.command.clone()
+        recovery = task.mode == int(CommandMode.RECOVERY)
+        command[recovery, :3] = 0
+        command[recovery, 3] = task.command[recovery, 3]
+        self._apply_segment(ids, command, draw.kind, draw.duration_s,
+                            draw.heading_enabled & ~recovery, draw.heading_offset_rad)
+        # The robot is born at rest; admitted commands slew from standing.
+        start = torch.zeros_like(command)
+        start[:, 3] = .32
+        self.stream.current[ids] = self.stream.envelope.project(start)[0]
+
+    def _draw_segments(self, rows):
+        return self.command_pool.sample(self.family[rows], self.terrain_kind[rows], self.elapsed[rows],
+                                        self.approach_sign[rows], self.command_context(), self.generator)
+
+    def _apply_segment(self, rows, command, kind, duration_s, heading_enabled, heading_offset_rad):
+        """Hold one step target per row; CommandStream applies the deployment slew."""
+        self.trajectory.start[rows], self.trajectory.end[rows] = command, command
+        self.trajectory.kind[rows] = int(TrajectoryKind.HOLD)
+        self.segment_clock[rows] = 0
+        self.segment_end_s[rows] = self.elapsed[rows] + duration_s
+        self.segment_kind[rows] = kind
+        self.segment_counts.add_(torch.bincount(kind, minlength=len(self.segment_counts)))
+        # An approach course keeps its spawn heading target for the episode.
+        keep = CommandPool.approach(self.terrain_kind[rows]) & self.heading_valid[rows]
+        self.heading_enabled[rows] = torch.where(keep, self.heading_enabled[rows], heading_enabled)
+        self.heading_offset_rad[rows] = torch.where(keep, self.heading_offset_rad[rows], heading_offset_rad)
+        self.heading_valid[rows] = keep
+
+    def _resample_segments(self, blocked_by_stair):
+        """Draw the next command segment for settled rows without an active skill."""
+        blocked = (torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+                   if blocked_by_stair is None else torch.as_tensor(blocked_by_stair, dtype=torch.bool,
+                                                                    device=self.device))
+        due = ((self.elapsed >= self.segment_end_s) & (self.protocol.active_id < 0) & ~blocked
+               & (self.base_mode != int(CommandMode.RECOVERY)))
+        rows = due.nonzero().flatten()
+        if rows.numel():
+            draw = self._draw_segments(rows)
+            self._apply_segment(rows, draw.command, draw.kind, draw.duration_s,
+                                draw.heading_enabled, draw.heading_offset_rad)
+
+    def begin_tracking(self, mask):
+        """Recovery handoff: SCUT ground-reset command, then ordinary segments."""
+        rows = mask.nonzero().flatten()
+        if not rows.numel():
+            return
+        if self.command_pool is None:
+            self.family[rows] = int(TaskFamily.HEIGHT)
+            return
+        vx, wz = self.command_pool.handoff(len(rows), self.generator, self.device)
+        command = self.stream.current[rows].clone()
+        command[:, 0], command[:, 1], command[:, 2] = vx, 0., wz
+        self.trajectory.start[rows], self.trajectory.end[rows] = command, command
+        self.trajectory.kind[rows] = int(TrajectoryKind.HOLD)
+        self.segment_clock[rows] = 0
+        self.segment_end_s[rows] = self.elapsed[rows] + self.command_pool.config.handoff_s
+        self.heading_enabled[rows] = False
+        self.heading_valid[rows] = False
 
     @staticmethod
     def _wrap_angle(angle):
@@ -356,16 +453,17 @@ class LabCourseTasks:
                     or not torch.isfinite(yaw_rad).all()):
                 raise ValueError('heading controller requires finite [N] yaw on the policy device')
         self.elapsed.add_(self.policy_dt_s)
+        self.segment_clock.add_(self.policy_dt_s)
+        if self.command_pool is not None:
+            self._resample_segments(blocked_by_stair)
         cyclic = (self.trajectory.kind == 2) | (self.trajectory.kind == 3) | (self.trajectory.kind == 5)
-        clock = torch.where(cyclic, self.elapsed.remainder(self.trajectory.duration_s), self.elapsed)
+        clock = torch.where(cyclic, self.segment_clock.remainder(self.trajectory.duration_s), self.segment_clock)
         target = self.trajectory.at(clock)
         if yaw_rad is not None:
             initialize = self.heading_enabled & ~self.heading_valid
             if bool(initialize.any()):
-                sampled_heading = ((torch.rand(self.num_envs, generator=self.generator,
-                                                device=self.device) * 2 - 1) * math.pi)
                 self.heading_target_rad.copy_(torch.where(
-                    initialize, sampled_heading, self.heading_target_rad))
+                    initialize, self._wrap_angle(yaw_rad + self.heading_offset_rad), self.heading_target_rad))
                 self.heading_valid |= self.heading_enabled
             error = self._wrap_angle(self.heading_target_rad - yaw_rad)
             heading_yaw = (self.heading_gain * error).clamp(

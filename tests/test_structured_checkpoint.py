@@ -104,7 +104,8 @@ def test_explicit_35k_snapshot_restores_four_stage_budget_and_jump_sampler(tmp_p
         assert restored.trainer.consumed == state.trainer.consumed
         assert len(journal.summary()['reserved_by_stage']) == 4
         draw = restored.sampler.sample(1000, 3)
-        assert torch.bincount(draw.family, minlength=6).tolist() == [200, 100, 100, 100, 500, 0]
+        from transformer_rl.formal.tasks.curriculum import JUMP_WEIGHTS
+        assert torch.bincount(draw.family, minlength=6).tolist() == [round(1000 * w) for w in JUMP_WEIGHTS]
         assert recipe.journal_spec().target_rollouts == 35000
 
 

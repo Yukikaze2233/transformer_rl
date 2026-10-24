@@ -42,14 +42,19 @@ ROTATION_DASH_FORWARD_M_S = (2.0, 2.7)
 
 STAGE_NAMES = ('warmup', 'rough', 'hard')
 STAGE_BUDGETS = (5000, 20000, 5000)
+# Birth families (HEIGHT, MOTION, ROTATION, TERRAIN, REQUEST, RECOVERY). Planar
+# commands come from the within-episode command pool, so the ordinary families
+# only shape the first segment. Low-pose stand-up is trained by ground-reset
+# births inside ordinary families (SCUT); the posture-catalogue RECOVERY family
+# is reserved for a separate righting curriculum and has no formal weight.
 STAGE_WEIGHTS = (
-    (0.60, 0.20, 0.10, 0.00, 0.00, 0.10),
-    (0.15, 0.25, 0.15, 0.35, 0.00, 0.10),
-    (0.15, 0.15, 0.15, 0.35, 0.00, 0.20),
+    (0.10, 0.75, 0.15, 0.00, 0.00, 0.00),
+    (0.05, 0.40, 0.10, 0.45, 0.00, 0.00),
+    (0.05, 0.40, 0.10, 0.45, 0.00, 0.00),
 )
 TOTAL_BUDGET = sum(STAGE_BUDGETS)
 JUMP_BUDGET = 5000
-JUMP_WEIGHTS = (0.20, 0.10, 0.10, 0.10, 0.50, 0.00)
+JUMP_WEIGHTS = (0.05, 0.25, 0.05, 0.20, 0.45, 0.00)
 COMPLETE_STAGE_NAMES = (*STAGE_NAMES, 'jump')
 COMPLETE_STAGE_BUDGETS = (*STAGE_BUDGETS, JUMP_BUDGET)
 COMPLETE_STAGE_WEIGHTS = (*STAGE_WEIGHTS, JUMP_WEIGHTS)
