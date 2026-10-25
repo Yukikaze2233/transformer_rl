@@ -153,3 +153,20 @@ def test_quarantine_does_not_hide_asset_or_systemic_errors(tmp_path, failure):
         course.ground()
     assert not course.query_invalid.any()
 
+
+
+@pytest.mark.parametrize('finish,isolated', [(.5, True), (1., False)])
+def test_miss_beyond_the_declared_course_is_a_row_exit_and_inside_it_a_hole(tmp_path, finish, isolated):
+    course = cached_course(tmp_path)
+    # The physical tile is larger than the authored course rectangle.
+    course.router.starts = torch.tensor([-1.])
+    course.router.finishes = torch.tensor([finish])
+    course.router.half_widths = torch.tensor([1.])
+    course.env._root_link_position()[0, :2] = .9  # inside physical bounds, beyond x = 0.5
+    if isolated:
+        course.ground()
+        assert course.finish_queries().tolist() == [True, False]
+    else:
+        with pytest.raises(RuntimeError, match='terrain'):
+            course.ground()
+            course.finish_queries()

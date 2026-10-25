@@ -277,6 +277,16 @@ class LabTerrainCourse:
         selected = bounds[tile.clamp(0, len(bounds) - 1)]
         outside = ((points[..., :2] < selected[:, None, 0] - 1e-5)
                    | (points[..., :2] > selected[:, None, 1] + 1e-5)).any(-1)
+        starts = getattr(self.router, 'starts', None)
+        if starts is not None:
+            # Authored assets fill only their declared course rectangle inside
+            # a larger physical tile: a miss beyond that rectangle is a row
+            # leaving the course (e.g. reversing off the approach), not a hole.
+            index = tile.clamp(0, len(starts) - 1)[:, None]
+            local = points[..., :2] - self.router.origins[:, None, :2]
+            outside |= ((local[..., 0] < starts[index] - 1e-5)
+                        | (local[..., 0] > self.router.finishes[index] + 1e-5)
+                        | (local[..., 1].abs() > self.router.half_widths[index] + 1e-5))
         bad = ~valid.all(-1)
         isolated = (bad & ready & legal & finite_state.all(-1)
                     & (valid | outside).all(-1) & torch.isfinite(points).all(dim=(-2, -1)))

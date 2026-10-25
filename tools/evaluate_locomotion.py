@@ -386,7 +386,13 @@ def main():
         env = EvaluationEnv(cfg)
         env.set_task_sampler(EvalSampler())
         if args.suite == 'step':
-            env._terrain_course.router.level.fill_(env._terrain_course.router.manifest['levels'] - 1)
+            router = env._terrain_course.router
+            router.level.fill_(router.manifest['levels'] - 1)
+            # Route step and platform rows only to the authored RMUC courses.
+            procedural = torch.tensor([tile['name'] not in ('road_step', 'central_steps')
+                                       for tile in router.manifest['tiles']], device=router.kinds.device)
+            stepped = (router.kinds == int(TerrainKind.STEP_UP)) | (router.kinds == int(TerrainKind.TWO_PLATFORMS))
+            router.kinds[procedural & stepped] = -1
         env.reset()
         if args.suite == 'step':
             names = [env._terrain_course.router.manifest['tiles'][int(tile)]['name']
