@@ -48,9 +48,19 @@ from .terrain_collision import partition_static_collision
 from .dynamics import LabStartupDynamics
 from .sensors import LabSensorModel
 from .action_transport import DelayedActionTransport, SubstepActionLatch
+from .birth import BirthRandomization
+from ..simulation.ground import WheelCollisionCentres
 from ..control.communication import EpisodeRandomization, PhysicalCommunication
 from .joint_coordinates import ContinuousJointCoordinates
 from .mechanics import NativeLoopTelemetry
+
+
+def _quat_mul(a, b):
+    """Hamilton product of xyzw quaternions."""
+    ax, ay, az, aw = a.unbind(-1)
+    bx, by, bz, bw = b.unbind(-1)
+    return torch.stack((aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx,
+                        aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz), -1)
 
 
 def _yaw(quaternion_xyzw):
@@ -228,6 +238,7 @@ class WheeledLabEnv(DirectRLEnv):
         self._held_generated_at_s = torch.zeros(self.num_envs, dtype=torch.float64, device=self._device)
         self._substep = 0
         self._motor_envelope = getattr(cfg, 'motor_envelope_spec', None)
+        self._birth_randomization = None
         formal_config = getattr(cfg, "formal_reward_spec", None)
         self._formal_reward = None
         self._boundary_geometry = None
@@ -351,6 +362,13 @@ class WheeledLabEnv(DirectRLEnv):
             self._recovery_preparation = _RecoveryPreparation(
                 self._control.controller, policy_dt_s=float(self.step_dt),
                 timeout_s=self._failure_latch.limits.preparation_timeout_s)
+            birth = getattr(self.cfg, 'birth_randomization_spec', None)
+            if birth is not None and birth.enabled:
+                wheels = WheelCollisionCentres.from_urdf(
+                    (self._asset.directory / self._asset.manifest['urdf']).read_bytes(), self._binding)
+                self._birth_randomization = BirthRandomization(
+                    self._recovery_reset, birth, wheels, seed=int(getattr(self.cfg, 'seed', 0) or 0) + 86028121,
+                    device=self._device, pair_domain=self._control.controller.pair_domain)
             if getattr(self.cfg, 'course_manifest', None):
                 from .terrain import LabTerrainCourse
                 self._terrain_course = LabTerrainCourse(self, self.cfg.course_manifest)
@@ -957,17 +975,21 @@ class WheeledLabEnv(DirectRLEnv):
             targets, q, dq, now, strength=None if randomization is None else randomization.motor_strength,
             envelope=self._motor_envelope, motor_velocity_rad_s=shaft_velocity,
             no_load_scale=None if randomization is None else randomization.no_load_scale)
+        requested = feedback.capped_effort
+        preparation = getattr(self, '_recovery_preparation', None)
+        if preparation is not None:
+            requested = preparation.release_effort(requested)
         if communication is not None:
             generated = torch.where(targets.control_source == int(ControlSource.POLICY), generated_at, now)
-            effort = communication.deliver(feedback.capped_effort, feedback.effort_bounds,
+            effort = communication.deliver(requested, feedback.effort_bounds,
                 now, generated, feedback_sample_s, response=self._control.drive,
                 target_arrived_at_s=targets.controller_issued_at_s)
         elif self._control.drive is not None:
             effort = self._control.drive.advance(
-                feedback.capped_effort, self._physics_dt_tensor, feedback.effort_bounds,
+                requested, self._physics_dt_tensor, feedback.effort_bounds,
             ).mean_effort
         else:
-            effort = feedback.capped_effort
+            effort = requested
         # Gas pressure is a main-link mount force/torque, not a second
         # prismatic slider effort. Slider damping remains in the actuator cfg.
         if self._spring_force is not None:
@@ -1184,6 +1206,12 @@ class WheeledLabEnv(DirectRLEnv):
             self._observe_substep()
         self.episode_length_buf += 1
         self.common_step_counter += 1
+        birth = getattr(self, '_birth_randomization', None)
+        if birth is not None and self._last_state is not None:
+            birth.observe(
+                float(self.step_dt), height_m=self._last_state.height_above_ground_m,
+                height_command_m=self._command[:, 3], tilt_rad=self._last_tilt,
+                wheel_load_n=self._last_state.wheel_ground_force_n, terminated=self._terminated)
         preparation = getattr(self, '_recovery_preparation', None)
         if preparation is not None:
             q = self._joint_positions().index_select(1, self._active_indices)
@@ -1319,28 +1347,6 @@ class WheeledLabEnv(DirectRLEnv):
         root_pose[:, :3] += self.scene.env_origins.index_select(0, ids)
         if self._terrain_course is not None:
             self._terrain_course.place_reset(ids, task_sample, root_pose)
-            support_lr = self._terrain_course._last_support_clearance_lr.index_select(0, ids)
-            self._last_reset_support_clearance_lr = support_lr
-            finite_rows = torch.isfinite(support_lr).all(-1)
-            last_ordinary = int(finite_rows.sum())
-            last_bilateral = int((finite_rows & (support_lr[:, 0] >= 0)
-                                  & (support_lr[:, 1] >= 0)).sum())
-            self._last_reset_support_rows = last_ordinary
-            self._last_reset_support_bilateral_rows = last_bilateral
-            support = support_lr[finite_rows]
-            self._last_reset_support_clearance = (
-                support.amin() if support.numel() else None)
-            self._reset_support_rows += last_ordinary
-            self._reset_support_bilateral_rows += last_bilateral
-            for side, name in ((0, '_reset_support_left_min'),
-                               (1, '_reset_support_right_min')):
-                values = support_lr[:, side]
-                values = values[torch.isfinite(values)]
-                if values.numel():
-                    value = values.amin()
-                    previous = getattr(self, name)
-                    setattr(self, name, value if previous is None
-                            else torch.minimum(previous, value))
         root_velocity = torch.zeros(count, 6, dtype=torch.float32, device=self._device)
         joint_position = self._as_torch(self.robot.data.default_joint_pos).index_select(0, ids).clone()
         joint_velocity = torch.zeros_like(joint_position)
@@ -1382,6 +1388,9 @@ class WheeledLabEnv(DirectRLEnv):
                     1, torch.tensor(asset_joint_order, device=self._device))
                 root_velocity[local] = pose.root_com_velocity
                 joint_velocity[local] = pose.joint_velocity
+        ground = self._randomize_births(ids, task_sample, root_pose, joint_position, joint_velocity)
+        if self._terrain_course is not None:
+            self._record_reset_support(ids)
         if self._recovery_reset is not None:
             # Validate the exact q18 written to physics against the selected
             # closed-chain source. Nominal/recovery solver output must already
@@ -1461,6 +1470,11 @@ class WheeledLabEnv(DirectRLEnv):
         self._reset_mask[ids] = True
         if self._terrain_course is not None:
             self._terrain_course.reset_commands(ids, task_sample)
+            if ground is not None and ground.any():
+                # SCUT ground reset: vx, yaw in U(-1, 1) for 1.5 s, then the pool.
+                rows = torch.zeros(self.num_envs, dtype=torch.bool, device=self._device)
+                rows[ids[ground]] = True
+                self._terrain_course.tasks.begin_tracking(rows)
         if self._formal_reward is not None:
             fresh = ~self._formal_initialized[ids]
             self._episode_id[ids] += 1
@@ -1491,6 +1505,11 @@ class WheeledLabEnv(DirectRLEnv):
         if self._recovery_preparation is not None:
             self._recovery_preparation.reset_rows(
                 ids, q, self._base_command_mode == int(CommandMode.RECOVERY), self._clock())
+            if getattr(self, '_pending_ground_rows', None) is not None and self._pending_ground_rows.numel():
+                self._recovery_preparation.release_rows(
+                    self._pending_ground_rows, self._birth_randomization.release_frames(float(self.step_dt)))
+                self._birth_randomization.begin(self._pending_ground_rows)
+            self._pending_ground_rows = None
         if self._communication is not None:
             dq = self._as_torch(self.robot.data.joint_vel).index_select(1, self._active_indices)
             self._communication.reset(mask, q, dq, self._clock(), difficulty=difficulty)
@@ -1514,6 +1533,8 @@ class WheeledLabEnv(DirectRLEnv):
                      else self._episode_randomization.state_dict())}
         if self._action_latch is not None:
             state['action_latch'] = self._action_latch.state_dict()
+        if self._birth_randomization is not None:
+            state['birth_randomization'] = self._birth_randomization.state_dict()
         return state
 
     def restore_control_timing(self, state):
@@ -1535,6 +1556,63 @@ class WheeledLabEnv(DirectRLEnv):
             self._episode_randomization.restore_after_physical_reset(state['episode_randomization'])
         if self._action_latch is not None:
             self._action_latch.restore_after_physical_reset(state['action_latch'])
+        if self._birth_randomization is not None:
+            self._birth_randomization.restore_after_physical_reset(state['birth_randomization'])
+
+    def _randomize_births(self, ids, task_sample, root_pose, joint_position, joint_velocity):
+        """SCUT births inside this asset's travel: ground or landing posture on every ordinary row.
+
+        Writes the reset tensors in place and returns the [M] ground-birth mask
+        (None without birth randomization). Recovery rows keep their posture.
+        """
+        birth = self._birth_randomization
+        self._pending_ground_rows = None
+        if birth is None or task_sample is None:
+            return None
+        ordinary = task_sample.mode != int(CommandMode.RECOVERY)
+        ground, index, tilt, wheels = birth.draw(ordinary, birth.ground_eligible(task_sample.terrain_kind))
+        landing = ordinary & ~ground
+        # The course placed the nominal stance on its local ground; keep that datum.
+        spawn = (self._terrain_course.nominal_spawn_height_m if self._terrain_course is not None
+                 else self._task.nominal_height_m)
+        datum = root_pose[:, 2] - spawn
+        root_pose[ground, 2] = datum[ground] + birth.ground_root_height_m[index[ground]]
+        root_pose[landing, 2] = datum[landing] + birth.landing_root_height_m + birth.config.tilt_clearance_m
+        root_pose[landing, 3:7] = _quat_mul(root_pose[landing, 3:7], birth.tilt_quaternion(tilt[landing]))
+        rows = ordinary.nonzero(as_tuple=False).flatten()
+        order = [self._recovery_reset.kinematics.binding.native_joint_names.index(name)
+                 for name in self._binding.native_joint_names]
+        joint_position[rows] = birth.joint_position[index[rows]].index_select(
+            1, torch.tensor(order, device=self._device))
+        if self._terrain_course is not None and rows.numel():
+            lifted = root_pose[rows]
+            self._terrain_course.raise_to_support(ids[rows], lifted, birth.wheel_centre_root_m[index[rows]])
+            root_pose[rows] = lifted
+        wheel_columns = [self._binding.native_joint_names.index(name) for name in ('L_joint3', 'R_joint3')]
+        joint_velocity[:, wheel_columns] = torch.where(ordinary[:, None], wheels, joint_velocity[:, wheel_columns])
+        self._pending_ground_rows = ids[ground]
+        return ground
+
+    def _record_reset_support(self, ids):
+        """Wheel-bottom support gaps of the reset rows as finally written."""
+        support_lr = self._terrain_course._last_support_clearance_lr.index_select(0, ids)
+        self._last_reset_support_clearance_lr = support_lr
+        finite_rows = torch.isfinite(support_lr).all(-1)
+        last_ordinary = int(finite_rows.sum())
+        last_bilateral = int((finite_rows & (support_lr[:, 0] >= 0) & (support_lr[:, 1] >= 0)).sum())
+        self._last_reset_support_rows = last_ordinary
+        self._last_reset_support_bilateral_rows = last_bilateral
+        support = support_lr[finite_rows]
+        self._last_reset_support_clearance = support.amin() if support.numel() else None
+        self._reset_support_rows += last_ordinary
+        self._reset_support_bilateral_rows += last_bilateral
+        for side, name in ((0, '_reset_support_left_min'), (1, '_reset_support_right_min')):
+            values = support_lr[:, side]
+            values = values[torch.isfinite(values)]
+            if values.numel():
+                value = values.amin()
+                previous = getattr(self, name)
+                setattr(self, name, value if previous is None else torch.minimum(previous, value))
 
     def _encoder_position(self, q):
         """True output positions to encoder coordinates (randomized zero bias)."""

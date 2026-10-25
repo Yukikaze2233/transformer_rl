@@ -23,6 +23,7 @@ from .contract import FlatTaskSpec
 from .critic_features import CRITIC_INPUT_CONTRACT
 from .action_transport import ActionLatchConfig, ActionTransportConfig
 from ..tasks.command_pool import CommandPoolConfig
+from .birth import BirthRandomizationConfig
 from ..tasks.reward import REWARD_VERSION
 from ..control.communication import CommunicationConfig, EpisodeRandomizationConfig
 from .materials import WheelMaterialConfig
@@ -106,7 +107,7 @@ def parse_configuration(recipe, configuration, authorized_boot):
                 'terrain_atlas_pin', 'environment_spacing_m', 'task', 'pair_domain',
                 'physics', 'profile_collection', 'termination_limits', 'sensors', 'dynamics'}
     allowed = expected | {'action_transport', 'wheel_material', 'communication', 'episode_randomization',
-                          'action_latch', 'motor_envelope', 'command_pool'}
+                          'action_latch', 'motor_envelope', 'command_pool', 'birth_randomization'}
     if (not isinstance(configuration, dict) or not expected <= set(configuration) <= allowed
             or configuration['format'] != 'managed_lab_runtime_v4'
             or configuration['authorized_boot'] != authorized_boot or authorized_boot != boot_id()
@@ -119,7 +120,8 @@ def parse_configuration(recipe, configuration, authorized_boot):
             or not isinstance(configuration['task'], dict)
             or set(configuration['task']) != {field.name for field in fields(FlatTaskSpec)}
             or not isinstance(configuration['termination_limits'], dict)
-            or set(configuration['termination_limits']) != {field.name for field in fields(NativeTaskLimits)}
+            or not ({field.name for field in fields(NativeTaskLimits)} - {'pose_failure_confirm_s'}
+                    <= set(configuration['termination_limits']) <= {field.name for field in fields(NativeTaskLimits)})
             or not isinstance(configuration['sensors'], dict)
             or not ({field.name for field in fields(SensorModelConfig)} - {'shared_delay'}
                     <= set(configuration['sensors']) <= {field.name for field in fields(SensorModelConfig)})
@@ -147,7 +149,7 @@ def parse_configuration(recipe, configuration, authorized_boot):
     if configuration.get('episode_randomization') is not None:
         EpisodeRandomizationConfig.from_dict(configuration['episode_randomization'])
     for key, parser in (('action_latch', ActionLatchConfig), ('motor_envelope', MotorEnvelope),
-                        ('command_pool', CommandPoolConfig)):
+                        ('command_pool', CommandPoolConfig), ('birth_randomization', BirthRandomizationConfig)):
         if configuration.get(key) is not None:
             parser.from_dict(configuration[key])
     latch_raw = configuration.get('action_latch')
@@ -243,6 +245,8 @@ def runtime(recipe, components, configuration, *, control):
                             else MotorEnvelope.from_dict(configuration['motor_envelope'])),
             command_pool=(None if configuration.get('command_pool') is None
                           else CommandPoolConfig.from_dict(configuration['command_pool'])),
+            birth_randomization=(None if configuration.get('birth_randomization') is None
+                                 else BirthRandomizationConfig.from_dict(configuration['birth_randomization'])),
             declarative_scene=launcher.declarative_scene,
             terrain_scan=True, forward_scan=True, terrain_profile='course',
             terrain_atlas_manifest=str(atlas), expected_manifest_sha256=asset.manifest_sha256)
@@ -315,6 +319,8 @@ def runtime(recipe, components, configuration, *, control):
                 'constants': asdict(MotorEnvelope()),
                 'scope': 'datasheet-derived linear back-EMF limit on true shaft speed; not identified under load'},
             'command_pool': None if configuration.get('command_pool') is None else asdict(CommandPoolConfig()),
+            'birth_randomization': (None if configuration.get('birth_randomization') is None
+                                    else asdict(BirthRandomizationConfig.from_dict(configuration['birth_randomization']))),
             'reward_version': REWARD_VERSION,
             'control_delay_contract': control_delay_contract(configuration, response),
             'wheel_material': env.wheel_material_receipt,

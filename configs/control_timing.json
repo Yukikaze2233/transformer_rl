@@ -67,5 +67,14 @@
       0.015
     ],
     "shared_delay": true
+  },
+  "birth_randomization": {
+    "enabled": true
+  },
+  "termination_limits": {
+    "failure_tilt_rad": 0.6981317007977318,
+    "forbidden_body_load_n": 1.0,
+    "forbidden_contact_confirm_s": 0.4,
+    "pose_failure_confirm_s": 0.4
   }
 }

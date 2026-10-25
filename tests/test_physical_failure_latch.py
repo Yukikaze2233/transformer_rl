@@ -98,3 +98,26 @@ def test_historical_import_and_frozen_configuration_remain_compatible():
     assert HistoricalLimits is NativeTaskLimits
     with pytest.raises(ValueError):
         PhysicalFailureLatch(limits(), 1, physics_dt_s=0)
+
+
+def test_pose_failures_must_persist_like_scut_before_ending_an_episode():
+    latch = PhysicalFailureLatch(replace(limits(), failure_tilt_rad=.7, pose_failure_confirm_s=.4),
+                                 2, physics_dt_s=.005)
+    value = sample(2)
+    tilt = torch.tensor([[torch.sin(torch.tensor(1.)), 0., -torch.cos(torch.tensor(1.))]])
+    value['gravity_body'] = tilt.expand(2, -1).clone()  # 57 deg > 40 deg
+    for _ in range(79):  # 0.395 s
+        assert not latch.observe(**value).true_failure.any()
+    # A brief recovery below the limit restarts the persistence window.
+    upright = dict(value, gravity_body=torch.tensor([[0., 0., -1.]]).expand(2, -1).clone())
+    latch.observe(**upright)
+    for _ in range(79):
+        assert not latch.observe(**value).true_failure.any()
+    result = latch.observe(**value)
+    assert result.failure_reasons.tolist() == [int(FailureReason.EXCESSIVE_TILT)] * 2
+    low = PhysicalFailureLatch(replace(limits(), pose_failure_confirm_s=.4), 1, physics_dt_s=.005)
+    sitting = sample(1)
+    sitting['height_m'].fill_(.05)
+    for _ in range(79):
+        assert not low.observe(**sitting).true_failure.any()
+    assert low.observe(**sitting).failure_reasons.tolist() == [int(FailureReason.LOW_SUPPORT_HEIGHT)]

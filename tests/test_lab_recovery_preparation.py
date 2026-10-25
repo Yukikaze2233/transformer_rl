@@ -153,3 +153,26 @@ def test_actual_lab_collector_masks_preparation_and_restarts_handoff_history():
     expected[:, :, 14:16] = 0
     torch.testing.assert_close(history, expected, rtol=0, atol=0)
     StructuredPPOTrainer(model)._validate_behavior(batch, torch.arange(2))
+
+
+def test_passive_release_requests_zero_torque_then_hands_off_after_its_frames():
+    controller = OutputFeedbackController((0.,) * 6, 2, pair_domain=None)
+    preparation = _RecoveryPreparation(controller, policy_dt_s=.02, timeout_s=5.)
+    position = torch.zeros(2, 6)
+    clock = torch.zeros(2, dtype=torch.float64)
+    preparation.reset_rows(torch.arange(2), position, torch.zeros(2, dtype=torch.bool), clock)
+    preparation.release_rows(torch.tensor([0]), 10)
+    policy = controller.decode(torch.ones(2, 6), position, clock)
+    targets = preparation.targets(policy, clock)
+    assert targets.control_source.tolist() == [int(ControlSource.PREPARATION_HOLD), int(ControlSource.POLICY)]
+    assert targets.issued_action[0].eq(0).all()
+    effort = torch.full((2, 6), 7.)
+    released = preparation.release_effort(effort)
+    # SCUT zero_torque_time_s: no motor torque on the released row.
+    assert released[0].eq(0).all() and released[1].eq(7.).all()
+    for _ in range(9):
+        handoff, timeout = preparation.finish_interval(position)
+        assert not handoff.any() and not timeout.any()
+    handoff, timeout = preparation.finish_interval(position)
+    assert handoff.tolist() == [True, False] and not timeout.any()
+    assert not preparation.active.any() and not preparation.passive.any()

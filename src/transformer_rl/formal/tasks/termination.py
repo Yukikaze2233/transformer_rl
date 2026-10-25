@@ -35,6 +35,9 @@ class NativeTaskLimits:
     passive_knee_overrun_rad: float
     knee_pivot_residual_m: float
     preparation_timeout_s: float
+    # SCUT: tilt and low-support failures must persist (0.4 s) before ending
+    # an episode, so a landing or stand-up may touch down. 0 keeps instant.
+    pose_failure_confirm_s: float = 0.
 
     def __post_init__(self):
         positive = ('healthy_tilt_rad', 'failure_tilt_rad', 'forbidden_body_load_n',
@@ -47,6 +50,8 @@ class NativeTaskLimits:
                 or not self.minimum_recovery_height_m <= self.minimum_normal_height_m
                 or not self.healthy_tilt_rad < self.failure_tilt_rad <= math.pi
                 or self.preparation_timeout_s < .05
+                or type(self.pose_failure_confirm_s) not in (int, float)
+                or not math.isfinite(self.pose_failure_confirm_s) or self.pose_failure_confirm_s < 0
                 or not isinstance(self.forbidden_body_names, tuple) or not self.forbidden_body_names
                 or len(set(self.forbidden_body_names)) != len(self.forbidden_body_names)
                 or any(not isinstance(v, str) or not v for v in self.forbidden_body_names)):
@@ -71,6 +76,7 @@ class PhysicalFailureLatch:
         self.limits, self.num_envs = limits, num_envs
         self.device, self.dt = torch.device(device), float(physics_dt_s)
         self.contact_time_s = torch.zeros(num_envs, dtype=torch.float64, device=self.device)
+        self.pose_time_s = torch.zeros(num_envs, dtype=torch.float64, device=self.device)
         self.failure_reasons = torch.zeros(num_envs, dtype=torch.long, device=self.device)
 
     def reset(self, mask):
@@ -78,6 +84,7 @@ class PhysicalFailureLatch:
                 or mask.dtype != torch.bool or mask.device != self.device):
             raise ValueError('physical condition reset needs its actual row mask')
         self.contact_time_s[mask] = 0
+        self.pose_time_s[mask] = 0
         self.failure_reasons[mask] = 0
 
     @torch.no_grad()
@@ -109,9 +116,12 @@ class PhysicalFailureLatch:
         contact = contacts.any(-1) & ~recovery
         self.contact_time_s.copy_(torch.where(contact, self.contact_time_s + self.dt, 0))
         minimum = torch.where(recovery, limits.minimum_recovery_height_m, limits.minimum_normal_height_m)
+        low, tilted = height_m < minimum, (tilt > limits.failure_tilt_rad) & ~recovery
+        self.pose_time_s.copy_(torch.where(low | tilted, self.pose_time_s + self.dt, 0))
+        confirmed = self.pose_time_s >= limits.pose_failure_confirm_s - 1e-9
         events = (
-            (height_m < minimum, FailureReason.LOW_SUPPORT_HEIGHT),
-            ((tilt > limits.failure_tilt_rad) & ~recovery, FailureReason.EXCESSIVE_TILT),
+            (low & confirmed, FailureReason.LOW_SUPPORT_HEIGHT),
+            (tilted & confirmed, FailureReason.EXCESSIVE_TILT),
             (self.contact_time_s >= limits.forbidden_contact_confirm_s - 1e-9,
              FailureReason.FORBIDDEN_BODY_CONTACT),
             (knee_signed_clearance_rad.lt(-limits.passive_knee_overrun_rad).any(-1),

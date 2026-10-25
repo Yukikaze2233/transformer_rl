@@ -92,6 +92,10 @@ class _RecoveryPreparation:
         self._start = torch.zeros(count, 6, device=device)
         self._delta = torch.zeros(count, 4, device=device)
         self._duration = torch.zeros(count, dtype=torch.float64, device=device)
+        # Timed passive release (SCUT ground reset): zero motor torque, so the
+        # robot settles or collapses under gravity before the policy acts.
+        self.passive = torch.zeros(count, dtype=torch.bool, device=device)
+        self._release_frames = torch.zeros(count, dtype=torch.long, device=device)
         self._has_active = False
 
     @torch.no_grad()
@@ -99,6 +103,7 @@ class _RecoveryPreparation:
         hold = self.controller.reset_hold_action(feedback, position_tolerance_rad=1e-6)
         target = self.controller.decode(torch.zeros_like(feedback), feedback, now_s)
         self.active[ids] = eligible[ids] & ~hold.admitted[ids]
+        self.passive[ids] = False
         self.elapsed[ids], self.frames[ids] = 0., 0
         self._start[ids] = feedback[ids]
         self._delta[ids] = target.admitted_leg_position_rad[ids] - feedback[ids, :4]
@@ -106,6 +111,24 @@ class _RecoveryPreparation:
         # relative target between its two admitted endpoint configurations.
         self._duration[ids] = self._delta[ids].abs().amax(-1).double()
         self._has_active = bool(self.active.any())
+
+    @torch.no_grad()
+    def release_rows(self, ids, frames):
+        """Script-own ``ids`` for ``frames`` policy intervals of passive release."""
+        if type(frames) is not int or frames < 1:
+            raise ValueError('passive release needs a positive whole number of policy intervals')
+        self.active[ids] = True
+        self.passive[ids] = True
+        self._release_frames[ids] = frames
+        self.elapsed[ids], self.frames[ids] = 0., 0
+        self._has_active = bool(self.active.any())
+
+    @torch.no_grad()
+    def release_effort(self, effort):
+        """Per substep: passive rows request zero torque on all six outputs (SCUT)."""
+        if not bool(self.passive.any()):
+            return effort
+        return torch.where(self.passive[:, None], torch.zeros_like(effort), effort)
 
     @torch.no_grad()
     def targets(self, policy_targets, now_s):
@@ -117,13 +140,15 @@ class _RecoveryPreparation:
         reference[:, :4] += fraction[:, None].float() * self._delta
         # Encode a commanded waypoint, not a fabricated feedback measurement.
         hold = self.controller.preparation_hold(reference, position_tolerance_rad=1e-6)
-        if not bool(hold.admitted[self.active].all()):
+        if not bool(hold.admitted[self.active & ~self.passive].all()):
             raise ValueError('recovery preparation waypoint violates the original coupled target domain')
         selected = self.active[:, None]
         raw = self.controller.nominal[:4] + .25 * hold.requested_action[:, :4]
+        # A passive release issues no waypoint; its targets follow feedback per substep.
+        issued = torch.where(self.passive[:, None], 0., hold.requested_action)
         return replace(
             policy_targets,
-            issued_action=torch.where(selected, hold.requested_action, policy_targets.issued_action),
+            issued_action=torch.where(selected, issued, policy_targets.issued_action),
             raw_leg_position_rad=torch.where(selected, raw, policy_targets.raw_leg_position_rad),
             admitted_leg_position_rad=torch.where(selected, hold.leg_position_rad,
                                                   policy_targets.admitted_leg_position_rad),
@@ -142,9 +167,11 @@ class _RecoveryPreparation:
         if self._has_active:
             self.frames.add_(self.active.long())
             hold = self.controller.reset_hold_action(feedback, position_tolerance_rad=1e-6)
-            handoff = self.active & hold.admitted & (self.frames >= 5)
-            timeout = self.active & ~handoff & (self.elapsed >= self.timeout_s - 1e-9)
+            released = self.passive & (self.frames >= self._release_frames)
+            handoff = (self.active & ~self.passive & hold.admitted & (self.frames >= 5)) | released
+            timeout = self.active & ~self.passive & ~handoff & (self.elapsed >= self.timeout_s - 1e-9)
             self.active &= ~handoff
+            self.passive &= ~released
             self._has_active = bool(self.active.any())
         return handoff, timeout
 

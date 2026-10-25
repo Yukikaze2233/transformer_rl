@@ -373,6 +373,28 @@ class LabTerrainCourse:
         self.tof_step_height_m.copy_(value)
         self.tof_request_id.copy_(ids)
 
+    def raise_to_support(self, ids, pose, wheel_centres_root):
+        """Raise reset ``pose`` rows [M,7] until both wheel colliders clear authored terrain.
+
+        ``wheel_centres_root`` [M|1,2,3] are the rows' wheel collider centres in
+        the root frame. Never lowers a row; records each wheel's bottom gap.
+        """
+        wheel_offsets = self._rotate_xyzw(pose[:, None, 3:7], wheel_centres_root.to(pose.dtype))
+        wheel_points = (pose[:, None, :3] + wheel_offsets).to(torch.float32)
+        wheel_points[..., 2] = self.query._ceiling_m
+        query_tiles = self.router.tile[ids][:, None].expand(-1, 2).contiguous()
+        heights, valid, _, _ = self.query(wheel_points, query_tiles)
+        if not valid.all():
+            raise RuntimeError('reset approach has no authored support under both wheel colliders')
+        # wheel bottom = root_z + local_z - radius.
+        required = heights - wheel_offsets[..., 2] + self._wheel_radius[None] + self._reset_clearance_m
+        pose[:, 2] = torch.maximum(pose[:, 2], required.amax(-1))
+        gap = pose[:, 2, None] + wheel_offsets[..., 2] - self._wheel_radius[None] - heights
+        # Keep both wheels separately: the minimum alone cannot establish
+        # that the second wheel was supported by authored terrain.
+        self._last_support_clearance[ids] = gap.amin(-1)
+        self._last_support_clearance_lr[ids] = gap
+
     def place_reset(self, ids, task, pose):
         if task is None:
             raise ValueError('terrain course requires the formal TaskDraw sampler')
@@ -412,26 +434,9 @@ class LabTerrainCourse:
         ordinary = task.mode != int(CommandMode.RECOVERY)
         if ordinary.any():
             rows = ordinary.nonzero(as_tuple=False).flatten()
-            wheel_offsets = self._rotate_xyzw(
-                pose[rows, 3:7][:, None, :], self._wheel_centres_root[None].to(pose.dtype))
-            wheel_points = pose[rows, :3][:, None, :] + wheel_offsets
-            wheel_points = wheel_points.to(torch.float32)
-            wheel_points[..., 2] = self.query._ceiling_m
-            query_tiles = tile.index_select(0, rows)[:, None].expand(-1, 2).contiguous()
-            heights, valid, _, _ = self.query(wheel_points, query_tiles)
-            if not valid.all():
-                raise RuntimeError('reset approach has no authored support under both wheel colliders')
-            # wheel bottom = root_z + local_z - radius. Raise only; never sink.
-            required = heights - wheel_offsets[..., 2] + self._wheel_radius[None]
-            required = required + self._reset_clearance_m
-            adjusted = torch.maximum(pose[rows, 2:3], required.amax(-1, keepdim=True))
-            pose[rows, 2] = adjusted[:, 0]
-            gap = (pose[rows, 2, None] + wheel_offsets[..., 2]
-                   - self._wheel_radius[None] - heights)
-            # Keep both wheels separately: the old minimum cannot establish
-            # that the second wheel was supported by authored terrain.
-            self._last_support_clearance[ids[rows]] = gap.amin(-1)
-            self._last_support_clearance_lr[ids[rows]] = gap
+            lifted = pose[rows]
+            self.raise_to_support(ids[rows], lifted, self._wheel_centres_root[None])
+            pose[rows] = lifted
         self._last_support_clearance[ids[~ordinary]] = float('nan')
         self._last_support_clearance_lr[ids[~ordinary]] = float('nan')
         self._ground_token = None
@@ -659,6 +664,8 @@ class LabTerrainCourse:
                 'query_rejected_intervals': int(self.query_rejected_intervals),
                 'query_rejection_scope': 'spatial misses; reset, no PPO/auxiliary/bootstrap credit',
                 'recovery': self.recovery.metrics(),
+                'birth': (None if self.env._birth_randomization is None
+                          else self.env._birth_randomization.metrics()),
                 'episode_birth_family_counts': dict(zip(
                     (name.name.lower() for name in TaskFamily), self._birth_family_counts.tolist())),
                 'episode_birth_counts_scope': 'observed source counters; legacy v2 history is unavailable',
