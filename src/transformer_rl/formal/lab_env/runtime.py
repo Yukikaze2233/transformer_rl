@@ -208,11 +208,12 @@ def runtime(recipe, components, configuration, *, control):
         torch.cuda.set_device(0)
         torch.cuda.init()
         health = NativePhysicsHealth.for_native_process(control.binding['attempt'])
+        sections = optional_sections(configuration)
         cfg = build_course_env_cfg(
             asset, atlas, num_envs=recipe.num_envs, device=recipe.device, seed=recipe.training_seed,
             environment_spacing_m=configuration['environment_spacing_m'], response=response, pair_domain=pair,
             task=task, termination_limits=limits, sensors=sensors, dynamics=dynamics, action_transport=transport,
-            sections=optional_sections(configuration), declarative_scene=launcher.declarative_scene)
+            sections=sections, declarative_scene=launcher.declarative_scene)
         configure_course_physics(cfg, configuration['physics'], num_envs=recipe.num_envs, device=recipe.device,
                                  declarative_scene=launcher.declarative_scene)
         if sdk_identity is not None:
@@ -268,12 +269,12 @@ def runtime(recipe, components, configuration, *, control):
                                      'sampling': 'episode reset; startup mass and wheel materials remain fixed'},
             'action_latch': {'configuration': configuration.get('action_latch'),
                              'scope': 'previous policy target held for whole 5 ms substeps at the controller latch'},
-            'motor_envelope': None if configuration.get('motor_envelope') is None else {
-                'constants': asdict(MotorEnvelope()),
+            'motor_envelope': None if sections['motor_envelope'] is None else {
+                'constants': asdict(sections['motor_envelope']),
                 'scope': 'datasheet-derived linear back-EMF limit on true shaft speed; not identified under load'},
-            'command_pool': None if configuration.get('command_pool') is None else asdict(CommandPoolConfig()),
-            'birth_randomization': (None if configuration.get('birth_randomization') is None
-                                    else asdict(BirthRandomizationConfig.from_dict(configuration['birth_randomization']))),
+            'command_pool': None if sections['command_pool'] is None else asdict(sections['command_pool']),
+            'birth_randomization': (None if sections['birth_randomization'] is None
+                                    else asdict(sections['birth_randomization'])),
             'reward_version': REWARD_VERSION,
             'control_delay_contract': control_delay_contract(configuration, response),
             'wheel_material': env.wheel_material_receipt,
