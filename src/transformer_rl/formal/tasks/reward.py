@@ -17,7 +17,7 @@ from ..control.ownership import ControlSource, validate_issued_control
 from ..control.observation import CommandMode, MechanicalBinding
 
 
-REWARD_VERSION = 'locomotion_v2'
+REWARD_VERSION = 'locomotion_v3'
 REWARD_POSITIVE_TERMS = (
     'forward', 'yaw', 'height', 'attitude', 'jump_vertical', 'jump_attitude', 'recovery_upright',
 )
@@ -36,6 +36,15 @@ DEADBAND_FORWARD_M_S = .1
 DEADBAND_YAW_RAD_S = .1
 # Fore-aft wheel split (SCUT no_fork): base-frame x(L) - x(R), metres.
 FORK_TOLERANCE_M = .05
+# SCUT base run vel_height_gate (linear band): NORMAL-mode velocity tracking
+# pays in full while |e_h| <= 0.05 m and nothing beyond 0.10 m, so the support
+# height is held before velocity is tracked. SCUT's rough run drops the gate;
+# stair/slope modes command heights away from the support height on purpose.
+VELOCITY_HEIGHT_GATE_M = (.05, .10)
+# SCUT trained runs: track_{lin_vel_xy,ang_vel_z}_square -0.1, stand_still_lin_vel
+# -2.0 (from-scratch flat run); per second, before the bounded composition.
+VELOCITY_SQUARE_WEIGHT = .1
+STAND_STILL_WEIGHT = 2.
 
 
 def wheel_positions_in_base(link_pose_world_xyzw, base_index, wheel_indices):
@@ -368,21 +377,24 @@ class PhysicalRewardComposer:
         target_w = torch.where(command[:, 2].abs() < DEADBAND_YAW_RAD_S, 0., command[:, 2])
         ev, ew = v_forward - target_v, yaw_rate - target_w
         support_eh = sample.height_above_ground_m - command[:, 3]
+        full, zero = VELOCITY_HEIGHT_GATE_M
+        velocity_gate = torch.where(reference.mode == int(CommandMode.NORMAL),
+                                    ((zero - support_eh.abs()) / (zero - full)).clamp(0, 1), 1.)
         jump_eh = sample.root_world_z_m - reference.jump_height_world_z_m
         eh = torch.where(jump, jump_eh, support_eh)
         evz = sample.velocity_origin_world_m_s[:, 2] - reference.jump_velocity_world_z_m_s
         pose = sample.roll_pitch_rad - reference.target_roll_pitch_rad
         upright = (-sample.gravity_body[:, 2]).clamp(-1, 1)
         height_gate = torch.where(recovery, upright.clamp_min(0), torch.ones_like(upright))
-        # SCUT V14 tracking (per second): exp(-clip(e,1)^2/0.5) - (0.25 e)^2 for
-        # forward, exp(-clip(e,0.8)^2/0.25) - (0.5 e)^2 for yaw, and
-        # exp(-clip(e_h,0.15)^2/0.001) - (10 e_h)^2 for height.
+        # SCUT tracking (per second): g [exp(-clip(e,1)^2/0.5) - 0.1 (0.25 e)^2] for
+        # forward, g [exp(-clip(e,0.8)^2/0.25) - 0.1 (0.5 e)^2] for yaw, with g the
+        # velocity height gate, and exp(-clip(e_h,0.15)^2/0.001) - (10 e_h)^2 for height.
         locomotion = torch.where(ordinary, 1., torch.where(jump, .8, 0.))
         gx, gy = sample.gravity_body[:, 0], sample.gravity_body[:, 1]
         # Densities per second. Ordinary <= 1+1+1+2 = 5; jump <= 0.8+1+1+1+1;
         # recovery <= 1+4; all below the composer's 8/s bound.
-        positive = {'forward': locomotion * torch.exp(-ev.clamp(-1., 1.).square() / .5),
-                    'yaw': (~recovery) * torch.exp(-ew.clamp(-.8, .8).square() / .25),
+        positive = {'forward': locomotion * velocity_gate * torch.exp(-ev.clamp(-1., 1.).square() / .5),
+                    'yaw': (~recovery) * velocity_gate * torch.exp(-ew.clamp(-.8, .8).square() / .25),
                     'height': height_gate * torch.exp(-eh.clamp(-.15, .15).square() / .001),
                     # SCUT flat_orientation_{y,x}_exp on projected gravity.
                     'attitude': ordinary * (torch.exp(-gx.square() / .02) + torch.exp(-gy.square() / .01)),
@@ -405,8 +417,8 @@ class PhysicalRewardComposer:
         landing = jump & ((phase == int(RewardPhase.LANDING)) | (phase == int(RewardPhase.SETTLING)))
         weight_n = self._mass_kg * self.tuning.gravity_m_s2
         excess_landing = (wheel_load.sum(-1) / weight_n - self.tuning.landing_load_multiple).clamp_min(0)
-        cost = {'forward': (~recovery) * (.25 * ev).square(),
-                'yaw': (~recovery) * (.5 * ew).square(),
+        cost = {'forward': (~recovery) * velocity_gate * VELOCITY_SQUARE_WEIGHT * (.25 * ev).square(),
+                'yaw': (~recovery) * velocity_gate * VELOCITY_SQUARE_WEIGHT * (.5 * ew).square(),
                 'height': height_gate * (10 * eh).square(),
                 'attitude': torch.where(recovery, 2 * h(pose / .8).sum(-1),
                                          torch.where(jump, .25 * h(pose / .5).sum(-1),
@@ -418,7 +430,7 @@ class PhysicalRewardComposer:
                                 self.tuning.angular_damping_ordinary))
                     * sample.angular_velocity_body_rad_s[:, :2].square().sum(-1),
                 # SCUT stand_still_lin_vel: |v_x| + |v_y| inside the forward deadband.
-                'stand_world_xy': still * horizontal.abs().sum(-1),
+                'stand_world_xy': STAND_STILL_WEIGHT * still * horizontal.abs().sum(-1),
                 'ordinary_vertical': ordinary * .5 * v_up.square(),
                 'jump_vertical': jump * h(evz / .5),
                 # SCUT no_fork + no_fork_square: 1(|dx| > 0.05 m) + (5 dx)^2, dx = x_L - x_R.
@@ -462,7 +474,7 @@ class PhysicalRewardComposer:
         gates = {'ordinary': ordinary, 'jump': jump, 'recovery': recovery, 'exact_stationary': exact_still,
                  'stationary_deadband': still,
                  'slip_left': slip[:, 0], 'slip_right': slip[:, 1], 'landing': landing,
-                 'height_reference_weight': height_gate,
+                 'height_reference_weight': height_gate, 'velocity_height_gate': velocity_gate,
                  'first_action_difference': self._action_count > 0, 'second_action_difference': self._action_count > 1}
         errors = {'forward_m_s': ev, 'yaw_rad_s': ew, 'support_height_m': support_eh,
                   'jump_world_height_m': jump_eh, 'jump_world_vertical_m_s': evz,

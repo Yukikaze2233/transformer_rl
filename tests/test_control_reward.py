@@ -168,14 +168,14 @@ def test_standing_gate_uses_horizontal_speed_inside_the_reward_deadband():
     body = torch.tensor([[.02, 0., 0.], [0., .02, 0.]])
     creep = lambda value, _: replace(value, velocity_origin_body_m_s=body)
     result = step(reward, change=creep)
-    # SCUT stand_still_lin_vel: |v_x| + |v_y| = 0.02 m/s per second.
-    torch.testing.assert_close(result.raw_cost_densities['stand_world_xy'], torch.full((2,), .02, dtype=torch.float64))
+    # SCUT stand_still_lin_vel -2.0: 2 (|v_x| + |v_y|) = 0.04 per second.
+    torch.testing.assert_close(result.raw_cost_densities['stand_world_xy'], torch.full((2,), .04, dtype=torch.float64))
     small = reference()
     small.admitted_body_command[:, 0] = .05
     deadband = step(reward, small, change=creep)
     assert deadband.gate_fractions['exact_stationary'].eq(0).all()
     assert deadband.gate_fractions['stationary_deadband'].eq(1).all()
-    torch.testing.assert_close(deadband.raw_cost_densities['stand_world_xy'], torch.full((2,), .02, dtype=torch.float64))
+    torch.testing.assert_close(deadband.raw_cost_densities['stand_world_xy'], torch.full((2,), .04, dtype=torch.float64))
     moving = reference()
     moving.admitted_body_command[:, 0] = .5
     result = step(reward, moving, change=creep)
@@ -409,3 +409,30 @@ def test_reused_native_input_and_returned_statistics_do_not_alias_future_reward_
     step(reward)
     torch.testing.assert_close(result.physical_step_reward, expected)
     assert result.raw_error_means['forward_m_s'].eq(0).all()
+
+
+def test_velocity_tracking_pays_only_once_the_support_height_is_held():
+    reward = fixture()
+    moving = reference()
+    moving.admitted_body_command[:, 0] = 1.
+    slow = lambda value, _: replace(value, velocity_origin_body_m_s=torch.tensor([[.5, 0., 0.], [.5, 0., 0.]]))
+    held = step(reward, moving, change=slow)
+    gate = held.gate_fractions['velocity_height_gate']
+    assert gate.eq(1).all()
+    # SCUT square weight -0.1: 0.1 (0.25 * 0.5)^2 per second.
+    torch.testing.assert_close(held.raw_cost_densities['forward'], torch.full((2,), .1 * .125 ** 2, dtype=torch.float64))
+
+    def crouched(drop):
+        def change(value, _):
+            value = slow(value, _)
+            return replace(value, height_above_ground_m=value.height_above_ground_m - drop)
+        return change
+    band = step(fixture(), moving, change=crouched(.075))
+    torch.testing.assert_close(band.gate_fractions['velocity_height_gate'], torch.full((2,), .5, dtype=torch.float64))
+    low = step(fixture(), moving, change=crouched(.12))
+    assert low.gate_fractions['velocity_height_gate'].eq(0).all()
+    assert low.raw_positive_densities['forward'].eq(0).all() and low.raw_cost_densities['forward'].eq(0).all()
+    stair = reference()
+    stair.admitted_body_command[:, 0] = 1.
+    stair.mode[:] = int(CommandMode.STAIR)
+    assert step(fixture(), stair, change=crouched(.12)).gate_fractions['velocity_height_gate'].eq(1).all()
