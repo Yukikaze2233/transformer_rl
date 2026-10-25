@@ -12,6 +12,30 @@ import math
 import torch
 
 
+def gas_spring_force_n(u, coefficients, fit_end):
+    """Datasheet cubic inside its fitted domain, continued linearly beyond it.
+
+    ``u`` is compression / stroke already clamped to [0, 1]. The printed curve
+    stops at the reserve-stroke mark (u = 0.9 for BKB0.45-080-205); the rest of
+    the mechanical stroke continues with the end slope, without extrapolating
+    the cubic.
+    """
+    a, b, c, d = coefficients
+    inside = u.clamp_max(fit_end)
+    end_slope = b + fit_end * (2 * c + 3 * d * fit_end)
+    return a + inside * (b + inside * (c + inside * d)) + end_slope * (u - fit_end).clamp_min(0)
+
+
+def gas_spring_work_j_per_m(u, coefficients, fit_end):
+    """Integral of ``gas_spring_force_n`` over normalized compression from 0 to ``u``."""
+    a, b, c, d = coefficients
+    inside = u.clamp_max(fit_end)
+    tail = (u - fit_end).clamp_min(0)
+    end_force = a + fit_end * (b + fit_end * (c + fit_end * d))
+    end_slope = b + fit_end * (2 * c + 3 * d * fit_end)
+    return inside * (a + inside * (b / 2 + inside * (c / 3 + inside * d / 4))) + tail * (end_force + end_slope * tail / 2)
+
+
 @dataclass(frozen=True)
 class PressureParameters:
     joint_names: tuple[str, str]
@@ -93,13 +117,14 @@ class NativeSliderPressure:
         compression = self._zero - slider_position_m.double()
         raw_u = compression / self._stroke
         u = raw_u.clamp(0, 1)
-        a, b, c, d = self.parameters.force_coefficients_n
-        force = (a + u * (b + u * (c + u * d))) * scale
+        coefficients, fit_end = self.parameters.force_coefficients_n, self.parameters.fitted_u_domain[1]
+        force = gas_spring_force_n(u, coefficients, fit_end) * scale
         # Integral of F(compression) from full extension. Linear tails preserve
         # virtual work for endpoint-held numerical forces outside the stroke.
-        potential = self._stroke * (u * (a + u * (b / 2 + u * (c / 3 + u * d / 4)))
-                                    + torch.where(raw_u < 0, a * raw_u, 0)
-                                    + torch.where(raw_u > 1, (a + b + c + d) * (raw_u - 1), 0)) * scale
+        full = gas_spring_force_n(torch.ones_like(u), coefficients, fit_end)
+        potential = self._stroke * (gas_spring_work_j_per_m(u, coefficients, fit_end)
+                                    + torch.where(raw_u < 0, coefficients[0] * raw_u, 0)
+                                    + torch.where(raw_u > 1, full * (raw_u - 1), 0)) * scale
         if (not torch.isfinite(force).all() or (force < 0).any() or not torch.isfinite(potential).all()):
             raise ValueError('pressure evaluation produced invalid effort or model potential')
         native_force = force.to(torch.float32)

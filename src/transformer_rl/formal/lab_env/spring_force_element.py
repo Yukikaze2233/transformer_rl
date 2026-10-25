@@ -12,6 +12,8 @@ from typing import NamedTuple
 
 import torch
 
+from ..control.pressure import gas_spring_force_n
+
 
 class SpringPressureForces(NamedTuple):
     forces_world: torch.Tensor
@@ -35,8 +37,8 @@ class SpringForceElement:
     ``within_mechanical_stroke`` and ``within_fitted_domain`` are separate
     diagnostics for the *mount-point* compression. Invalid lanes yield NaN
     wrenches; they are never replaced by nominal geometry. No motor-angle
-    branch is inferred or clipped here. The existing cubic's normalized
-    compression clamp is retained, including its endpoint extension.
+    branch is inferred or clipped here. Compression is clamped to the stroke;
+    beyond the fitted domain the force continues linearly from its end slope.
     """
 
     def __init__(self, spec, manifest, fit, body_names, device, dtype=torch.float32):
@@ -90,6 +92,7 @@ class SpringForceElement:
         self._strokes = torch.tensor(strokes, dtype=dtype, device=self.device)
         self._fit_domain = torch.tensor(domain, dtype=dtype, device=self.device)
         self._coefficients = tuple(float(value) for value in coefficients)
+        self._fit_end = float(domain[1])
         if not bool(torch.isfinite(self._points).all() & torch.isfinite(self._full_lengths).all()
                    & torch.isfinite(self._strokes).all() & torch.isfinite(self._fit_domain).all()):
             raise ValueError("Spring mounting points and length datums must be finite")
@@ -123,8 +126,7 @@ class SpringForceElement:
         compression = self._full_lengths-length
         normalized_compression = compression/self._strokes
         u = normalized_compression.clamp(0., 1.)
-        a, b, c, d = self._coefficients
-        magnitude = (a+u*(b+u*(c+u*d)))*spring_strength
+        magnitude = gas_spring_force_n(u, self._coefficients, self._fit_end)*spring_strength
         upper_force = magnitude[..., None]*(separation/length[..., None])
         forces = torch.stack((upper_force, -upper_force), dim=2).flatten(1, 2)
         torques = torch.linalg.cross(mounts-com, forces)

@@ -44,8 +44,14 @@ def test_curve_tail_and_mechanical_overtravel_have_distinct_explicit_flags():
     assert torch.equal(result.within_fitted_curve[:, 0], torch.tensor([True, True, False, False]))
     assert torch.equal(result.within_mechanical_stroke[:, 0], torch.tensor([True, True, True, False]))
     assert torch.equal(result.endpoint_clamped[:, 0], torch.tensor([False, False, False, True]))
-    endpoint = sum(parameters.force_coefficients_n)
-    assert result.slider_effort_n[-1, 0].item() == pytest.approx(endpoint, abs=3e-5)
+    # Beyond the printed curve (u > 0.9) the force continues linearly from the
+    # end slope; past the stroke it is held at the u = 1 value.
+    a, b, c, d = parameters.force_coefficients_n
+    end = parameters.fitted_u_domain[1]
+    end_force = a + end * (b + end * (c + end * d))
+    slope = b + end * (2 * c + 3 * d * end)
+    assert result.slider_effort_n[2, 0].item() == pytest.approx(end_force + slope * (.95 - end), abs=1e-3)
+    assert result.slider_effort_n[-1, 0].item() == pytest.approx(end_force + slope * (1 - end), abs=1e-3)
     assert result.normalized_compression[-1, 0] > 1
 
 
