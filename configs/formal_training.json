@@ -40,7 +40,7 @@
   "ppo": {
     "epochs": 5,
     "minibatches": 4,
-    "training_chunk": 3072,
+    "training_chunk": 24576,
     "learning_rate": 0.0001,
     "clip_ratio": 0.2,
     "value_clip": 0.2,

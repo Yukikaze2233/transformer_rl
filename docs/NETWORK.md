@@ -198,7 +198,7 @@ L_critic = 4×mean(max((V−return)²,(V_clipped−return)²))
 
 速度标签是当前`t`的机身原点速度，接触来自截至`t`的历史；预测标签为`dq(t+20ms)−dq(t)`（50Hz策略周期），不除dt，不与Critic角加速度混淆。特权标签detach，不直接进入动作头。
 
-PPO和三个辅助项合成一次Actor事务，动作梯度允许穿过估计头。Actor与Critic独立Adam；没有绕过KL的辅助优化器。每个辅助项按整个逻辑minibatch有效标签数归一化；3072分块只累积梯度，不能按块独立平均再相加。
+PPO和三个辅助项合成一次Actor事务，动作梯度允许穿过估计头。Actor与Critic独立Adam；没有绕过KL的辅助优化器。每个辅助项按整个逻辑minibatch有效标签数归一化；分块（`training_chunk`）只累积梯度，不能按块独立平均再相加。
 
 保存旧均值／log标准差／原始动作logp，计算旧→新解析Gaussian KL。正式配置`kl_early_stop=false`：每个逻辑minibatch复用Actor损失前向的detached均值／log标准差计算KL，调节两套Adam的共同学习率，再分别更新Actor和Critic。KL大于目标两倍时LR除1.5，处于0与目标一半之间时乘1.5，边界为`1e-5…1e-2`；参考起点`1e-4`。有限KL不触发提前停止／回滚，连续零更新计数仅作诊断；非有限梯度／KL仍作为数值故障处理。旧实验可显式启用guard分支，不能将其规则描述为当前正式配置。
 
@@ -213,7 +213,7 @@ PPO和三个辅助项合成一次Actor事务，动作梯度允许穿过估计头
 
 状态监督另由`state_auxiliary`有效标签mask控制；Actor、Critic、下一步监督、trace、bootstrap不可共用一个done。脚本交回RL建立新控制epoch与历史，不把准备阶段结果归给策略。
 
-训练保持4096×24、50Hz策略/200Hz物理、5 epochs×4逻辑minibatches（20步/update），每批完整有效时24,576端点，Actor分块3072；两套Adam各最多20步。学习率和KL调度读取对应会话冻结的recipe及优化器状态，不能由并行修改中的工作树反推旧训练所用配置。clip／value clip0.2、value系数4、梯度范数上限1，`gamma=.99`、`lambda=.95`。周期checkpoint100更新，计划启停另存。
+训练保持4096×24、50Hz策略/200Hz物理、5 epochs×4逻辑minibatches（20步/update），每批完整有效时24,576端点，Actor整批一次前向/反向（`training_chunk=24576`，显存约17.7GB）；两套Adam各最多20步。学习率和KL调度读取对应会话冻结的recipe及优化器状态，不能由并行修改中的工作树反推旧训练所用配置。clip／value clip0.2、value系数4、梯度范数上限1，`gamma=.99`、`lambda=.95`。周期checkpoint100更新，计划启停另存。
 
 应分别记录尝试、保留、回滚步数及两个optimizer实际使用的LR。正式路径在有效样本足够时完成20步，不能把旧guard下因拒绝而变短的优化耗时当作正常吞吐。正式配置另设`validate_behavior=false`，关闭更新前重算mean／std／logp的allclose门禁；保存旧logp、PPO概率比、batch有限值和reset／GAE合同不变。仅在显式诊断时开启该重算检查。学习率和辅助损失权重属于训练配置，不改变网络拓扑；短程成功更新不能证明长期稳定或任务能力。
 
@@ -293,7 +293,7 @@ value = model.critic(critic_input)  # [B]
 
 最需要实测的是**PPO与辅助监督对同一Actor的耦合**：速度NLL、接触BCE和下一步预测同时更新共享编码器；状态头的8D输出又进入动作解码器。辅助梯度可以改变策略均值，正式路径由联合更新的KL调节共同LR。只对8D估计做detach也不能隔离辅助损失到共享编码器的梯度。应同时检查KL、非有限梯度、辅助／PPO梯度占比和探索标准差；换成MLP不自动消除这些耦合。
 
-参数规模不大，但更新开销不只由参数量决定：一个24,576端点的逻辑minibatch会拆成8个3072端点块，完整5×4次Actor更新需要160次分块前向／反向。正式minibatch KL复用损失前向；`validate_behavior=false`时不执行更新前行为复现，全rollout KL仍作为诊断；旧guard分支才执行额外probe／回滚检查。吞吐应以有实际保留更新的轮次统计。
+参数规模不大，但更新开销不只由参数量决定：此前一个24,576端点的逻辑minibatch拆成8个3072端点块（5×4次更新共160次分块前向／反向）；按整批归一化的梯度与单块相同，改为整批一块后，Kaiser实测PPO阶段由3.37s降到2.61s/轮。正式minibatch KL复用损失前向；`validate_behavior=false`时不执行更新前行为复现，全rollout KL仍作为诊断；旧guard分支才执行额外probe／回滚检查。吞吐应以有实际保留更新的轮次统计。
 
 源码：[网络](../src/transformer_rl/formal/policy.py) · [观测](../src/transformer_rl/formal/control/observation.py) · [动作映射](../src/transformer_rl/formal/control/actuation.py) · [窗口与mask](../src/transformer_rl/formal/learning/contracts.py) · [PPO](../src/transformer_rl/formal/learning/optimization.py) · [恢复](../src/transformer_rl/formal/learning/checkpoint.py)。
 
