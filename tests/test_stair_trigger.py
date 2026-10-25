@@ -97,3 +97,5 @@ def test_reverse_travel_is_an_operator_request_and_checkpoint_round_trip():
     torch.testing.assert_close(many.trigger_distance_m, drawn)
     with pytest.raises(ValueError):
         TofTriggerConfig(trigger_distance_m=(.8, .3))
+    with pytest.raises(ValueError):  # the beam would reach beyond the ~2 m ToF range
+        TofTriggerConfig(early_distance_m=(.8, 2.))

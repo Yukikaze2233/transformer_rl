@@ -57,6 +57,8 @@ class TofTriggerConfig:
     # Two detections closer than this (world xy) are the same riser; the second
     # level of the RMUC central steps is about 0.6 m beyond the first.
     riser_identity_m: float = .2
+    # The forward ToF reads out to about 2 m; the beam must stay inside it.
+    sensor_range_m: float = 2.
 
     def __post_init__(self):
         for name in ('trigger_distance_m', 'early_distance_m'):
@@ -68,8 +70,8 @@ class TofTriggerConfig:
                 or not 0 <= self.early_probability <= 1
                 or any(not math.isfinite(v) or v <= 0
                        for v in (self.height_noise_m, self.sample_spacing_m, self.edge_window_m,
-                                 self.minimum_travel_speed_m_s, self.riser_identity_m))
-                or self.edge_window_m < self.sample_spacing_m):
+                                 self.minimum_travel_speed_m_s, self.riser_identity_m, self.sensor_range_m))
+                or self.edge_window_m < self.sample_spacing_m or self.range_m > self.sensor_range_m):
             raise ValueError('ToF trigger bounds are invalid')
 
     @property
