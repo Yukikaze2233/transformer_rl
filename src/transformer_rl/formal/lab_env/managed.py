@@ -220,6 +220,7 @@ class ManagedLabRuntime:
         return {'scope': 'last_completed_policy_interval_across_environments',
                 'pooled_rollout_statistics': False, 'reward': summary,
                 'reward_contract': self._reward_contract(), 'course': self.course.metrics(),
+                'environment': self.env.episode_diagnostics(),
                 'wheel_lookahead': self.course.lookahead_summary()}
 
 

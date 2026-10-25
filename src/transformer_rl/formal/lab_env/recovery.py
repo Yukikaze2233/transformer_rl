@@ -73,11 +73,13 @@ class RecoveryResetPose:
 
 
 class _RecoveryPreparation:
-    """Move only unrepresentable recovery starts into the existing action box.
+    """Script-owned starts before the policy takes over; no PPO/auxiliary credit.
 
-    Each explicit waypoint is a script-owned preparation hold for one policy
-    interval. It never expands policy targets or supplies PPO/auxiliary credit.
-    The 1rad/s reference rate is independent of the unchanged 200Hz motor PD.
+    Two kinds share one ownership chain and handoff: a waypoint preparation
+    moves an unrepresentable recovery start into the existing action box (one
+    script-owned hold per policy interval, 1 rad/s reference rate, independent
+    of the unchanged 200 Hz motor PD), and a passive release requests zero
+    torque for a fixed number of intervals (SCUT ground reset).
     """
 
     def __init__(self, controller, *, policy_dt_s, timeout_s):
@@ -258,7 +260,8 @@ class LabRecoveryReset:
         return FlatSpawnPatch.from_courses(self._flat_courses, origins, bounds,
                                            torch.zeros(self.num_envs, dtype=torch.float64))
 
-    def _patch(self, ids, origins):
+    def flat_patch(self, ids, origins):
+        """The verified flat spawn patch of ``ids`` translated to their world origins."""
         # local patch 已在构造时验证；这里只把已证明的平面按实际 env origin 平移到世界系。
         local = self._local_patch
         hashes = tuple(local.course_sha256[index] for index in ids.tolist())
@@ -291,7 +294,7 @@ class LabRecoveryReset:
         controller = OutputFeedbackController(
             self.kinematics.binding.nominal_policy_position_rad, n, pair_domain=None, device="cpu")
         candidate = self.compiler.compile(posture_id, yaw_rad, controller)
-        patch = self._patch(ids, origins)
+        patch = self.flat_patch(ids, origins)
         placement = self.geometry.place(
             candidate.closure.tree_position, candidate.requested_root_orientation_xyzw,
             origins[:, :2], patch,

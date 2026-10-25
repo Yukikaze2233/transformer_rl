@@ -1644,6 +1644,12 @@ class WheeledLabEnv(DirectRLEnv):
         velocity[:, 5] += delta[:, 2]
         self.robot.write_root_com_velocity_to_sim_index(root_velocity=velocity, env_ids=rows)
 
+    def episode_diagnostics(self):
+        """Birth randomization and physical-failure counters owned by the environment."""
+        birth, latch = self._birth_randomization, self._failure_latch
+        return {'births': None if birth is None else birth.metrics(),
+                'terminations': None if latch is None else latch.metrics()}
+
     def control_timing_metrics(self):
         values = {} if self._communication is None else self._communication.metrics()
         if self._sensor_model is not None:

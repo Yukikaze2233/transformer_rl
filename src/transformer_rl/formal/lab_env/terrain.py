@@ -698,10 +698,6 @@ class LabTerrainCourse:
                 'query_rejected_intervals': int(self.query_rejected_intervals),
                 'query_rejection_scope': 'spatial misses; reset, no PPO/auxiliary/bootstrap credit',
                 'recovery': self.recovery.metrics(),
-                'birth': (None if self.env._birth_randomization is None
-                          else self.env._birth_randomization.metrics()),
-                'failure_reasons': (None if getattr(self.env, '_failure_latch', None) is None
-                                    else self.env._failure_latch.metrics()),
                 'episode_birth_family_counts': dict(zip(
                     (name.name.lower() for name in TaskFamily), self._birth_family_counts.tolist())),
                 'episode_birth_counts_scope': 'observed source counters; legacy v2 history is unavailable',

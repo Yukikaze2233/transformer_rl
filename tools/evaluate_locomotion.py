@@ -1,8 +1,8 @@
 """Deterministic native evaluation of one structured checkpoint; never touches its session.
 
-Run with the Lab interpreter. All robot/task imports come from the session's
-frozen ``source``; the session's recipe/runtime bind the asset, response and
-atlas. The actor's deterministic mean is clipped and decoded as in training;
+Run with the Lab interpreter. Robot/task imports come from the session's
+frozen ``source`` unless ``--source`` names a newer release with the same task
+contract; the session's recipe/runtime bind the asset, response and atlas. The actor's deterministic mean is clipped and decoded as in training;
 no optimizer is built and no budget is charged. Suites:
 
 - flat: the eight CP4400-comparable cases (standing at four heights, forward
@@ -49,6 +49,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--session', type=Path, required=True, help='Session directory with source/recipe/runtime')
     parser.add_argument('--checkpoint', type=Path, required=True)
+    parser.add_argument('--source', type=Path, help='Source root with transformer_rl/ (default: <session>/source)')
     parser.add_argument('--output', type=Path, required=True, help='Fresh evaluation directory')
     parser.add_argument('--suite', choices=('flat', 'ground', 'step'), required=True)
     parser.add_argument('--timing', choices=('nominal', 'trained'), default='nominal')
@@ -227,7 +228,8 @@ def main():
     if any(name == 'transformer_rl' or name.startswith('transformer_rl.') for name in sys.modules):
         raise RuntimeError('a non-frozen transformer_rl module was imported before the source binding')
     sys.dont_write_bytecode = True
-    sys.path.insert(0, str(session / 'source'))
+    source = (args.source or session / 'source').resolve()
+    sys.path.insert(0, str(source))
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     import numpy as np
@@ -236,7 +238,7 @@ def main():
 
     torch.manual_seed(args.seed)
     provenance = {'format': 'locomotion_checkpoint_evaluation_v1', 'started_utc': datetime.now(timezone.utc).isoformat(),
-                  'session': str(session), 'checkpoint': str(args.checkpoint), 'checkpoint_sha256': sha(args.checkpoint),
+                  'session': str(session), 'source': str(source), 'checkpoint': str(args.checkpoint), 'checkpoint_sha256': sha(args.checkpoint),
                   'script_sha256': sha(__file__), 'suite': args.suite, 'timing': args.timing,
                   'num_envs': args.num_envs, 'seed': args.seed, 'horizon_s': args.seconds,
                   'policy': 'deterministic actor mean, clipped to the action bounds and decoded as in training',
@@ -250,17 +252,15 @@ def main():
         launcher.configure_settings()
         torch.cuda.set_device(torch.device(args.device))
         torch.cuda.init()
-        from isaaclab_physx.physics.physx_manager_cfg import PhysxCfg
         from transformer_rl.common.training_control import verify_pin
         from transformer_rl.formal.control.actuation import PairTargetDomain, ResponseParameters
         from transformer_rl.formal.control.observation import CommandMode
         from transformer_rl.formal.control.sensors import SensorModelConfig
         from transformer_rl.formal.lab_env.birth import BirthRandomizationConfig
-        from transformer_rl.formal.lab_env.cfg import build_env_cfg
+        from transformer_rl.formal.lab_env.cfg import build_course_env_cfg, configure_course_physics
         from transformer_rl.formal.lab_env.contract import FlatTaskSpec
         from transformer_rl.formal.lab_env.env import WheeledLabEnv
         from transformer_rl.formal.lab_env.formal_curriculum import LabTaskSample
-        from transformer_rl.formal.lab_env.formal_reward import FormalRewardConfig
         from transformer_rl.formal.lab_env.sections import optional_sections, termination_limits
         from transformer_rl.formal.lab_env.settings import load_asset_description
         from transformer_rl.formal.policy import StructuredPolicy, policy_config_from_dict
@@ -359,27 +359,19 @@ def main():
         else:
             for name in ('communication', 'episode_randomization', 'action_latch', 'wheel_material'):
                 sections[name] = None
-        cfg = build_env_cfg(str(asset), num_envs=n, env_spacing_m=runtime['environment_spacing_m'],
-                            device=args.device, response=response, pair_domain=pair,
-                            task=FlatTaskSpec(**runtime['task']),
-                            formal_reward=FormalRewardConfig.from_manifest(
-                                description.manifest, normal_load_source='native_contact_patch_normal_forces'),
-                            termination_limits=termination_limits(runtime['termination_limits']), sensors=sensors, dynamics=dynamics,
-                            **sections, terrain_profile='course', terrain_atlas_manifest=str(atlas),
-                            terrain_scan=True, forward_scan=True, declarative_scene=launcher.declarative_scene,
-                            expected_manifest_sha256=description.manifest_sha256, seed=args.seed)
+        cfg = build_course_env_cfg(
+            description, atlas, num_envs=n, device=args.device, seed=args.seed,
+            environment_spacing_m=runtime['environment_spacing_m'], response=response, pair_domain=pair,
+            task=FlatTaskSpec(**runtime['task']), termination_limits=termination_limits(runtime['termination_limits']),
+            sensors=sensors, dynamics=dynamics, sections=sections, declarative_scene=launcher.declarative_scene)
         cfg.episode_length_s = args.seconds + 5.
+        # A few rows need far smaller contact buffers than the 4096-row training scene.
         physics = dict(runtime['physics'], gpu_found_lost_pairs_capacity=2**18,
                        gpu_found_lost_aggregate_pairs_capacity=2**20, gpu_total_aggregate_pairs_capacity=2**18,
                        gpu_max_rigid_contact_count=2**20, gpu_max_rigid_patch_count=2**18,
                        gpu_collision_stack_size=2**27)
-        cfg.sim.enable_scene_query_support = False
-        cfg.sim.physics = PhysxCfg(enable_external_forces_every_iteration=True, enable_scene_query_support=False,
-                                  **physics)
-        if launcher.declarative_scene:
-            from transformer_rl.formal.lab_env.ga_isolation import configure_ga_isolation
-            object.__setattr__(cfg, '_native_clone_binding', configure_ga_isolation(
-                cfg.sim.physics, cfg.scene.robot, n, args.device))
+        configure_course_physics(cfg, physics, num_envs=n, device=args.device,
+                                 declarative_scene=launcher.declarative_scene)
         env = EvaluationEnv(cfg)
         env.set_task_sampler(EvalSampler())
         if args.suite == 'step':

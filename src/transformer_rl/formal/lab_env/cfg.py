@@ -390,3 +390,43 @@ def build_env_cfg(asset_directory: str, *, num_envs: int = 4096,
         cfg.height_scanner = cfg.terrain_scanner = None
         cfg.forward_scanners = ()
     return cfg
+
+
+def build_course_env_cfg(asset: AssetDescription, atlas_manifest, *, num_envs: int, device: str, seed: int,
+                         environment_spacing_m: float, response, pair_domain, task, termination_limits,
+                         sensors=None, dynamics=None, action_transport=None, sections=None,
+                         declarative_scene: bool) -> WheeledLabEnvCfg:
+    """Static RMUC course configuration shared by managed training and evaluation.
+
+    Formal reward with native contact-patch loads, the 77-point course scan and
+    the forward scanners; ``sections`` are the parsed optional runtime sections.
+    """
+    return build_env_cfg(
+        str(asset.directory), num_envs=num_envs, env_spacing_m=environment_spacing_m, device=device,
+        response=response, pair_domain=pair_domain, task=task,
+        formal_reward=FormalRewardConfig.from_manifest(
+            asset.manifest, normal_load_source='native_contact_patch_normal_forces'),
+        termination_limits=termination_limits, sensors=sensors, dynamics=dynamics,
+        action_transport=action_transport, **(sections or {}), declarative_scene=declarative_scene,
+        terrain_scan=True, forward_scan=True, terrain_profile='course',
+        terrain_atlas_manifest=str(atlas_manifest), seed=seed, expected_manifest_sha256=asset.manifest_sha256)
+
+
+def configure_course_physics(cfg: WheeledLabEnvCfg, physics: dict, *, num_envs: int, device: str,
+                             declarative_scene: bool) -> None:
+    """PhysX capacities for the static course and GA clone isolation.
+
+    The course queries its immutable triangles on Warp's Torch stream, so a
+    second PhysX raycast/overlap BVH over every robot shape is unused work;
+    contact reporting and collision solving stay enabled.
+    """
+    from isaaclab_physx.physics.physx_manager_cfg import PhysxCfg
+
+    cfg.sim.enable_scene_query_support = False
+    cfg.sim.physics = PhysxCfg(enable_external_forces_every_iteration=True,
+                               enable_scene_query_support=False, **physics)
+    if declarative_scene:
+        from .ga_isolation import configure_ga_isolation
+
+        object.__setattr__(cfg, '_native_clone_binding', configure_ga_isolation(
+            cfg.sim.physics, cfg.scene.robot, num_envs, device))

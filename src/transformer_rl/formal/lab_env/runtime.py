@@ -197,11 +197,9 @@ def runtime(recipe, components, configuration, *, control):
         launcher = LabSimulation(recipe.device)
         import omni.kit.app
         import torch
-        from isaaclab_physx.physics.physx_manager_cfg import PhysxCfg
 
-        from .cfg import build_env_cfg
+        from .cfg import build_course_env_cfg, configure_course_physics
         from .env import WheeledLabEnv
-        from .formal_reward import FormalRewardConfig
 
         launcher.configure_settings()
         extensions = omni.kit.app.get_app().get_extension_manager()
@@ -210,24 +208,13 @@ def runtime(recipe, components, configuration, *, control):
         torch.cuda.set_device(0)
         torch.cuda.init()
         health = NativePhysicsHealth.for_native_process(control.binding['attempt'])
-        cfg = build_env_cfg(
-            str(asset.directory), num_envs=recipe.num_envs,
-            env_spacing_m=configuration['environment_spacing_m'], device=recipe.device,
-            response=response, pair_domain=pair, task=task,
-            formal_reward=FormalRewardConfig.from_manifest(
-                asset.manifest, normal_load_source='native_contact_patch_normal_forces'),
-            termination_limits=limits,
-            sensors=sensors, dynamics=dynamics, action_transport=transport,
-            **optional_sections(configuration), declarative_scene=launcher.declarative_scene,
-            terrain_scan=True, forward_scan=True, terrain_profile='course',
-            terrain_atlas_manifest=str(atlas), expected_manifest_sha256=asset.manifest_sha256)
-        cfg.seed = recipe.training_seed
-        # The course queries its immutable triangles on Warp's Torch stream.
-        # Updating a second PhysX raycast/overlap BVH for every robot shape is
-        # unused work; contact reporting and collision solving stay enabled.
-        cfg.sim.enable_scene_query_support = False
-        cfg.sim.physics = PhysxCfg(enable_external_forces_every_iteration=True,
-                                  enable_scene_query_support=False, **configuration['physics'])
+        cfg = build_course_env_cfg(
+            asset, atlas, num_envs=recipe.num_envs, device=recipe.device, seed=recipe.training_seed,
+            environment_spacing_m=configuration['environment_spacing_m'], response=response, pair_domain=pair,
+            task=task, termination_limits=limits, sensors=sensors, dynamics=dynamics, action_transport=transport,
+            sections=optional_sections(configuration), declarative_scene=launcher.declarative_scene)
+        configure_course_physics(cfg, configuration['physics'], num_envs=recipe.num_envs, device=recipe.device,
+                                 declarative_scene=launcher.declarative_scene)
         if sdk_identity is not None:
             from isaaclab.utils.string import string_to_callable
             from isaaclab_physx.physics import PhysxManager
@@ -240,11 +227,6 @@ def runtime(recipe, components, configuration, *, control):
             sdk_identity['launch_contract'] = {
                 'physics_manager': 'isaaclab_physx.physics.physx_manager:PhysxManager',
                 'use_newton_actuators': False, 'quaternion_order': 'xyzw'}
-        if launcher.declarative_scene:
-            from .ga_isolation import configure_ga_isolation
-
-            object.__setattr__(cfg, '_native_clone_binding', configure_ga_isolation(
-                cfg.sim.physics, cfg.scene.robot, recipe.num_envs, recipe.device))
         env = WheeledLabEnv(cfg)
         health.check()
         if configuration.get('wheel_material') is not None:

@@ -429,6 +429,7 @@ def main(argv=None):
             }
             if env._terrain_course is not None:
                 record['terrain_course'] = env._terrain_course.metrics()
+            record['environment'] = env.episode_diagnostics()
             with metrics_path.open("a") as stream:
                 stream.write(json.dumps(_jsonable(record), ensure_ascii=False, allow_nan=False) + "\n")
             print("LAB PPO update", json.dumps({

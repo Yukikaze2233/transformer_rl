@@ -273,7 +273,9 @@ def test_low_frequency_reward_projection_labels_its_interval_scope(tmp_path):
             raw_positive_densities={'tracking': values * 2}, raw_cost_densities={'effort': values * .1},
             event_rewards={'success': values * 0}, gate_fractions={'support': torch.ones(4)})
         env._terrain_course.metrics = lambda: {'scan_misses': 0, 'request_responses': [0] * 9}
+        env.episode_diagnostics = lambda: {'births': None, 'terminations': None}
         report = managed.diagnostics()
+        assert report['environment'] == {'births': None, 'terminations': None}
         assert report['scope'] == 'last_completed_policy_interval_across_environments'
         assert report['pooled_rollout_statistics'] is False
         assert report['reward']['bounded_density_mean']['tracking'] == 2.5

@@ -122,7 +122,7 @@ class BirthPostureLibrary:
         level[:, 3] = 1
         placement = recovery.geometry.place(
             tree, level, torch.zeros(count, 2, dtype=torch.float64),
-            recovery._patch(torch.arange(count) % recovery.num_envs, torch.zeros(count, 3, dtype=torch.float64)),
+            recovery.flat_patch(torch.arange(count) % recovery.num_envs, torch.zeros(count, 3, dtype=torch.float64)),
             clearance_m=recovery.config.clearance_m, loop_tolerance_m=recovery.config.loop_tolerance_m,
             wheel_support_tolerance_m=recovery.config.wheel_support_tolerance_m)
         checks = {'converged': solved.converged, 'within_native_limits': solved.within_native_limits,
