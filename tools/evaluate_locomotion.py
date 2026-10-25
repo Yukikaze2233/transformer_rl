@@ -91,8 +91,14 @@ def flat_command(case, t):
     return vx, 0., wz, height
 
 
-def step_windows(trace, row, t, valid, signal, admitted, np):
-    """Per 5 s phase: rise times, overshoot and tracking of one command axis."""
+def step_windows(trace, row, t, valid, signal, admitted, np, *, stop_tolerance=.05):
+    """Per 5 s phase: rise times, overshoot and tracking of one command axis.
+
+    A window that commands zero after motion also reports the stop time
+    (|signal| <= tolerance held 0.5 s, from the window start), the planar
+    braking distance until then, and the settle time (additionally pitch within
+    0.02 rad of its window-end value, held 0.5 s).
+    """
     windows = []
     for start in np.arange(PHASE_S, 35. - 1e-6, PHASE_S):
         mask = valid & (t >= start - 1e-8) & (t < start + PHASE_S - 1e-8)
@@ -110,6 +116,21 @@ def step_windows(trace, row, t, valid, signal, admitted, np):
             item['rise_10_90_s'] = (float(times[reach[1][0]] - times[reach[0][0]])
                                     if all(len(r) for r in reach) else None)
             item['overshoot'] = float(max(0., np.max(np.sign(target) * values) - abs(target)))
+        elif windows and abs(windows[-1]['admitted_end']) > 1e-3:
+            hold = round(.5 / .02)
+            pitch = trace['rpy_rad'][index, row, 1]
+            stopped = np.abs(values) <= stop_tolerance
+            settled = stopped & (np.abs(pitch - pitch[-1]) <= .02)
+
+            def first_held(mask):
+                return next((i for i in range(max(0, len(mask) - hold + 1)) if mask[i:i + hold].all()), None)
+            stop, settle = first_held(stopped), first_held(settled)
+            item['stop_rule'] = f'|signal|<={stop_tolerance} held 0.5 s; settle adds |pitch-pitch_end|<=0.02 rad'
+            item['stop_s'] = None if stop is None else float(times[stop] - start)
+            item['settle_s'] = None if settle is None else float(times[settle] - start)
+            if stop is not None:
+                position = trace['position_world_m'][index[:stop + 1], row, :2]
+                item['braking_distance_m'] = float(np.linalg.norm(np.diff(position, axis=0), axis=1).sum())
         windows.append(item)
     return windows
 
@@ -395,22 +416,22 @@ def main():
         bounds = torch.tensor(recipe['collection']['action_bounds'], device=device)
         alive = torch.ones(n, dtype=torch.bool, device=device)
         end = [{'kind': 'horizon', 'at_s': args.seconds, 'failure_flags': 0} for _ in range(n)]
-        estimate = None
         for step in range(round(args.seconds / .02)):
             frames = env.obs_buf['policy'].reshape(n, 5, 35)
+            observed_at = env._clock().clone()
             with torch.inference_mode():
                 mean, raw_state, _ = policy.outputs(frames)
             if not torch.isfinite(mean).all():
                 raise RuntimeError('policy produced a nonfinite action mean')
-            env._completed_estimate = estimate
+            # As the collector: the observation, its state-head output and its timestamp.
+            env._completed_estimate = CompletedEstimate._from_actor_observation(
+                frames[:, -1].float(), raw_state.float(), observed_at)
             _, _, terminated, truncated, _ = env.step(mean.clamp(-bounds, bounds))
             done = terminated | truncated
             for row in (alive & done).nonzero().flatten().tolist():
                 end[row] = {'kind': 'true_failure' if bool(terminated[row]) else 'truncated',
                             'at_s': float(env._clock()[row]), 'failure_flags': int(env._eval_last_flags[row])}
             alive &= ~done
-            estimate = CompletedEstimate._from_actor_observation(
-                env.obs_buf['policy'].reshape(n, 5, 35)[:, -1].float(), raw_state.float(), env._clock().clone())
             state, sample = env._last_state, env._last_sample
             q = sample.root_link_orientation_xyzw
             x, y, z, w = (q / q.norm(dim=-1, keepdim=True)).unbind(-1)
