@@ -78,6 +78,9 @@ class PhysicalFailureLatch:
         self.contact_time_s = torch.zeros(num_envs, dtype=torch.float64, device=self.device)
         self.pose_time_s = torch.zeros(num_envs, dtype=torch.float64, device=self.device)
         self.failure_reasons = torch.zeros(num_envs, dtype=torch.long, device=self.device)
+        # Episodes ended per reason (all bits set at the first failing substep).
+        self.reason_counts = torch.zeros(len(FailureReason), dtype=torch.long, device=self.device)
+        self._reason_bits = torch.tensor([int(reason) for reason in FailureReason], device=self.device)
 
     def reset(self, mask):
         if (not isinstance(mask, torch.Tensor) or mask.shape != (self.num_envs,)
@@ -130,9 +133,17 @@ class PhysicalFailureLatch:
              FailureReason.KNEE_PIVOT_RESIDUAL),
             (~within_pressure_stroke.all(-1), FailureReason.PRESSURE_STROKE),
         )
+        before = self.failure_reasons != 0
         for event, reason in events:
             self.failure_reasons.bitwise_or_(event.long() * int(reason))
         failed = self.failure_reasons != 0
+        first = (failed & ~before)[:, None]
+        self.reason_counts += (first & (self.failure_reasons[:, None] & self._reason_bits).ne(0)).sum(0)
         healthy = (~failed & ~contact & (tilt <= limits.healthy_tilt_rad)
                    & knee_signed_clearance_rad.ge(0).all(-1))
         return PhysicalConditions(healthy, failed.clone(), self.failure_reasons.clone())
+
+    def metrics(self):
+        return {'episodes_ended_by_reason': dict(zip((reason.name.lower() for reason in FailureReason),
+                                                     self.reason_counts.tolist())),
+                'scope': 'all reasons set at the first failing substep; one episode may count several'}

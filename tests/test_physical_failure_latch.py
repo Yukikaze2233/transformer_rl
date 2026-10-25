@@ -121,3 +121,8 @@ def test_pose_failures_must_persist_like_scut_before_ending_an_episode():
     for _ in range(79):
         assert not low.observe(**sitting).true_failure.any()
     assert low.observe(**sitting).failure_reasons.tolist() == [int(FailureReason.LOW_SUPPORT_HEIGHT)]
+    # Each ended episode is counted once per reason, at its first failing substep.
+    low.observe(**sitting)
+    assert low.metrics()['episodes_ended_by_reason']['low_support_height'] == 1
+    assert latch.metrics()['episodes_ended_by_reason']['excessive_tilt'] == 2
+    assert sum(latch.metrics()['episodes_ended_by_reason'].values()) == 2

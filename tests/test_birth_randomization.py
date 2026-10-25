@@ -106,9 +106,13 @@ def test_stand_up_telemetry_counts_ground_births(selected):
     terminated = torch.zeros(16, dtype=torch.bool)
     terminated[1] = True
     height[0] = .1  # still down
+    reasons = torch.zeros(16, dtype=torch.long)
+    reasons[1] = 2 | 4  # excessive tilt and forbidden body contact
     birth.observe(.02, height_m=height, height_command_m=command, tilt_rad=tilt, wheel_load_n=loaded,
-                  terminated=terminated)
+                  terminated=terminated, failure_reasons=reasons)
     assert birth.counts[3] - base[3] == 1
+    bits = birth.metrics()['ground_failure_bits']
+    assert bits['excessive_tilt'] >= 1 and bits['forbidden_body_contact'] >= 1 and bits['low_support_height'] == 0
     height[0] = .29
     for _ in range(25):
         birth.observe(.02, height_m=height, height_command_m=command, tilt_rad=tilt, wheel_load_n=loaded,

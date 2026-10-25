@@ -240,6 +240,8 @@ class BirthRandomization:
         self.wheel_centre_root_m = self.library.wheel_centre_root_m.to(self.device)
         # landing births, ground births, ground births stood up, ground births failed first
         self.counts = torch.zeros(4, dtype=torch.long, device=self.device)
+        # Ground births failed first, per FailureReason bit (one row may set several).
+        self.failure_bits = torch.zeros(6, dtype=torch.long, device=self.device)
         self.since_birth_s = torch.full((recovery.num_envs,), float('inf'), device=self.device)
         self.standing_s = torch.zeros(recovery.num_envs, device=self.device)
 
@@ -283,7 +285,7 @@ class BirthRandomization:
         self.standing_s[rows] = 0
 
     @torch.no_grad()
-    def observe(self, dt_s, *, height_m, height_command_m, tilt_rad, wheel_load_n, terminated):
+    def observe(self, dt_s, *, height_m, height_command_m, tilt_rad, wheel_load_n, terminated, failure_reasons=None):
         """Telemetry only: stood up = within 5 cm of the height command, tilt < 20 deg, both
         wheels loaded, held for 0.5 s."""
         active = torch.isfinite(self.since_birth_s)
@@ -295,12 +297,18 @@ class BirthRandomization:
         failed = active & ~stood & terminated
         self.counts[2] += stood.sum()
         self.counts[3] += failed.sum()
+        if failure_reasons is not None:
+            bits = 1 << torch.arange(len(self.failure_bits), device=self.device)
+            self.failure_bits += (failed[:, None] & (failure_reasons[:, None] & bits).ne(0)).sum(0)
         self.since_birth_s.masked_fill_(stood | failed, float('inf'))
 
     def metrics(self):
         landing, ground, stood, failed = self.counts.tolist()
         return {'landing_births': landing, 'ground_births': ground, 'ground_stood_up': stood,
                 'ground_failed_before_standing': failed,
+                'ground_failure_bits': dict(zip(('low_support_height', 'excessive_tilt', 'forbidden_body_contact',
+                                                 'passive_knee_overrun', 'knee_pivot_residual', 'pressure_stroke'),
+                                                self.failure_bits.tolist())),
                 'stand_up_rule': '|h-h_cmd|<0.05 m, tilt<20 deg, both wheels >5 N for 0.5 s (telemetry only)',
                 'library': self.library.receipt}
 

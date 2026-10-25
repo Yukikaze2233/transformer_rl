@@ -1211,7 +1211,9 @@ class WheeledLabEnv(DirectRLEnv):
             birth.observe(
                 float(self.step_dt), height_m=self._last_state.height_above_ground_m,
                 height_command_m=self._command[:, 3], tilt_rad=self._last_tilt,
-                wheel_load_n=self._last_state.wheel_ground_force_n, terminated=self._terminated)
+                wheel_load_n=self._last_state.wheel_ground_force_n, terminated=self._terminated,
+                failure_reasons=(None if getattr(self, '_failure_latch', None) is None
+                                 else self._failure_latch.failure_reasons))
         preparation = getattr(self, '_recovery_preparation', None)
         if preparation is not None:
             q = self._joint_positions().index_select(1, self._active_indices)
