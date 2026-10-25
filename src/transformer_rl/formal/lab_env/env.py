@@ -1510,7 +1510,6 @@ class WheeledLabEnv(DirectRLEnv):
             if getattr(self, '_pending_ground_rows', None) is not None and self._pending_ground_rows.numel():
                 self._recovery_preparation.release_rows(
                     self._pending_ground_rows, self._birth_randomization.release_frames(float(self.step_dt)))
-                self._birth_randomization.begin(self._pending_ground_rows)
             self._pending_ground_rows = None
         if self._communication is not None:
             dq = self._as_torch(self.robot.data.joint_vel).index_select(1, self._active_indices)
@@ -1574,6 +1573,10 @@ class WheeledLabEnv(DirectRLEnv):
         ordinary = task_sample.mode != int(CommandMode.RECOVERY)
         ground, index, tilt, wheels = birth.draw(ordinary, birth.ground_eligible(task_sample.terrain_kind))
         landing = ordinary & ~ground
+        # Close the previous episodes before tracking the new births.
+        birth.settle(ids)
+        birth.begin(ids[ground], 'ground')
+        birth.begin(ids[landing], 'landing')
         # The course placed the nominal stance on its local ground; keep that datum.
         spawn = (self._terrain_course.nominal_spawn_height_m if self._terrain_course is not None
                  else self._task.nominal_height_m)

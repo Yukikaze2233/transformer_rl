@@ -34,6 +34,13 @@ from .recovery import LabRecoveryReset
 # below the belly clearance of the lowest stance; slopes and step courses
 # would put the level body into the terrain.
 GROUND_TERRAINS = (TerrainKind.FLAT, TerrainKind.ROUGH, TerrainKind.MATERIAL)
+# Telemetry: each tracked episode ends exactly once in one outcome. Failures
+# are bucketed by time after the handoff (the end of the ground release).
+BIRTH_KINDS = ('landing', 'ground')
+OUTCOMES = ('stood_up', 'failed_in_release', 'failed_within_0p5s_after_handoff', 'failed_later',
+            'ended_unresolved')
+FAILURE_BITS = ('low_support_height', 'excessive_tilt', 'forbidden_body_contact', 'passive_knee_overrun',
+                'knee_pivot_residual', 'pressure_stroke')
 
 
 @dataclass(frozen=True)
@@ -238,12 +245,15 @@ class BirthRandomization:
         self.ground_root_height_m = self.library.ground_root_height_m.to(self.device)
         self.landing_root_height_m = self.library.landing_root_height_m
         self.wheel_centre_root_m = self.library.wheel_centre_root_m.to(self.device)
-        # landing births, ground births, ground births stood up, ground births failed first
-        self.counts = torch.zeros(4, dtype=torch.long, device=self.device)
-        # Ground births failed first, per FailureReason bit (one row may set several).
-        self.failure_bits = torch.zeros(6, dtype=torch.long, device=self.device)
-        self.since_birth_s = torch.full((recovery.num_envs,), float('inf'), device=self.device)
-        self.standing_s = torch.zeros(recovery.num_envs, device=self.device)
+        count = recovery.num_envs
+        self.births = torch.zeros(len(BIRTH_KINDS), dtype=torch.long, device=self.device)
+        self.outcomes = torch.zeros(len(BIRTH_KINDS), len(OUTCOMES), dtype=torch.long, device=self.device)
+        # Failed episodes per FailureReason bit (one episode may set several).
+        self.failure_bits = torch.zeros(len(BIRTH_KINDS), len(FAILURE_BITS), dtype=torch.long, device=self.device)
+        self._release_s = torch.tensor([0., config.ground_release_s], device=self.device)
+        self.kind = torch.full((count,), -1, dtype=torch.long, device=self.device)  # tracked birth kind
+        self.since_birth_s = torch.zeros(count, device=self.device)
+        self.standing_s = torch.zeros(count, device=self.device)
 
     def _uniform(self, shape, bound):
         return (torch.rand(shape, generator=self.generator, device=self.device) * 2 - 1) * bound
@@ -264,7 +274,6 @@ class BirthRandomization:
         index = torch.randint(len(self.ground_root_height_m), (count,), generator=self.generator, device=self.device)
         tilt = self._uniform((count, 2), c.roll_pitch_rad)
         wheels = self._uniform((count, 2), c.wheel_velocity_rad_s)
-        self.counts[0] += (ordinary & ~ground).sum()
         return ground, index, tilt, wheels
 
     @staticmethod
@@ -278,38 +287,52 @@ class BirthRandomization:
         return max(1, round(self.config.ground_release_s / policy_dt_s))
 
     @torch.no_grad()
-    def begin(self, rows):
-        """Start stand-up telemetry for ground-birth ``rows``."""
-        self.counts[1] += rows.numel()
+    def settle(self, rows):
+        """Close the tracked episodes of reset ``rows`` that neither stood up nor failed."""
+        kind = self.kind[rows]
+        self.outcomes[:, OUTCOMES.index('ended_unresolved')] += torch.bincount(
+            kind[kind >= 0], minlength=len(BIRTH_KINDS))
+        self.kind[rows] = -1
+
+    @torch.no_grad()
+    def begin(self, rows, kind):
+        """Track the new episodes of ``rows`` born as ``kind`` ('landing' or 'ground')."""
+        index = BIRTH_KINDS.index(kind)
+        self.births[index] += rows.numel()
+        self.kind[rows] = index
         self.since_birth_s[rows] = 0
         self.standing_s[rows] = 0
 
     @torch.no_grad()
     def observe(self, dt_s, *, height_m, height_command_m, tilt_rad, wheel_load_n, terminated, failure_reasons=None):
         """Telemetry only: stood up = within 5 cm of the height command, tilt < 20 deg, both
-        wheels loaded, held for 0.5 s."""
-        active = torch.isfinite(self.since_birth_s)
+        wheels loaded, held for 0.5 s; a termination first ends the episode as a failure."""
+        active = self.kind >= 0
         self.since_birth_s.add_(dt_s * active)
         upright = (active & ((height_m - height_command_m).abs() < .05) & (tilt_rad < math.radians(20))
                    & (wheel_load_n > 5).all(-1))
         self.standing_s.copy_(torch.where(upright, self.standing_s + dt_s, 0))
         stood = active & (self.standing_s >= .5)
         failed = active & ~stood & terminated
-        self.counts[2] += stood.sum()
-        self.counts[3] += failed.sum()
+        after_handoff = self.since_birth_s - self._release_s[self.kind.clamp_min(0)]
+        bucket = torch.where(after_handoff <= 0, 1, torch.where(after_handoff <= .5, 2, 3))
+        outcome = torch.where(stood, 0, bucket)
+        done = stood | failed
+        self.outcomes.view(-1).add_(torch.bincount((self.kind * len(OUTCOMES) + outcome)[done],
+                                                   minlength=self.outcomes.numel()))
         if failure_reasons is not None:
-            bits = 1 << torch.arange(len(self.failure_bits), device=self.device)
-            self.failure_bits += (failed[:, None] & (failure_reasons[:, None] & bits).ne(0)).sum(0)
-        self.since_birth_s.masked_fill_(stood | failed, float('inf'))
+            bits = 1 << torch.arange(len(FAILURE_BITS), device=self.device)
+            hit = (failed[:, None] & (failure_reasons[:, None] & bits).ne(0)).long()
+            self.failure_bits.index_add_(0, self.kind.clamp_min(0), hit)
+        self.kind.masked_fill_(done, -1)
 
     def metrics(self):
-        landing, ground, stood, failed = self.counts.tolist()
-        return {'landing_births': landing, 'ground_births': ground, 'ground_stood_up': stood,
-                'ground_failed_before_standing': failed,
-                'ground_failure_bits': dict(zip(('low_support_height', 'excessive_tilt', 'forbidden_body_contact',
-                                                 'passive_knee_overrun', 'knee_pivot_residual', 'pressure_stroke'),
-                                                self.failure_bits.tolist())),
+        return {'births': dict(zip(BIRTH_KINDS, self.births.tolist())),
+                'outcomes': {kind: dict(zip(OUTCOMES, row)) for kind, row in zip(BIRTH_KINDS, self.outcomes.tolist())},
+                'failure_bits': {kind: dict(zip(FAILURE_BITS, row))
+                                 for kind, row in zip(BIRTH_KINDS, self.failure_bits.tolist())},
                 'stand_up_rule': '|h-h_cmd|<0.05 m, tilt<20 deg, both wheels >5 N for 0.5 s (telemetry only)',
+                'handoff_s': dict(zip(BIRTH_KINDS, self._release_s.tolist())),
                 'library': self.library.receipt}
 
     def state_dict(self):
@@ -324,5 +347,5 @@ class BirthRandomization:
         generator = torch.Generator(device=self.device)
         generator.set_state(state['rng'].cpu())
         self.generator = generator
-        self.since_birth_s.fill_(float('inf'))
+        self.kind.fill_(-1)
         self.standing_s.zero_()

@@ -84,10 +84,8 @@ def test_draws_split_ground_and_landing_births(selected):
     _, birth = selected
     ordinary = torch.tensor([True] * 3000 + [False] * 1000)
     eligible = torch.tensor([True] * 2000 + [False] * 2000)
-    before = birth.counts.clone()
     ground, index, tilt, wheels = birth.draw(ordinary, eligible)
     assert not ground[2000:].any() and .45 < ground[:2000].float().mean() < .55
-    assert birth.counts[0] - before[0] == int((ordinary & ~ground).sum())
     assert tilt.abs().le(.15).all() and wheels.abs().le(50).all() and index.lt(512).all()
     state = birth.state_dict()
     again = birth.draw(ordinary, eligible)
@@ -95,29 +93,45 @@ def test_draws_split_ground_and_landing_births(selected):
     torch.testing.assert_close(birth.draw(ordinary, eligible)[1], again[1])
 
 
-def test_stand_up_telemetry_counts_ground_births(selected):
-    _, birth = selected
-    rows = torch.tensor([0, 1])
-    birth.begin(rows)
-    base = birth.counts.clone()
-    height, command = torch.full((16,), .30), torch.full((16,), .30)
-    loaded = torch.full((16, 2), 40.)
-    tilt = torch.zeros(16)
-    terminated = torch.zeros(16, dtype=torch.bool)
-    terminated[1] = True
-    height[0] = .1  # still down
-    reasons = torch.zeros(16, dtype=torch.long)
+def test_stand_up_telemetry_closes_each_episode_once_with_its_outcome(selected):
+    recovery, birth = selected
+    rows = torch.arange(4)
+    birth.settle(torch.arange(recovery.num_envs))
+    base_outcomes, base_bits = birth.outcomes.clone(), birth.failure_bits.clone()
+    birth.begin(rows[:3], 'ground')
+    birth.begin(rows[3:], 'landing')
+    count = recovery.num_envs
+    height, command = torch.full((count,), .1), torch.full((count,), .30)
+    loaded, tilt = torch.full((count, 2), 40.), torch.zeros(count)
+    reasons = torch.zeros(count, dtype=torch.long)
     reasons[1] = 2 | 4  # excessive tilt and forbidden body contact
-    birth.observe(.02, height_m=height, height_command_m=command, tilt_rad=tilt, wheel_load_n=loaded,
-                  terminated=terminated, failure_reasons=reasons)
-    assert birth.counts[3] - base[3] == 1
-    bits = birth.metrics()['ground_failure_bits']
-    assert bits['excessive_tilt'] >= 1 and bits['forbidden_body_contact'] >= 1 and bits['low_support_height'] == 0
+
+    def tick(terminated=(), seconds=.02):
+        dead = torch.zeros(count, dtype=torch.bool)
+        dead[list(terminated)] = True
+        birth.observe(seconds, height_m=height, height_command_m=command, tilt_rad=tilt, wheel_load_n=loaded,
+                      terminated=dead, failure_reasons=reasons)
+
+    tick(terminated=[1])          # ground row 1 fails inside the 0.2 s release
+    for _ in range(20):
+        tick()                    # 0.42 s after birth: still down
+    tick(terminated=[3])          # landing row 3 fails 0.44 s after its (immediate) handoff
     height[0] = .29
     for _ in range(25):
-        birth.observe(.02, height_m=height, height_command_m=command, tilt_rad=tilt, wheel_load_n=loaded,
-                      terminated=torch.zeros(16, dtype=torch.bool))
-    assert birth.counts[2] - base[2] == 1
+        tick()                    # ground row 0 stands up
+    birth.settle(rows)            # row 2 is reset (e.g. time limit) before standing
+    delta = birth.outcomes - base_outcomes
+    ground, landing = delta[1].tolist(), delta[0].tolist()
+    assert ground == [1, 1, 0, 0, 1] and landing == [0, 0, 1, 0, 0]
+    bits = birth.failure_bits - base_bits
+    assert bits[1, 1] == 1 and bits[1, 2] == 1 and bits[0].sum() == 0
+    # A later landing episode on row 2 cannot inherit the old ground timer.
+    birth.begin(rows[2:3], 'landing')
+    height[2] = .29
+    for _ in range(25):
+        tick()
+    assert (birth.outcomes - base_outcomes)[0, 0] == 1 and (birth.outcomes - base_outcomes)[1, 0] == 1
+    assert set(birth.metrics()['outcomes']) == {'landing', 'ground'}
 
 
 def test_reset_rows_get_ground_or_landing_postures_and_recovery_rows_keep_theirs(selected):
@@ -126,7 +140,16 @@ def test_reset_rows_get_ground_or_landing_postures_and_recovery_rows_keep_theirs
     from transformer_rl.formal.control.observation import CommandMode
     from transformer_rl.formal.lab_env import env as env_module
 
-    recovery, birth = selected
+    from transformer_rl.formal.lab_env.recovery import LabRecoveryReset
+    from transformer_rl.formal.lab_env.settings import load_asset_description
+    from transformer_rl.formal.simulation.ground import WheelCollisionCentres
+
+    # Per-row telemetry needs a recovery reset that covers every environment ID.
+    asset = load_asset_description(ASSET)
+    recovery = LabRecoveryReset(asset, 512)
+    wheels = WheelCollisionCentres.from_urdf((asset.directory / asset.manifest['urdf']).read_bytes(), asset.binding)
+    birth = BirthRandomization(recovery, BirthRandomizationConfig(enabled=True, library_size=512), wheels,
+                               seed=2102, device='cpu')
     path = Path(env_module.__file__)
     definition = next(node for node in ast.parse(path.read_text()).body
                       if isinstance(node, ast.ClassDef) and node.name == 'WheeledLabEnv')
@@ -161,3 +184,6 @@ def test_reset_rows_get_ground_or_landing_postures_and_recovery_rows_keep_theirs
     wheels = [binding.native_joint_names.index(name) for name in ('L_joint3', 'R_joint3')]
     others = [i for i in range(18) if i not in wheels]
     assert velocity[:, others].eq(0).all() and velocity[:40].eq(0).all()
+    # Every ordinary reset row starts one tracked episode of its birth kind.
+    assert birth.births.tolist() == [int(landing.sum()), int(ground.sum())]
+    assert birth.kind[ids[:40]].eq(-1).all()
