@@ -21,30 +21,14 @@ from ..control.sensors import SensorModelConfig
 from ..simulation.dynamics import StartupDynamicsConfig
 from .contract import FlatTaskSpec
 from .critic_features import CRITIC_INPUT_CONTRACT
-from .action_transport import ActionLatchConfig, ActionTransportConfig
+from .action_transport import ActionTransportConfig
 from ..tasks.command_pool import CommandPoolConfig
-from .birth import BirthRandomizationConfig
 from ..tasks.reward import REWARD_VERSION
-from ..control.communication import CommunicationConfig, EpisodeRandomizationConfig
-from .materials import WheelMaterialConfig
+from .sections import OPTIONAL_SECTIONS, optional_sections, termination_limits
 from .formal_curriculum import FormalCurriculumCapabilities
 from .managed import ManagedCurriculum, ManagedLabRuntime
 from .settings import load_asset_description
 from .sdk import LabSimulation, verify_recovery_sdk_identity
-
-
-# Optional runtime sections, each parsed whole by its own frozen contract; the
-# names match the build_env_cfg keywords.
-OPTIONAL_SECTIONS = {'communication': CommunicationConfig, 'episode_randomization': EpisodeRandomizationConfig,
-                     'wheel_material': WheelMaterialConfig, 'action_latch': ActionLatchConfig,
-                     'motor_envelope': MotorEnvelope, 'command_pool': CommandPoolConfig,
-                     'birth_randomization': BirthRandomizationConfig}
-
-
-def optional_sections(configuration):
-    """Parsed optional runtime sections as build_env_cfg keywords; None when absent."""
-    return {name: None if configuration.get(name) is None else parser.from_dict(configuration[name])
-            for name, parser in OPTIONAL_SECTIONS.items()}
 
 
 _PHYSICS_FIELDS = {'gpu_found_lost_pairs_capacity', 'gpu_found_lost_aggregate_pairs_capacity',
@@ -145,9 +129,7 @@ def parse_configuration(recipe, configuration, authorized_boot):
             or any(type(value) is not int or value < 1 for value in configuration['physics'].values())):
         raise ValueError('managed Lab runtime requires its exact current-boot physical configuration')
     task = FlatTaskSpec(**configuration['task'])
-    limits = dict(configuration['termination_limits'])
-    limits['forbidden_body_names'] = tuple(limits['forbidden_body_names'])
-    limits = NativeTaskLimits(**limits)
+    limits = termination_limits(configuration['termination_limits'])
     sensors = SensorModelConfig(**configuration['sensors'])
     dynamics = StartupDynamicsConfig(**configuration['dynamics'])
     if sensors.physics_dt_s != .005 or sensors.policy_dt_s != recipe.collection.policy_dt_s:

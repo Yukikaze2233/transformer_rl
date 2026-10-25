@@ -33,15 +33,11 @@ from ..tasks.curriculum import (
     COMPLETE_STAGE_BUDGETS, COMPLETE_STAGE_NAMES, COMPLETE_STAGE_WEIGHTS,
     STAGE_BUDGETS, STAGE_NAMES, STAGE_WEIGHTS, ContinuousTaskSampler, RotationMode, TaskFamily,
 )
-from .action_transport import ActionLatchConfig, ActionTransportConfig
+from .action_transport import ActionTransportConfig
 from .birth import BirthRandomizationConfig
-from .materials import WheelMaterialConfig
-from ..tasks.termination import NativeTaskLimits
-from ..control.actuation import MotorEnvelope
-from ..control.communication import CommunicationConfig, EpisodeRandomizationConfig
-from ..control.sensors import SensorModelConfig
-from ..tasks.command_pool import CommandContext, CommandPool, CommandPoolConfig, SegmentKind
+from ..tasks.command_pool import CommandContext, CommandPool, SegmentKind
 from .prepare import prepare_session
+from .sections import merge_preset
 from .settings import load_asset_description
 
 
@@ -74,43 +70,9 @@ def _single_target_delay(runtime):
     return runtime
 
 
-_PRESET_REQUIRED = {'communication': CommunicationConfig, 'episode_randomization': EpisodeRandomizationConfig}
-_PRESET_OPTIONAL = {'action_latch': ActionLatchConfig, 'motor_envelope': MotorEnvelope,
-                    'command_pool': CommandPoolConfig, 'wheel_material': WheelMaterialConfig,
-                    'birth_randomization': BirthRandomizationConfig}
-# Sections merged field-by-field into the runtime and re-parsed whole.
-_PRESET_OVERRIDES = ('sensors', 'termination_limits')
-
-
 def _with_control_timing(runtime, path):
     """Merge a reviewed preset; every section is parsed by its own contract."""
-    value = dict(runtime)
-    if path is None:
-        return value
-    preset = read_json(path)
-    allowed = set(_PRESET_REQUIRED) | set(_PRESET_OPTIONAL) | set(_PRESET_OVERRIDES)
-    if not isinstance(preset, dict) or not set(_PRESET_REQUIRED) <= set(preset) <= allowed:
-        raise ValueError('control preset must bind communication and episode randomization')
-    for name, parser in {**_PRESET_REQUIRED, **_PRESET_OPTIONAL}.items():
-        if name in preset:
-            parser.from_dict(preset[name])
-    for name, parser in (('sensors', SensorModelConfig), ('termination_limits', _termination_limits)):
-        if name not in preset:
-            continue
-        # Overrides keep the runtime's other fields (e.g. clocks) and are re-parsed whole.
-        if not isinstance(preset[name], dict) or not isinstance(value.get(name), dict):
-            raise ValueError(f'{name} override requires a runtime {name} block')
-        preset = {**preset, name: {**value[name], **preset[name]}}
-        parser(**preset[name])
-    if 'action_latch' in preset and preset['action_latch'].get('enabled'):
-        # The substep latch replaces whole policy-step transport.
-        value['action_transport'] = {'enabled': False, 'delays_steps': [0], 'nominal_fraction': 1.0}
-    value.update(preset)
-    return value
-
-
-def _termination_limits(**fields):
-    return NativeTaskLimits(**{**fields, 'forbidden_body_names': tuple(fields['forbidden_body_names'])})
+    return dict(runtime) if path is None else merge_preset(runtime, read_json(path))
 
 
 def _command_pool_report(settings, *, seed, sample_count=20000):

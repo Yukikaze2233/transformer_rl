@@ -218,7 +218,6 @@ def main(argv=None):
         from .formal_reward import FormalRewardConfig
         from .recover import RecoverTaskSpec
         from .settings import load_asset_description
-        from ..tasks.termination import NativeTaskLimits
 
         launcher.configure_settings()
         if "cuda" in args.device:
@@ -237,7 +236,7 @@ def main(argv=None):
         transport_raw = runtime.get("action_transport")
         action_transport = (ActionTransportConfig() if transport_raw is None
                             else ActionTransportConfig.from_dict(transport_raw))
-        from .runtime import optional_sections
+        from .sections import optional_sections, termination_limits as parse_limits
         # The same optional sections as the managed runtime (timing, materials, births, ...).
         sections = optional_sections(runtime)
         asset = args.asset_directory or runtime["asset_directory"]
@@ -293,9 +292,7 @@ def main(argv=None):
             limits = runtime.get('termination_limits', runtime.get('tuning', {}).get('limits'))
             if not isinstance(limits, dict):
                 raise ValueError('formal diagnostic sampling needs explicit original termination limits')
-            limits = dict(limits)
-            limits['forbidden_body_names'] = tuple(limits['forbidden_body_names'])
-            termination_limits = NativeTaskLimits(**limits)
+            termination_limits = parse_limits(limits)
         recover_spec = (RecoverTaskSpec(policy_dt_s=.02, action_hold_s=args.recover_hold_s,
                                         height_command_m=args.recover_height)
                         if args.recover else None)

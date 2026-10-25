@@ -261,14 +261,13 @@ def main():
         from transformer_rl.formal.lab_env.env import WheeledLabEnv
         from transformer_rl.formal.lab_env.formal_curriculum import LabTaskSample
         from transformer_rl.formal.lab_env.formal_reward import FormalRewardConfig
-        from transformer_rl.formal.lab_env.runtime import optional_sections
+        from transformer_rl.formal.lab_env.sections import optional_sections, termination_limits
         from transformer_rl.formal.lab_env.settings import load_asset_description
         from transformer_rl.formal.policy import StructuredPolicy, policy_config_from_dict
         from transformer_rl.formal.simulation.dynamics import StartupDynamicsConfig
         from transformer_rl.formal.tasks.curriculum import TaskDraw, TaskFamily
         from transformer_rl.formal.tasks.geometry import TerrainKind
         from transformer_rl.formal.tasks.protocol import CompletedEstimate
-        from transformer_rl.formal.tasks.termination import NativeTaskLimits
 
         payload = torch.load(args.checkpoint, map_location='cpu', weights_only=True)
         policy_config = policy_config_from_dict(payload['recipe']['policy'])
@@ -347,8 +346,6 @@ def main():
         response = ResponseParameters.from_recorded_response(
             json.loads(verify_pin(runtime['response_source_pin']).read_text())['actuator_response'])
         atlas = verify_pin(runtime['terrain_atlas_pin'])
-        limits = dict(runtime['termination_limits'])
-        limits['forbidden_body_names'] = tuple(limits['forbidden_body_names'])
         pair = None if runtime['pair_domain'] is None else PairTargetDomain(**runtime['pair_domain'])
         sections = optional_sections(runtime)
         sections['command_pool'] = None  # the evaluation owns the commands
@@ -367,7 +364,7 @@ def main():
                             task=FlatTaskSpec(**runtime['task']),
                             formal_reward=FormalRewardConfig.from_manifest(
                                 description.manifest, normal_load_source='native_contact_patch_normal_forces'),
-                            termination_limits=NativeTaskLimits(**limits), sensors=sensors, dynamics=dynamics,
+                            termination_limits=termination_limits(runtime['termination_limits']), sensors=sensors, dynamics=dynamics,
                             **sections, terrain_profile='course', terrain_atlas_manifest=str(atlas),
                             terrain_scan=True, forward_scan=True, declarative_scene=launcher.declarative_scene,
                             expected_manifest_sha256=description.manifest_sha256, seed=args.seed)
