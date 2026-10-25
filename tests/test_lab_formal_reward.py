@@ -53,7 +53,7 @@ def test_lab_formal_reward_keeps_formal_terms_and_omits_unavailable_ones():
     assert "contact_slip" in reward.missing_terms
     assert "contact_slip" not in LAB_AVAILABLE_TERMS
     assert result.gate_fractions["ordinary"].all()
-    assert "bounded_cost.contact_slip" in result.component_densities
+    assert "cost.contact_slip" in result.component_densities
 
 
 def test_unavailable_terms_are_removed_from_composition_not_just_logged():

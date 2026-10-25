@@ -72,7 +72,7 @@ class RolloutTelemetry:
                 if not isinstance(name, str):
                     raise TypeError('telemetry reward names must be strings')
                 # The physical producer prefixes paid components with
-                # positive./bounded_cost.; unavailable placeholder terms must
+                # positive./cost.; unavailable placeholder terms must
                 # remain absent from every scalar series.
                 if name.rsplit('.', 1)[-1] not in self.missing_terms:
                     selected[f'{group}/{name}'] = value
@@ -110,7 +110,7 @@ class RolloutTelemetry:
             'reward_observed_samples': samples,
             'reward_source_available': self._names is not None,
             'missing_reward_terms': dict(self.missing_terms),
-            'reward_scope': 'producer interval densities; formal positive./bounded_cost.* are after cost bounding; events/raw costs are separate; ownership/recovery bonus may change learning reward',
+            'reward_scope': 'producer interval densities; formal positive./cost.* sum without a cost bound (SCUT); events are separate; ownership/recovery bonus may change learning reward',
         }
         for name, total, bad in zip(names, densities, invalid):
             group, term = name.split('/', 1)

@@ -148,7 +148,7 @@ def test_effort_power_geometric_margin_and_harmful_contact_keep_separate_physica
     assert result.raw_cost_densities['harmful_contact'].eq(2).all()
 
 
-def test_large_errors_remain_visible_while_bounded_density_keeps_the_safe_return_lower_bound():
+def test_large_errors_remain_visible_and_costs_are_not_bounded():
     reward = fixture()
 
     def extreme(value, _):
@@ -157,8 +157,11 @@ def test_large_errors_remain_visible_while_bounded_density_keeps_the_safe_return
 
     result = step(reward, change=extreme)
     density = torch.stack(tuple(result.component_densities.values())).sum(0)
-    assert density.ge(-10 - 1e-5).all() and density.le(8).all()
-    assert torch.stack(tuple(result.raw_cost_densities.values())).sum(0).gt(10000).all()
+    raw = torch.stack(tuple(result.raw_cost_densities.values())).sum(0)
+    positive = torch.stack(tuple(result.raw_positive_densities.values())).sum(0)
+    # SCUT composition: the reward is the plain positive-minus-cost sum.
+    assert raw.gt(10000).all()
+    torch.testing.assert_close(density, positive - raw)
     assert result.raw_error_means['forward_m_s'].eq(100).all()
     assert result.raw_error_mean_squares['forward_m_s'].eq(10000).all()
 
@@ -242,42 +245,28 @@ def test_slip_uses_named_contact_speed_and_force_gate_not_body_or_rolling_speed(
     assert result.gate_fractions['slip_left'].eq(1).all() and result.gate_fractions['slip_right'].eq(0).all()
 
 
-def test_true_failure_pays_absorbing_tail_once_but_time_limit_does_not():
+def test_true_failure_pays_the_scut_event_once_but_time_limit_does_not():
     reward = fixture()
     result = step(reward, failed=torch.tensor([True, False]), timeout=torch.tensor([True, True]))
-    expected = .05 - 4 + reward.tuning.gamma * reward.tuning.absorbing_value
-    torch.testing.assert_close(result.learning_reward, torch.tensor([expected, .05]))
-    assert result.event_rewards['failure_absorbing_value_tail'][1] == 0
-    assert result.timestamp_s.eq(.01).all()  # No absorbing physics was appended.
+    torch.testing.assert_close(result.learning_reward, torch.tensor([.05 - 4, .05]))
+    assert set(result.event_rewards) == {'failure', 'physical_skill_success'}
+    assert result.timestamp_s.eq(.01).all()  # No synthetic terminal physics was appended.
     with pytest.raises(ValueError, match='initialized'):
         begin(reward)
     with pytest.raises(RuntimeError):
         finish(reward)
 
 
-def test_safe_holding_and_recovery_outrank_immediate_failure_even_at_the_worst_density_bound():
-    reward = fixture()
-    failure = step(reward, failed=torch.ones(2, dtype=torch.bool))
-    gamma = reward.tuning.gamma
-    safe_2s = sum(gamma**i * -.0999 for i in range(200))
-    recovery_2s = sum(gamma**i * (-.08 if i < 50 else .02) for i in range(200))
-    infinite_safe_lower = -.1 / (1 - gamma)
-    best_possible_failure = .08 - 4 + gamma * reward.tuning.absorbing_value
-    assert -4 > safe_2s  # The old event alone could prefer immediate failure.
-    assert recovery_2s > safe_2s > float(failure.learning_reward[0])
-    assert infinite_safe_lower > best_possible_failure
-
 
 @pytest.mark.parametrize('period', [.005, .001])
-def test_each_subinterval_is_bounded_before_integration_rather_than_bounding_a_policy_rate_mean(period):
+def test_each_subinterval_cost_is_integrated_at_its_physical_dt(period):
     reward = fixture(period)
     result = step(reward, change=lambda value, index: replace(value, joint_boundary_shortfall_rad=
                   torch.full((2, 6), .05 if index <= reward.substeps // 2 else 0.)))
-    expected = 5 - 5 * torch.tanh(torch.tensor(1.2, dtype=torch.float64))
-    total_density = torch.stack(tuple(result.component_densities.values())).sum(0)
-    torch.testing.assert_close(total_density, expected.expand(2), atol=1e-6, rtol=1e-6)
+    # Half of the interval pays 2 (0.05/0.05)^2 x 6 = 12/s; the policy-rate mean is 6/s.
     assert result.raw_cost_densities['joint_boundary'].eq(6).all()
-    assert not torch.allclose(total_density, torch.full((2,), 5., dtype=torch.float64) - 10 * torch.tanh(torch.tensor(.6)))
+    torch.testing.assert_close(result.component_densities['cost.joint_boundary'],
+                               torch.full((2,), -6., dtype=torch.float64))
 
 
 def test_gae_does_not_bootstrap_an_already_included_failure_tail_but_time_limit_keeps_its_terminal_value():

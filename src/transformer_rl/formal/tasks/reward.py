@@ -17,7 +17,7 @@ from ..control.ownership import ControlSource, validate_issued_control
 from ..control.observation import CommandMode, MechanicalBinding
 
 
-REWARD_VERSION = 'locomotion_v3'
+REWARD_VERSION = 'locomotion_v4'
 REWARD_POSITIVE_TERMS = (
     'forward', 'yaw', 'height', 'attitude', 'jump_vertical', 'jump_attitude', 'recovery_upright',
 )
@@ -76,8 +76,7 @@ class RewardTuning:
     robot_mass_kg: float
     gamma: float = .99498743710662
     policy_dt_s: float = .01
-    cost_density_scale: float = 10.
-    absorbing_density: float = -11.
+    # SCUT termination -200 x 0.02 s: one event per failure, no absorbing tail.
     failure_event: float = -4.
     success_event: float = 1.
     gravity_m_s2: float = 9.81
@@ -92,21 +91,9 @@ class RewardTuning:
                 or min(self.robot_mass_kg, self.gravity_m_s2, self.landing_load_multiple) <= 0
                 or min(self.angular_damping_ordinary, self.angular_damping_jump,
                        self.angular_damping_recovery) < 0
-                or self.policy_dt_s not in (.01, .02) or not 0 < self.gamma < 1 or self.cost_density_scale != 10.
-                or self.absorbing_density >= -self.cost_density_scale or self.failure_event >= 0
+                or self.policy_dt_s not in (.01, .02) or not 0 < self.gamma < 1 or self.failure_event >= 0
                 or self.success_event < 0):
-            raise ValueError('reward tuning requires explicit mass, policy-period discount and a strictly worse absorbing density')
-        # Even the best terminal density must be worse than safe continuation
-        # at its worst continuous density. This is a reward-bound assertion,
-        # not a claim about an imperfect learned critic or finite evaluation.
-        best_failure = 8 * self.policy_dt_s + self.failure_event + self.gamma * self.absorbing_value
-        safe_lower = -self.cost_density_scale * self.policy_dt_s / (1 - self.gamma)
-        if best_failure >= safe_lower:
-            raise ValueError('failure reward could beat the declared safe-continuation lower bound')
-
-    @property
-    def absorbing_value(self):
-        return self.absorbing_density * self.policy_dt_s / (1 - self.gamma)
+            raise ValueError('reward tuning requires explicit mass, policy-period discount and a negative failure event')
 
 
 @dataclass(frozen=True)
@@ -180,8 +167,8 @@ class PhysicalRewardComposer:
 
     Physical terms use every200Hz/1kHz sample with its actual dt. Issued-action
     differences are policy-period densities held over that interval, not differentiated
-    again at the physics rate. All raw costs survive bounded composition.
-    Events occur once; absorbing value adds no synthetic physical transition.
+    again at the physics rate. As in SCUT, the reward is the plain sum of the
+    positive and cost terms (no cost bound) plus once-only events.
     """
 
     def __init__(self, binding: MechanicalBinding, num_envs, tuning: RewardTuning,
@@ -463,10 +450,8 @@ class PhysicalRewardComposer:
             cost = {key: value if key in available else torch.zeros_like(value)
                     for key, value in cost.items()}
         p, c = torch.stack(tuple(positive.values())).sum(0), torch.stack(tuple(cost.values())).sum(0)
-        scale = self.tuning.cost_density_scale
-        attenuation = torch.where(c > 0, scale * torch.tanh(c / scale) / c.clamp_min(1e-20), torch.ones_like(c))
         components = {**{'positive.' + key: value for key, value in positive.items()},
-                      **{'bounded_cost.' + key: -value * attenuation for key, value in cost.items()}}
+                      **{'cost.' + key: -value for key, value in cost.items()}}
         invalid |= (~torch.isfinite(p) | ~torch.isfinite(c) | (p < 0) | (p > 8 + 1e-5) | (c < 0)
                     | ~torch.isfinite(torch.stack(tuple(components.values()))).all(0))
         if invalid.any():
@@ -564,7 +549,6 @@ class PhysicalRewardComposer:
         credited = fresh_success & entire_skill_policy_owned & window['owned'] & ~terminated
         failure = terminated.to(torch.float64)
         events = {'failure': failure * self.tuning.failure_event,
-                  'failure_absorbing_value_tail': failure * self.tuning.gamma * self.tuning.absorbing_value,
                   'physical_skill_success': credited.to(torch.float64) * self.tuning.success_event}
         physical = torch.stack(tuple(window['components'].values())).sum(0) + torch.stack(tuple(events.values())).sum(0)
         learning = torch.where(window['owned'], physical, 0).to(torch.float32)

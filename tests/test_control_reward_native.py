@@ -142,7 +142,7 @@ def test_complete_physical_reward_reset_collector_and_ppo_path_keeps_failure_cre
     batch = collector.collect(12)
     assert env.sample_count == env.sim.steps == 24
     assert batch.masks.actor.sum() == 9
-    assert env.results[5].event_rewards['failure_absorbing_value_tail'][0] < 0
+    assert env.results[5].event_rewards['failure'][0] == -4
     torch.testing.assert_close(batch.returns.reshape(12, 2)[5, 0], env.results[5].learning_reward[0])
     assert all(result.learning_reward.eq(0).all() for result in env.results[:5])
     assert all(result.learning_reward[0] == 0 for result in env.results[6:11])
