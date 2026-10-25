@@ -285,7 +285,7 @@ value = model.critic(critic_input)  # [B]
 
 **该结构是合理的轻量工程候选，尚无证据证明优于同输入、同预算的历史MLP，也不能用一次优化停滞认定Transformer选型错误。**
 
-- **身体分组与共享头有明确作用。** 每侧腿token包含同轴双输出的q／dq／上一动作，左右共享投影与解码；身体ID保留侧别。它不强制源机械零件完全镜像，也不代替闭链物理。
+- **身体分组与共享头有明确作用。** 每侧腿token包含同轴双输出的q／dq／上一动作，左右共享投影与解码；身体ID保留侧别。正式配置`mirror_canonical=true`：右侧token与上下文先按y→−y反射到左侧坐标，共享解码器输出再乘侧别符号。镜像轴上右=−左，若在原始坐标共享权重，初始化即偏向反对称输出（CP4400剪刀步的成因之一）；反射后相同输入给出物理对称的腿动作。它不强制源机械零件完全镜像，也不代替闭链物理。
 - **Pre-LN与深度门控有研究依据。** 本实现是简单的逐特征sigmoid残差门控，借鉴稳定化方向；没有复现完整GTrXL、GRU式门控或跨段记忆，不能继承论文性能结论。[Pre-LN](https://proceedings.mlr.press/v119/xiong20b.html)、[GTrXL](https://proceedings.mlr.press/v119/parisotto20a.html)。
 - **空间mask是语义偏置。** 当前允许32／36个节点对，且仍执行稠密SDPA，不能宣称获得稀疏内核的计算收益。它只借鉴[Body Transformer](https://proceedings.mlr.press/v270/sferrazza25a.html)的身体结构思路，不是该模型的完整复现。
 - **五帧提供短时状态线索。** 两层时间注意力可组合当前与过去80ms的特征，但不会延长可观测历史；短通信RTT不能证明滑移、载荷和机身速度均已可辨识。

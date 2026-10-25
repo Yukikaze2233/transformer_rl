@@ -76,5 +76,21 @@
     "forbidden_body_load_n": 1.0,
     "forbidden_contact_confirm_s": 0.4,
     "pose_failure_confirm_s": 0.4
+  },
+  "wheel_material": {
+    "static_friction": [
+      0.5,
+      1.2
+    ],
+    "dynamic_friction": [
+      0.4,
+      1.0
+    ],
+    "restitution": [
+      0.02,
+      0.2
+    ],
+    "num_buckets": 64,
+    "anchor_lower_endpoint": true
   }
 }

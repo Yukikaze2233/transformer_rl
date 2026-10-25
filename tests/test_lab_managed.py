@@ -18,6 +18,7 @@ from transformer_rl.formal.lab_env.sensors import LabSensorModel
 from transformer_rl.formal.lab_env.recovery_lifecycle import RecoveryLifecycle
 from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
 from transformer_rl.formal.tasks.terrain_courses import TerrainCourseRouter
+from transformer_rl.formal.lab_env.stair_trigger import SimulatedTofTrigger
 from transformer_rl.formal.tasks.trajectory import DriveEnvelope
 
 
@@ -39,6 +40,7 @@ def scene(tmp_path, components, *, seed=13):
     course.stair_requests = StairRequestProtocol(4)
     course.stair_next_id = torch.zeros(4, dtype=torch.long)
     course._last_stair_response = torch.zeros(4, dtype=torch.long)
+    course.tof_trigger = SimulatedTofTrigger(4, min_height_m=.04, max_height_m=.20, seed=seed)
     course.lookahead_summary = lambda: {'scope': 'synthetic_geometry_fixture', 'misses': 0}
     reward = SimpleNamespace(config=FormalRewardConfig(16.),
                              missing_term_reasons={'contact_slip': 'No verified contact-point relative tangent velocity producer',

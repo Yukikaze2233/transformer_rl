@@ -302,6 +302,7 @@ def _stair_command_with_truth(truth_height, *, return_course=False):
     from transformer_rl.formal.lab_env.terrain import LabTerrainCourse
     from transformer_rl.formal.tasks.protocol import CompletedEstimate, RequestProtocol
     from transformer_rl.formal.lab_env.course_tasks import StairRequestProtocol
+    from transformer_rl.formal.lab_env.stair_trigger import SimulatedTofTrigger
 
     n = 2
     fsm = SkillFSM(n)
@@ -347,8 +348,10 @@ def _stair_command_with_truth(truth_height, *, return_course=False):
     course.tof_request_id = torch.full((n,), -1, dtype=torch.long)
     course.stair_next_id = torch.ones(n, dtype=torch.long)
     course._pending_requests = {'jump': None, 'stair': None}
-    course._course_stair_pending = torch.zeros(n, dtype=torch.bool)
-    course._course_stair_height = torch.zeros(n)
+    # Flat beam: the simulated ToF sees no riser unless a test supplies one.
+    course.tof_trigger = SimulatedTofTrigger(n, min_height_m=.04, max_height_m=.20, seed=5)
+    course.tof_profile = lambda: (torch.zeros(n, len(course.tof_trigger.distances_m)),
+                                  torch.ones(n, len(course.tof_trigger.distances_m), dtype=torch.bool))
     course._last_stair_response = torch.zeros(n, dtype=torch.long)
     course.advance_skill()
     if return_course:
@@ -428,75 +431,91 @@ def test_partial_reset_cancels_only_its_queued_external_request_rows():
     assert caller_packet.request_id.tolist() == [17, 23]
 
 
-def _sampled_stair_course(heights=(.08, .18), kinds=(3, 7)):
-    from dataclasses import replace
-    from test_lab_course_tasks import fixture
-    from transformer_rl.formal.control.observation import CommandMode
+def _tof_stair_course(heights=(.08, .18), distance_m=.4):
+    """Two rows approaching a riser of ``heights`` at ``distance_m`` along the beam."""
+    from transformer_rl.formal.lab_env.stair_trigger import SimulatedTofTrigger, TofTriggerConfig
 
     course = _stair_command_with_truth(0., return_course=True)
-    course.tasks, sample = fixture()
-    kind = torch.tensor(kinds, dtype=torch.long)
-    draw = replace(sample.draw, family=torch.full((2,), int(TaskFamily.TERRAIN)),
-                   terrain_kind=kind, step_up_m=torch.tensor(heights))
-    sample = replace(sample, draw=draw, terrain_kind=kind,
-                     mode=torch.full((2,), int(CommandMode.STAIR)))
+    config = TofTriggerConfig(trigger_distance_m=(.5, .5000001), early_probability=0., latency_intervals=(0, 0),
+                              height_noise_m=1e-6)
+    course.tof_trigger = SimulatedTofTrigger(2, min_height_m=.04, max_height_m=.20, config=config, seed=5)
+    course.tof_trigger.reset(torch.arange(2))
+    distances = course.tof_trigger.distances_m
+    course.tof_profile = lambda: (torch.tensor(heights)[:, None] * (distances[None] >= distance_m),
+                                  torch.ones(2, len(distances), dtype=torch.bool))
+    course.stair_requests.clear(torch.ones(2, dtype=torch.bool))
     course.env._skill_fsm.reset(torch.arange(2))
-    course.reset_commands(torch.arange(2), sample)
     return course
 
 
-def test_sampled_stair_commands_reach_the_same_request_port_once():
+def _tick(course, step):
+    from dataclasses import replace
+
+    now = torch.full((2,), .02 * step, dtype=torch.float64)
+    course.env._clock = lambda: now
+    # Each interval sees the estimate completed just before it.
+    course.env._completed_estimate = replace(course.env._completed_estimate, available_at_s=now - .01)
+    course.advance_skill()
+
+
+def test_tof_riser_reaches_the_request_port_once():
     from transformer_rl.formal.lab_env.skill_fsm import StairState
 
-    course = _sampled_stair_course()
-    course.advance_skill()
+    course = _tof_stair_course()
+    _tick(course, 1)
     accepted = course.stair_requests.active_id.clone()
-    assert (accepted >= 0).all() and not course._course_stair_pending.any()
-    torch.testing.assert_close(course.stair_requests.height_m, torch.tensor([.08, .18]))
+    assert (accepted >= 0).all()
+    torch.testing.assert_close(course.stair_requests.height_m, torch.tensor([.08, .18]), atol=1e-5, rtol=0)
     assert course.env._skill_fsm.stair.state.tolist() == [int(StairState.STEP_UP), int(StairState.BODY_BUMP)]
-    course.env._clock = lambda: torch.full((2,), .01, dtype=torch.float64)
-    course.advance_skill()
+    _tick(course, 2)
     torch.testing.assert_close(course.stair_requests.max_seen_id, accepted)
+    assert course.tof_trigger.counts[1] == 2
 
 
-def test_sampled_stair_waits_for_estimate_and_external_request_owns_its_row():
+def test_tof_waits_for_estimate_and_external_request_owns_its_row():
     from dataclasses import replace
     from transformer_rl.formal.lab_env.course_tasks import RequestCommand
 
-    course = _sampled_stair_course()
-    course.env._completed_estimate = replace(course.env._completed_estimate,
-                                             valid=torch.tensor([False, True]))
-    course.advance_skill()
-    assert course._course_stair_pending.tolist() == [True, False]
-    assert course.stair_requests.active_id[0] == -1
-    course.env._clock = lambda: torch.full((2,), .01, dtype=torch.float64)
-    course.env._completed_estimate = replace(course.env._completed_estimate,
-                                             valid=torch.ones(2, dtype=torch.bool))
+    course = _tof_stair_course()
+    course.env._completed_estimate = replace(course.env._completed_estimate, valid=torch.tensor([False, True]))
+    _tick(course, 1)
+    assert course.stair_requests.active_id[0] == -1 and course.tof_trigger.countdown[0] == 0
+    course.env._completed_estimate = replace(course.env._completed_estimate, valid=torch.ones(2, dtype=torch.bool))
     course.submit_request('stair', RequestCommand(torch.tensor([900, -1]), torch.tensor([.15, 0.])))
-    course.advance_skill()
+    _tick(course, 2)
     assert course.stair_requests.active_id[0] == 900
-    assert not course._course_stair_pending.any()
     assert course.stair_next_id[0] == 901
     torch.testing.assert_close(course.stair_requests.height_m[0], torch.tensor(.15))
 
 
-def test_downward_or_subcurb_courses_do_not_fabricate_upward_requests():
-    course = _sampled_stair_course(heights=(.02, .18), kinds=(3, 4))
-    course.advance_skill()
+def test_downward_or_subcurb_risers_do_not_fabricate_upward_requests():
+    course = _tof_stair_course(heights=(.02, -.13))
+    _tick(course, 1)
     assert course.stair_requests.active_id.eq(-1).all()
-    assert not course._course_stair_pending.any()
+    assert course.tof_trigger.counts[0] == 0
 
 
-def test_invalid_external_id_is_not_overwritten_by_a_sampled_course_command():
+def test_invalid_external_id_is_not_overwritten_by_a_tof_request():
     from transformer_rl.formal.lab_env.course_tasks import RequestCommand
     from transformer_rl.formal.tasks.protocol import RequestResponse
 
-    course = _sampled_stair_course()
+    course = _tof_stair_course()
     course.submit_request('stair', RequestCommand(torch.tensor([-2, -1]), torch.tensor([.1, 0.])))
-    course.advance_skill()
+    _tick(course, 1)
     assert course._last_stair_response[0] == int(RequestResponse.INVALID)
     assert course.stair_requests.active_id[0] == -1
-    assert not course._course_stair_pending[0]
+
+
+def test_tof_rearms_after_the_stair_skill_ends():
+    course = _tof_stair_course()
+    _tick(course, 1)
+    first = course.stair_requests.active_id.clone()
+    assert (first >= 0).all() and not course.tof_trigger.armed.any()
+    course.cancel_stair_request(torch.arange(2), first)
+    _tick(course, 2)
+    assert course.tof_trigger.armed.all()
+    _tick(course, 3)
+    assert (course.stair_requests.active_id > first).all()
 
 
 def test_terrain_route_binds_sampled_parameters_to_actual_atlas_buckets(atlas):

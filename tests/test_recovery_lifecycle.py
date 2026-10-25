@@ -147,8 +147,12 @@ def test_course_handoff_changes_next_mode_and_occupancy_without_new_episode_or_s
     value = fixture()
     course = LabTerrainCourse.__new__(LabTerrainCourse)
     course.recovery = value
+    from transformer_rl.formal.lab_env.course_tasks import LabCourseTasks
+
+    # Without a command pool the handoff keeps the legacy HEIGHT relabel.
     course.tasks = SimpleNamespace(base_mode=torch.full((2,), int(CommandMode.RECOVERY)),
-                                   family=torch.full((2,), int(TaskFamily.RECOVERY)))
+                                   family=torch.full((2,), int(TaskFamily.RECOVERY)), command_pool=None)
+    course.tasks.begin_tracking = lambda mask: LabCourseTasks.begin_tracking(course.tasks, mask)
     course.env = SimpleNamespace(
         _clock=lambda: torch.full((2,), .03, dtype=torch.float64),
         _completed_estimate=estimate(2), _interval_policy_owned=torch.ones(2, dtype=torch.bool),

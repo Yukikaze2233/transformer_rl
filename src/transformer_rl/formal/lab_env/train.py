@@ -201,7 +201,6 @@ def main(argv=None):
 
         from ..control.actuation import PairTargetDomain, ResponseParameters
         from .action_transport import ActionTransportConfig
-        from .materials import WheelMaterialConfig
         from ...common.training_control import verify_pin
         from ...common.random_state import capture_rng, restore_rng
         from ..learning.optimization import StructuredPPOConfig, StructuredPPOTrainer
@@ -238,13 +237,9 @@ def main(argv=None):
         transport_raw = runtime.get("action_transport")
         action_transport = (ActionTransportConfig() if transport_raw is None
                             else ActionTransportConfig.from_dict(transport_raw))
-        material_raw = runtime.get('wheel_material')
-        wheel_material = None if material_raw is None else WheelMaterialConfig.from_dict(material_raw)
-        from ..control.communication import CommunicationConfig, EpisodeRandomizationConfig
-        communication = (None if runtime.get('communication') is None
-                         else CommunicationConfig.from_dict(runtime['communication']))
-        episode_randomization = (None if runtime.get('episode_randomization') is None
-                                 else EpisodeRandomizationConfig.from_dict(runtime['episode_randomization']))
+        from .runtime import optional_sections
+        # The same optional sections as the managed runtime (timing, materials, births, ...).
+        sections = optional_sections(runtime)
         asset = args.asset_directory or runtime["asset_directory"]
 
         source = args.resume or args.init_checkpoint
@@ -309,8 +304,7 @@ def main(argv=None):
                             formal_reward=formal_reward, recover=recover_spec,
                             termination_limits=termination_limits,
                             sensors=sensors, dynamics=dynamics, action_transport=action_transport,
-                            communication=communication, episode_randomization=episode_randomization,
-                            wheel_material=wheel_material,
+                            **sections,
                             height_scanner=args.height_scanner,
                             terrain_scan=(args.terrain_scan or policy.critic_input_dim == 185),
                             forward_scan=args.forward_scan,

@@ -8,6 +8,7 @@ import torch
 
 from ..control.observation import CommandMode
 from ..simulation.ground import WheelCollisionCentres
+from ..tasks.protocol import RequestResponse
 from ..tasks.reward import RewardPhase
 from ..tasks.geometry import TerrainKind
 from ..tasks.curriculum import TaskFamily
@@ -17,6 +18,7 @@ from ..tasks.command_pool import CommandPool
 from ..tasks.trajectory import DriveEnvelope
 from .course_tasks import LabCourseTasks, RequestCommand, StairRequestProtocol, StairRequestConfig
 from .recovery_lifecycle import RecoveryLifecycle, RecoveryLifecycleConfig
+from .stair_trigger import SimulatedTofTrigger
 
 
 class LabTerrainCourse:
@@ -78,8 +80,8 @@ class LabTerrainCourse:
         x, y = torch.meshgrid(torch.linspace(-.5, .5, 11, device=env._device),
                               torch.linspace(-.3, .3, 7, device=env._device), indexing='xy')
         self._grid_offsets = torch.stack((x.flatten(), y.flatten()), -1)
-        # Stair control has no privileged terrain sensor. These are the only
-        # stair request sources; a future ToF driver fills the same tensors.
+        # Stair requests come from the manual key, an external ToF reading, or
+        # the simulated forward ToF below; all share the same request tensors.
         self.manual_stair_request = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
         self.manual_stair_height_m = torch.zeros(env.num_envs, dtype=torch.float32, device=env._device)
         self.manual_stair_request_id = torch.full((env.num_envs,), -1, dtype=torch.long, device=env._device)
@@ -88,10 +90,11 @@ class LabTerrainCourse:
         self.tof_step_height_m = torch.zeros(env.num_envs, dtype=torch.float32, device=env._device)
         self.tof_request_id = torch.full((env.num_envs,), -1, dtype=torch.long, device=env._device)
         self._pending_requests = {'jump': None, 'stair': None}
-        # Training commands are sampled task intent, never inferred from scan
-        # or contact truth. A new physical episode supplies at most one request.
-        self._course_stair_pending = torch.zeros(env.num_envs, dtype=torch.bool, device=env._device)
-        self._course_stair_height = torch.zeros(env.num_envs, device=env._device)
+        # Simulated forward ToF: one noisy, delayed request per detected riser.
+        self.tof_trigger = SimulatedTofTrigger(
+            env.num_envs, min_height_m=self.stair_requests.config.min_height_m,
+            max_height_m=self.stair_requests.config.max_height_m, seed=int(env.cfg.seed or 0) + 57,
+            device=env._device)
         self._last_stair_response = torch.zeros(env.num_envs, dtype=torch.long, device=env._device)
 
     def _command_context(self):
@@ -464,13 +467,7 @@ class LabTerrainCourse:
         self.tof_step_height_m[ids] = 0
         self.tof_request_id[ids] = -1
         self.stair_requests.reset(ids, env._clock())
-        upward_course = ((task.mode == int(CommandMode.STAIR))
-                         & (task.terrain_kind != int(TerrainKind.STEP_DOWN)))
-        height = task.draw.step_up_m
-        self._course_stair_pending[ids] = (upward_course
-            & (height >= self.stair_requests.config.min_height_m)
-            & (height <= self.stair_requests.config.max_height_m))
-        self._course_stair_height[ids] = torch.where(upward_course, height, 0.)
+        self.tof_trigger.reset(ids)
         self._last_stair_response[ids] = 0
         # A physical reset cancels only these rows, not another row's packet.
         for packet in self._pending_requests.values():
@@ -482,22 +479,39 @@ class LabTerrainCourse:
                 if packet.safety_abort is not None:
                     packet.safety_abort[ids] = False
 
-    def _course_stair_command(self, request_id, height_m, cancel_id, safety_abort, ready):
-        """Fill vacant command rows from the sampled episode, exactly once.
+    def tof_profile(self):
+        """Terrain heights along the travel direction of each body: [n,k] heights and validity.
 
-        An external request/cancel owns its row even if invalid or BUSY. Wait
-        for a completed estimate before issuing a new course request; do not
-        consume an ID merely because the reset endpoint has no valid estimate.
+        The beam starts at the root and follows the commanded travel sign
+        along the body heading; standing rows have no beam.
+        """
+        trigger = self.tof_trigger
+        quaternion = self.env._root_link_quat()
+        x, y, z, w = quaternion.unbind(-1)
+        yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+        forward = self.env._command[:, 0]
+        travel = torch.sign(forward) * (forward.abs() >= trigger.config.minimum_travel_speed_m_s)
+        direction = torch.stack((yaw.cos(), yaw.sin()), -1) * travel[:, None]
+        root = self.env._root_link_position()
+        points = torch.empty(self.env.num_envs, len(trigger.distances_m), 3, device=self.env._device)
+        points[..., :2] = root[:, None, :2] + direction[:, None] * trigger.distances_m[None, :, None]
+        points[..., 2] = self.query._ceiling_m
+        tiles = self.router.tile[:, None].expand(-1, points.shape[1]).contiguous()
+        height, valid, _, _ = self.query(points, tiles)
+        return height, valid & (travel != 0)[:, None]
+
+    def _tof_command(self, request_id, height_m, cancel_id, safety_abort, ready):
+        """Fill rows without an external request from the simulated ToF.
+
+        An external request/cancel owns its row even if invalid or BUSY; a due
+        ToF request then waits. Rows need a completed estimate and no active
+        stair or jump before a request is issued.
         """
         external = (request_id != -1) | (cancel_id != -1) | safety_abort
-        self._course_stair_pending &= ~external
-        issue = (self._course_stair_pending & ready & (self.tasks.active_id < 0)
-                 & (self.stair_requests.active_id < 0))
+        idle = ready & ~external & (self.tasks.active_id < 0) & (self.stair_requests.active_id < 0)
+        fire, measured = self.tof_trigger.step(*self.tof_profile(), idle=idle)
         next_id = torch.maximum(self.stair_next_id, self.stair_requests.max_seen_id + 1)
-        request_id = torch.where(issue, next_id, request_id)
-        height_m = torch.where(issue, self._course_stair_height, height_m)
-        self._course_stair_pending &= ~issue
-        return request_id, height_m
+        return torch.where(fire, next_id, request_id), torch.where(fire, measured, height_m), fire
 
     def finish_recovery_interval(self):
         """Finish the old reward interval before changing the next command mode."""
@@ -556,13 +570,14 @@ class LabTerrainCourse:
             # These inactive placeholders never become observations or labels.
             contact_probability = torch.where(ready[:, None], contact_probability, 0.)
             tilt = torch.where(ready, tilt, 0.)
-        request_id, height_request = self._course_stair_command(
+        request_id, height_request, fired = self._tof_command(
             request_id, height_request, cancel_id, safety_abort, ready)
         condition = self.stair_requests.step(
             now_s=env._clock(), request_id=request_id, height_m=height_request,
             cancel_id=cancel_id, jump_active=self.tasks.active_id >= 0,
             ready=ready & ~safety_abort)
         self._last_stair_response.copy_(condition.response)
+        rejected = fired & (condition.response != int(RequestResponse.ACCEPTED))
         # Each submitted packet is consumed once, including BUSY/invalid IDs.
         self.manual_stair_request.zero_()
         self.manual_stair_request_id.fill_(-1)
@@ -580,6 +595,8 @@ class LabTerrainCourse:
             command_height_m=admission.admitted[:, 3],
             manual_request=condition.active, manual_height_m=condition.height_m)
         self.stair_requests.clear(stair.exited)
+        # The next riser (two-level course, stairs) needs a fresh trigger.
+        self.tof_trigger.arm(rejected | finished | stair.exited)
         active = stair.mode != int(CommandMode.NORMAL)
         env._command.copy_(admission.admitted)
         env._command[:, 0] *= torch.where(active, stair.speed_scale, 1)
@@ -627,18 +644,23 @@ class LabTerrainCourse:
         return terminated & ~allowed_contact
 
     def state_dict(self):
-        return {'format': 'lab_terrain_course_v3', 'router': self.router.state_dict(),
+        return {'format': 'lab_terrain_course_v4', 'router': self.router.state_dict(),
                 'tasks': self.tasks.state_dict(), 'stair_requests': self.stair_requests.state_dict(),
                 'stair_next_id': self.stair_next_id.clone(),
                 'recovery': self.recovery.state_dict(),
-                'birth_family_counts': self._birth_family_counts.clone()}
+                'birth_family_counts': self._birth_family_counts.clone(),
+                'tof_trigger': self.tof_trigger.state_dict()}
 
     def restore_after_physical_reset(self, state):
-        legacy = isinstance(state, dict) and state.get('format') == 'lab_terrain_course_v2'
+        version = state.get('format') if isinstance(state, dict) else None
+        legacy = version == 'lab_terrain_course_v2'
         expected = {'format', 'router', 'tasks', 'stair_requests', 'stair_next_id'}
-        if (not isinstance(state, dict)
-                or set(state) != (expected if legacy else expected | {'recovery', 'birth_family_counts'})
-                or state.get('format') not in ('lab_terrain_course_v2', 'lab_terrain_course_v3')):
+        if not legacy:
+            expected |= {'recovery', 'birth_family_counts'}
+        if version == 'lab_terrain_course_v4':
+            expected |= {'tof_trigger'}
+        if (not isinstance(state, dict) or set(state) != expected
+                or version not in ('lab_terrain_course_v2', 'lab_terrain_course_v3', 'lab_terrain_course_v4')):
             raise ValueError('terrain course checkpoint format differs')
         next_id = state['stair_next_id']
         if (not isinstance(next_id, torch.Tensor) or next_id.shape != self.stair_next_id.shape
@@ -658,6 +680,8 @@ class LabTerrainCourse:
         if not legacy:
             self.recovery.restore_after_physical_reset(state['recovery'])
             self._birth_family_counts.copy_(births)
+        if 'tof_trigger' in state:
+            self.tof_trigger.restore_after_physical_reset(state['tof_trigger'])
 
     def metrics(self):
         report = {'atlas_sha256': self.router.identity,
@@ -680,7 +704,8 @@ class LabTerrainCourse:
                 'scan_queries': self.query.queries, 'scan_misses': int(self.query.misses),
                 'stair_response_last_interval': torch.bincount(
                     self._last_stair_response, minlength=9).tolist(),
-                'stair_command_source': 'external packet or sampled episode command; no terrain sensing',
+                'stair_command_source': 'manual key, external ToF packet, or simulated forward ToF',
+                'tof_trigger': self.tof_trigger.metrics(),
                 'request_responses': self.tasks.request_counters.tolist(),
                 'external_request_responses': self.tasks.external_request_counters.tolist(),
                 'request_end_counts': dict(zip(

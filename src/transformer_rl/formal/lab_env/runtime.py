@@ -33,6 +33,20 @@ from .settings import load_asset_description
 from .sdk import LabSimulation, verify_recovery_sdk_identity
 
 
+# Optional runtime sections, each parsed whole by its own frozen contract; the
+# names match the build_env_cfg keywords.
+OPTIONAL_SECTIONS = {'communication': CommunicationConfig, 'episode_randomization': EpisodeRandomizationConfig,
+                     'wheel_material': WheelMaterialConfig, 'action_latch': ActionLatchConfig,
+                     'motor_envelope': MotorEnvelope, 'command_pool': CommandPoolConfig,
+                     'birth_randomization': BirthRandomizationConfig}
+
+
+def optional_sections(configuration):
+    """Parsed optional runtime sections as build_env_cfg keywords; None when absent."""
+    return {name: None if configuration.get(name) is None else parser.from_dict(configuration[name])
+            for name, parser in OPTIONAL_SECTIONS.items()}
+
+
 _PHYSICS_FIELDS = {'gpu_found_lost_pairs_capacity', 'gpu_found_lost_aggregate_pairs_capacity',
                    'gpu_total_aggregate_pairs_capacity', 'gpu_max_rigid_contact_count',
                    'gpu_max_rigid_patch_count', 'gpu_collision_stack_size'}
@@ -106,8 +120,7 @@ def parse_configuration(recipe, configuration, authorized_boot):
     expected = {'format', 'authorized_boot', 'asset_directory', 'response_source_pin',
                 'terrain_atlas_pin', 'environment_spacing_m', 'task', 'pair_domain',
                 'physics', 'profile_collection', 'termination_limits', 'sensors', 'dynamics'}
-    allowed = expected | {'action_transport', 'wheel_material', 'communication', 'episode_randomization',
-                          'action_latch', 'motor_envelope', 'command_pool', 'birth_randomization'}
+    allowed = expected | {'action_transport'} | set(OPTIONAL_SECTIONS)
     if (not isinstance(configuration, dict) or not expected <= set(configuration) <= allowed
             or configuration['format'] != 'managed_lab_runtime_v4'
             or configuration['authorized_boot'] != authorized_boot or authorized_boot != boot_id()
@@ -142,18 +155,8 @@ def parse_configuration(recipe, configuration, authorized_boot):
     transport_raw = configuration.get('action_transport')
     transport = (ActionTransportConfig() if transport_raw is None
                  else ActionTransportConfig.from_dict(transport_raw))
-    if configuration.get('wheel_material') is not None:
-        WheelMaterialConfig.from_dict(configuration['wheel_material'])
-    if configuration.get('communication') is not None:
-        CommunicationConfig.from_dict(configuration['communication'])
-    if configuration.get('episode_randomization') is not None:
-        EpisodeRandomizationConfig.from_dict(configuration['episode_randomization'])
-    for key, parser in (('action_latch', ActionLatchConfig), ('motor_envelope', MotorEnvelope),
-                        ('command_pool', CommandPoolConfig), ('birth_randomization', BirthRandomizationConfig)):
-        if configuration.get(key) is not None:
-            parser.from_dict(configuration[key])
-    latch_raw = configuration.get('action_latch')
-    if transport.enabled and latch_raw is not None and ActionLatchConfig.from_dict(latch_raw).enabled:
+    latch = optional_sections(configuration)['action_latch']
+    if transport.enabled and latch is not None and latch.enabled:
         raise ValueError('policy-target delay needs one model: whole-step transport and the substep latch both enabled')
     if (tuple(task.action_bounds) != tuple(recipe.collection.action_bounds)
             or task.nominal_height_m != recipe.domain.nominal_height_m):
@@ -233,21 +236,7 @@ def runtime(recipe, components, configuration, *, control):
                 asset.manifest, normal_load_source='native_contact_patch_normal_forces'),
             termination_limits=limits,
             sensors=sensors, dynamics=dynamics, action_transport=transport,
-            communication=(None if configuration.get('communication') is None
-                           else CommunicationConfig.from_dict(configuration['communication'])),
-            episode_randomization=(None if configuration.get('episode_randomization') is None
-                                   else EpisodeRandomizationConfig.from_dict(configuration['episode_randomization'])),
-            wheel_material=(None if configuration.get('wheel_material') is None
-                            else WheelMaterialConfig.from_dict(configuration['wheel_material'])),
-            action_latch=(None if configuration.get('action_latch') is None
-                          else ActionLatchConfig.from_dict(configuration['action_latch'])),
-            motor_envelope=(None if configuration.get('motor_envelope') is None
-                            else MotorEnvelope.from_dict(configuration['motor_envelope'])),
-            command_pool=(None if configuration.get('command_pool') is None
-                          else CommandPoolConfig.from_dict(configuration['command_pool'])),
-            birth_randomization=(None if configuration.get('birth_randomization') is None
-                                 else BirthRandomizationConfig.from_dict(configuration['birth_randomization'])),
-            declarative_scene=launcher.declarative_scene,
+            **optional_sections(configuration), declarative_scene=launcher.declarative_scene,
             terrain_scan=True, forward_scan=True, terrain_profile='course',
             terrain_atlas_manifest=str(atlas), expected_manifest_sha256=asset.manifest_sha256)
         cfg.seed = recipe.training_seed
