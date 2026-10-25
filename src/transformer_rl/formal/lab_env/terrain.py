@@ -18,7 +18,7 @@ from ..tasks.command_pool import CommandPool
 from ..tasks.trajectory import DriveEnvelope
 from .course_tasks import LabCourseTasks, RequestCommand, StairRequestProtocol, StairRequestConfig
 from .recovery_lifecycle import RecoveryLifecycle, RecoveryLifecycleConfig
-from .stair_trigger import SimulatedTofTrigger
+from .stair_trigger import SimulatedTofTrigger, TofBeam
 
 
 class LabTerrainCourse:
@@ -91,6 +91,9 @@ class LabTerrainCourse:
         self.tof_request_id = torch.full((env.num_envs,), -1, dtype=torch.long, device=env._device)
         self._pending_requests = {'jump': None, 'stair': None}
         # Simulated forward ToF: one noisy, delayed request per detected riser.
+        self._stair_ground_start = torch.zeros(env.num_envs, device=env._device)
+        self._stair_request_height = torch.zeros(env.num_envs, device=env._device)
+        self.stair_outcomes = torch.zeros(3, dtype=torch.long, device=env._device)  # accepted, exited, climbed
         self.tof_trigger = SimulatedTofTrigger(
             env.num_envs, min_height_m=self.stair_requests.config.min_height_m,
             max_height_m=self.stair_requests.config.max_height_m, seed=int(env.cfg.seed or 0) + 57,
@@ -478,6 +481,7 @@ class LabTerrainCourse:
         self.tof_request_id[ids] = -1
         self.stair_requests.reset(ids, env._clock())
         self.tof_trigger.reset(ids)
+        self._stair_request_height[ids] = 0
         self._last_stair_response[ids] = 0
         # A physical reset cancels only these rows, not another row's packet.
         for packet in self._pending_requests.values():
@@ -490,7 +494,7 @@ class LabTerrainCourse:
                     packet.safety_abort[ids] = False
 
     def tof_profile(self):
-        """Terrain heights along the travel direction of each body: [n,k] heights and validity.
+        """The stair beam of each body (``TofBeam``) along its travel direction.
 
         The beam starts at the root and follows the commanded travel sign
         along the body heading; standing rows have no beam.
@@ -508,7 +512,7 @@ class LabTerrainCourse:
         points[..., 2] = self.query._ceiling_m
         tiles = self.router.tile[:, None].expand(-1, points.shape[1]).contiguous()
         height, valid, _, _ = self.query(points, tiles)
-        return height, valid & (travel != 0)[:, None]
+        return TofBeam(height, valid & (travel != 0)[:, None], root[:, :2], direction, travel > 0)
 
     def _tof_command(self, request_id, height_m, cancel_id, safety_abort, ready):
         """Fill rows without an external request from the simulated ToF.
@@ -519,7 +523,7 @@ class LabTerrainCourse:
         """
         external = (request_id != -1) | (cancel_id != -1) | safety_abort
         idle = ready & ~external & (self.tasks.active_id < 0) & (self.stair_requests.active_id < 0)
-        fire, measured = self.tof_trigger.step(*self.tof_profile(), idle=idle)
+        fire, measured = self.tof_trigger.step(self.tof_profile(), idle=idle)
         next_id = torch.maximum(self.stair_next_id, self.stair_requests.max_seen_id + 1)
         return torch.where(fire, next_id, request_id), torch.where(fire, measured, height_m), fire
 
@@ -587,7 +591,13 @@ class LabTerrainCourse:
             cancel_id=cancel_id, jump_active=self.tasks.active_id >= 0,
             ready=ready & ~safety_abort)
         self._last_stair_response.copy_(condition.response)
-        rejected = fired & (condition.response != int(RequestResponse.ACCEPTED))
+        accepted = condition.response == int(RequestResponse.ACCEPTED)
+        rejected = fired & ~accepted
+        self.tof_trigger.record_responses(fired, accepted)
+        # Closed-loop evidence (telemetry only): support height gained by the skill.
+        self._stair_ground_start.copy_(torch.where(accepted, env._ground_at_root, self._stair_ground_start))
+        self._stair_request_height.copy_(torch.where(accepted, height_request, self._stair_request_height))
+        self.stair_outcomes[0] += accepted.sum()
         # Each submitted packet is consumed once, including BUSY/invalid IDs.
         self.manual_stair_request.zero_()
         self.manual_stair_request_id.fill_(-1)
@@ -605,6 +615,11 @@ class LabTerrainCourse:
             command_height_m=admission.admitted[:, 3],
             manual_request=condition.active, manual_height_m=condition.height_m)
         self.stair_requests.clear(stair.exited)
+        gained = env._ground_at_root - self._stair_ground_start
+        tracked = stair.exited & (self._stair_request_height > 0)
+        self.stair_outcomes[1] += tracked.sum()
+        self.stair_outcomes[2] += (tracked & (gained >= .75 * self._stair_request_height)).sum()
+        self._stair_request_height.masked_fill_(stair.exited, 0)
         # The next riser (two-level course, stairs) needs a fresh trigger.
         self.tof_trigger.arm(rejected | finished | stair.exited)
         active = stair.mode != int(CommandMode.NORMAL)
@@ -714,6 +729,8 @@ class LabTerrainCourse:
                     self._last_stair_response, minlength=9).tolist(),
                 'stair_command_source': 'manual key, external ToF packet, or simulated forward ToF',
                 'tof_trigger': self.tof_trigger.metrics(),
+                'stair_closed_loop': dict(zip(('requests_accepted', 'skill_exits', 'climbed_75pct_of_request'),
+                                              self.stair_outcomes.tolist())),
                 'request_responses': self.tasks.request_counters.tolist(),
                 'external_request_responses': self.tasks.external_request_counters.tolist(),
                 'request_end_counts': dict(zip(

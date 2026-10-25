@@ -296,6 +296,17 @@ def test_body_bump_clears_only_allowed_contact_not_other_failures():
     assert result.tolist() == [False, True, True, True]
 
 
+def _beam(trigger, heights, distance_m=.4):
+    from transformer_rl.formal.lab_env.stair_trigger import TofBeam
+
+    count, distances = len(heights), trigger.distances_m
+    direction = torch.zeros(count, 2)
+    direction[:, 0] = 1.
+    return TofBeam(heights[:, None] * (distances[None] >= distance_m),
+                   torch.ones(count, len(distances), dtype=torch.bool), torch.zeros(count, 2), direction,
+                   torch.ones(count, dtype=torch.bool))
+
+
 def _stair_command_with_truth(truth_height, *, return_course=False):
     from types import SimpleNamespace
     from transformer_rl.formal.lab_env.skill_fsm import SkillFSM
@@ -350,8 +361,10 @@ def _stair_command_with_truth(truth_height, *, return_course=False):
     course._pending_requests = {'jump': None, 'stair': None}
     # Flat beam: the simulated ToF sees no riser unless a test supplies one.
     course.tof_trigger = SimulatedTofTrigger(n, min_height_m=.04, max_height_m=.20, seed=5)
-    course.tof_profile = lambda: (torch.zeros(n, len(course.tof_trigger.distances_m)),
-                                  torch.ones(n, len(course.tof_trigger.distances_m), dtype=torch.bool))
+    course.tof_profile = lambda: _beam(course.tof_trigger, torch.zeros(n))
+    course._stair_ground_start = torch.zeros(n)
+    course._stair_request_height = torch.zeros(n)
+    course.stair_outcomes = torch.zeros(3, dtype=torch.long)
     course._last_stair_response = torch.zeros(n, dtype=torch.long)
     course.advance_skill()
     if return_course:
@@ -440,9 +453,7 @@ def _tof_stair_course(heights=(.08, .18), distance_m=.4):
                               height_noise_m=1e-6)
     course.tof_trigger = SimulatedTofTrigger(2, min_height_m=.04, max_height_m=.20, config=config, seed=5)
     course.tof_trigger.reset(torch.arange(2))
-    distances = course.tof_trigger.distances_m
-    course.tof_profile = lambda: (torch.tensor(heights)[:, None] * (distances[None] >= distance_m),
-                                  torch.ones(2, len(distances), dtype=torch.bool))
+    course.tof_profile = lambda: _beam(course.tof_trigger, torch.tensor(heights), distance_m)
     course.stair_requests.clear(torch.ones(2, dtype=torch.bool))
     course.env._skill_fsm.reset(torch.arange(2))
     return course
@@ -469,7 +480,9 @@ def test_tof_riser_reaches_the_request_port_once():
     assert course.env._skill_fsm.stair.state.tolist() == [int(StairState.STEP_UP), int(StairState.BODY_BUMP)]
     _tick(course, 2)
     torch.testing.assert_close(course.stair_requests.max_seen_id, accepted)
-    assert course.tof_trigger.counts[1] == 2
+    metrics = course.tof_trigger.metrics()
+    assert metrics['requests_submitted']['tof'] == 2 and metrics['requests_accepted'] == 2
+    assert course.stair_outcomes[0] == 4  # the fixture's two manual requests and these two
 
 
 def test_tof_waits_for_estimate_and_external_request_owns_its_row():
@@ -506,7 +519,7 @@ def test_invalid_external_id_is_not_overwritten_by_a_tof_request():
     assert course.stair_requests.active_id[0] == -1
 
 
-def test_tof_rearms_after_the_stair_skill_ends():
+def test_tof_rearms_after_the_skill_ends_but_not_in_place_on_the_same_riser():
     course = _tof_stair_course()
     _tick(course, 1)
     first = course.stair_requests.active_id.clone()
@@ -515,6 +528,12 @@ def test_tof_rearms_after_the_stair_skill_ends():
     _tick(course, 2)
     assert course.tof_trigger.armed.all()
     _tick(course, 3)
+    assert course.stair_requests.active_id.eq(-1).all()  # same riser, still in the window
+    beam = course.tof_profile
+    course.tof_profile = lambda: _beam(course.tof_trigger, torch.zeros(2))  # backed off: riser left the beam
+    _tick(course, 4)
+    course.tof_profile = beam
+    _tick(course, 5)
     assert (course.stair_requests.active_id > first).all()
 
 
