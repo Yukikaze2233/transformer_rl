@@ -191,6 +191,10 @@ class PhysicalCommunication:
         if response is None:
             mean = (self.held_effort * old_duration[:, None]
                     + command * new_duration[:, None]) / self.dt
+        elif self.config.uplink_fraction == 1.:
+            # No downlink delay: the old torque segment lasts zero seconds and
+            # leaves the response state unchanged, so integrate the new one only.
+            mean = response.advance(command, new_duration, bounds).impulse / self.dt
         else:
             old = response.advance(self.held_effort, old_duration, bounds)
             new = response.advance(command, new_duration, bounds)

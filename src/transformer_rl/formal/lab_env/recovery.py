@@ -128,8 +128,6 @@ class _RecoveryPreparation:
     @torch.no_grad()
     def release_effort(self, effort):
         """Per substep: passive rows request zero torque on all six outputs (SCUT)."""
-        if not bool(self.passive.any()):
-            return effort
         return torch.where(self.passive[:, None], torch.zeros_like(effort), effort)
 
     @torch.no_grad()

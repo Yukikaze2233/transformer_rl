@@ -49,6 +49,7 @@ from .dynamics import LabStartupDynamics
 from .sensors import LabSensorModel
 from .action_transport import DelayedActionTransport, SubstepActionLatch
 from .birth import BirthRandomization
+from ..control.invariants import DeferredInvariants, require
 from ..simulation.ground import WheelCollisionCentres
 from ..control.communication import EpisodeRandomization, PhysicalCommunication
 from .joint_coordinates import ContinuousJointCoordinates
@@ -150,6 +151,11 @@ class WheeledLabEnv(DirectRLEnv):
         )
         self._stiffness = self._control.controller.stiffness
         self._damping = self._control.controller.damping
+        # Per-substep value checks are read once per policy interval (no host sync each).
+        self._invariants = DeferredInvariants(self._device)
+        self._control.controller.invariants = self._invariants
+        if self._control.drive is not None:
+            self._control.drive.invariants = self._invariants
         self._last_joint_acceleration = torch.zeros(self.num_envs, 6,
                                                     dtype=torch.float32, device=self._device)
         self._last_policy_velocity = torch.zeros(self.num_envs, 6,
@@ -998,8 +1004,7 @@ class WheeledLabEnv(DirectRLEnv):
                 self._as_torch(self.robot.data.body_com_pose_w)[..., :3],
                 self._spring_strength,
             )
-            if not bool(frame.valid.all()):
-                raise FloatingPointError('invalid gas-spring mount geometry before physics')
+            require(self._invariants, 'invalid gas-spring mount geometry before physics', ~frame.valid)
             self.robot.instantaneous_wrench_composer.add_forces_and_torques_index(
                 forces=frame.forces_world.contiguous(),
                 torques=frame.torques_about_com_world.contiguous(),
@@ -1204,6 +1209,9 @@ class WheeledLabEnv(DirectRLEnv):
             self.scene.update(dt=self.physics_dt)
             self._physical_tick += 1
             self._observe_substep()
+        invariants = getattr(self, '_invariants', None)
+        if invariants is not None:
+            invariants.raise_if_violated()
         self.episode_length_buf += 1
         self.common_step_counter += 1
         birth = getattr(self, '_birth_randomization', None)

@@ -11,6 +11,7 @@ import math
 
 import torch
 
+from .invariants import DeferredInvariants, require
 from .ownership import ControlSource, canonical_coaxial_displacement, validate_issued_control
 from ..contracts import ACTION_ORDER
 
@@ -186,17 +187,23 @@ class OutputFeedbackController:
         if pair_domain is not None:
             self._difference = torch.tensor(pair_domain.signed_difference_rad, dtype=torch.float64, device=self.device)
             self._signs = torch.tensor(pair_domain.signs, dtype=torch.float64, device=self.device)
+        # None checks values immediately; the environment installs a
+        # DeferredInvariants so per-substep checks cost no host sync.
+        self.invariants: DeferredInvariants | None = None
 
     def _matrix(self, name, value, width):
         if (not isinstance(value, torch.Tensor) or value.shape != (self.num_envs, width)
-                or value.device != self.device or value.dtype != torch.float32 or not torch.isfinite(value).all()):
+                or value.device != self.device or value.dtype != torch.float32):
             raise ValueError(f'{name} requires a finite float32 {(self.num_envs, width)} tensor')
+        require(self.invariants, f'{name} requires a finite float32 {(self.num_envs, width)} tensor',
+                ~torch.isfinite(value))
 
     def _clock(self, name, value):
         if (not isinstance(value, torch.Tensor) or value.shape != (self.num_envs,)
-                or value.device != self.device or value.dtype != torch.float64
-                or not torch.isfinite(value).all() or (value < 0).any()):
+                or value.device != self.device or value.dtype != torch.float64):
             raise ValueError(f'{name} requires a finite nonnegative float64 clock')
+        require(self.invariants, f'{name} requires a finite nonnegative float64 clock',
+                ~torch.isfinite(value) | (value < 0))
 
     @torch.no_grad()
     def decode(self, issued_action, feedback_position_rad, controller_issued_at_s):
@@ -312,22 +319,22 @@ class OutputFeedbackController:
         self._matrix('admitted_leg_position_rad', targets.admitted_leg_position_rad, 4)
         self._matrix('wheel_velocity_rad_s', targets.wheel_velocity_rad_s, 2)
         validate_issued_control(targets.issued_action, targets.control_source,
-                                num_envs=self.num_envs, device=self.device)
+                                num_envs=self.num_envs, device=self.device, invariants=self.invariants)
         self._clock('controller_issued_at_s', targets.controller_issued_at_s)
         self._clock('pd_computed_at_s', pd_computed_at_s)
-        if (targets.controller_issued_at_s > pd_computed_at_s + 1e-9).any():
-            raise ValueError('feedback cannot use a policy target issued in the future')
+        require(self.invariants, 'feedback cannot use a policy target issued in the future',
+                targets.controller_issued_at_s > pd_computed_at_s + 1e-9)
         scale = torch.ones_like(feedback_position_rad) if strength is None else strength
         self._matrix('strength', scale, 6)
-        if ((scale <= 0) | (scale > 1)).any():
-            raise ValueError('strength is an explicit positive derating, never an increased nominal output cap')
+        require(self.invariants, 'strength is an explicit positive derating, never an increased nominal output cap',
+                (scale <= 0) | (scale > 1))
         legs = (160 * (targets.admitted_leg_position_rad - feedback_position_rad[:, :4])
                 - 2.5 * feedback_velocity_rad_s[:, :4])
         wheels = .6 * (targets.wheel_velocity_rad_s - feedback_velocity_rad_s[:, 4:])
         requested = torch.cat((legs, wheels), -1) * scale
         bounds = self.effort_bounds * scale
-        if not torch.isfinite(requested).all() or not torch.isfinite(bounds).all():
-            raise ValueError('feedback effort or its scaled envelope overflowed before saturation')
+        require(self.invariants, 'feedback effort or its scaled envelope overflowed before saturation',
+                ~torch.isfinite(requested) | ~torch.isfinite(bounds))
         lower, upper = -bounds, bounds
         if envelope is not None:
             # Back-EMF depends on the true shaft speed, not delayed feedback.
@@ -367,6 +374,7 @@ class EffectiveDriveResponse:
         self._tau = torch.tensor(parameters.effective_time_constant_s, dtype=torch.float64, device=self.device)[None]
         self._direct = self._tau == 0
         self._tau_scale = torch.ones(num_envs, 6, dtype=torch.float64, device=self.device)
+        self.invariants: DeferredInvariants | None = None  # see OutputFeedbackController
 
     @torch.no_grad()
     def set_time_constant_scale(self, mask, scale):
@@ -380,14 +388,16 @@ class EffectiveDriveResponse:
     def advance(self, command, duration_s, effort_bounds):
         for name, value in (('command', command), ('effort_bounds', effort_bounds)):
             if (not isinstance(value, torch.Tensor) or value.shape != self.state.shape
-                    or value.device != self.device or value.dtype != torch.float32 or not torch.isfinite(value).all()):
+                    or value.device != self.device or value.dtype != torch.float32):
                 raise ValueError(f'{name} must match the finite native effort shape/dtype/device')
+            require(self.invariants, f'{name} must match the finite native effort shape/dtype/device',
+                    ~torch.isfinite(value))
         if (not isinstance(duration_s, torch.Tensor) or duration_s.shape != (self.num_envs,)
-                or duration_s.device != self.device or duration_s.dtype != torch.float64
-                or not torch.isfinite(duration_s).all() or (duration_s < 0).any() or (effort_bounds <= 0).any()):
+                or duration_s.device != self.device or duration_s.dtype != torch.float64):
             raise ValueError('drive segment requires finite nonnegative durations and positive effort bounds')
-        if not torch.isfinite(self.state).all():
-            raise ValueError('drive endpoint state is invalid')
+        require(self.invariants, 'drive segment requires finite nonnegative durations and positive effort bounds',
+                ~torch.isfinite(duration_s) | (duration_s < 0) | (effort_bounds <= 0).any(-1))
+        require(self.invariants, 'drive endpoint state is invalid', ~torch.isfinite(self.state))
         seconds, bound = duration_s[:, None], effort_bounds.double()
         initial = self.state.double().clamp(-bound, bound)
         held = command.double().clamp(-bound, bound)
@@ -400,8 +410,8 @@ class EffectiveDriveResponse:
         advanced = torch.where(self._direct, held, initial + beta * (held - initial))
         endpoint = torch.where(seconds > 0, advanced, initial).clamp(-bound, bound)
         impulse = seconds * mean
-        if not torch.isfinite(impulse).all() or not torch.isfinite(endpoint).all():
-            raise ValueError('drive integration overflowed before publishing a segment')
+        require(self.invariants, 'drive integration overflowed before publishing a segment',
+                ~torch.isfinite(impulse) | ~torch.isfinite(endpoint))
         self.state.copy_(endpoint.to(torch.float32))
         return DriveInterval(mean.to(torch.float32), self.state.clone(), impulse)
 
