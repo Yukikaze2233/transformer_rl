@@ -122,7 +122,7 @@ Actor的传感器模型位于 `control/sensors.py`：200Hz缓存四组具名读�
 
 可选runtime段（时序、材质、锁存、电机包络、命令池、出生）的解析集中在 `lab_env/sections.py`，不导入仿真器，entry预检、managed runtime、诊断训练器和checkpoint评价共用；静态课程的env与PhysX配置由 `lab_env/cfg.py` 的 `build_course_env_cfg` / `configure_course_physics` 统一生成。出生与终止计数由env自身的 `episode_diagnostics()` 发布，课程指标只含课程状态。
 
-出生与台阶请求各自独立成模块：`lab_env/birth.py` 在CPU上一次求解并认证闭链腿姿库（腿长按膝止挡均匀、腿角在策略可保持的输出域内均匀），reset时只做索引；地面出生由 `lab_env/recovery.py` 的释放区间输出零力矩0.2s，所有权记为脚本控制。`lab_env/stair_trigger.py` 只消费沿行进方向的高度剖面，实机ToF读数可驱动同一检测逻辑。`tasks/command_pool.py` 抽取回合内命令段，`tasks/termination.py` 对倾角、低高度与机身接触做0.4s持续判定，非有限状态与闭链损坏仍立即终止。
+出生与台阶请求各自独立成模块：`lab_env/birth.py` 在CPU上一次求解并认证闭链腿姿库（腿长按膝止挡均匀、腿角在策略可保持的输出域内均匀），reset时只做索引；认证只覆盖闭链闭合、关节限位、动作可表示性和平地净空，零件间内部干涉未验证（资产关闭了自碰撞）；出生遥测按落地/地面两类逐回合结算一次结局（站起、释放期失败、接管后0.5s内失败、更晚失败、未结算即重置）及失败原因；地面出生由 `lab_env/recovery.py` 的释放区间输出零力矩0.2s，所有权记为脚本控制。`lab_env/stair_trigger.py` 只消费沿行进方向的高度剖面，实机ToF读数可驱动同一检测逻辑。`tasks/command_pool.py` 抽取回合内命令段，`tasks/termination.py` 对倾角、低高度与机身接触做0.4s持续判定，非有限状态与闭链损坏仍立即终止。
 
 checkpoint保存模型、Adam、RNG、课程和消费预算。暂停在完整更新边界保存并留在同进程；保存退出后的冷恢复保留学习状态，但重建物理回合与历史。它不保证断电且无checkpoint时恢复未保存状态。
 
