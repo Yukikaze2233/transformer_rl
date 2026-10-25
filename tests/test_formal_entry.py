@@ -127,3 +127,18 @@ def test_preset_freezes_one_target_delay_model_and_a_bounded_delay_contract():
     assert contract['torque_downlink_ms'] == [0.0, 0.0]
     assert contract['whole_step_transport'] is False
     torch.testing.assert_close(torch.tensor(contract['leg_drive_time_constant_ms']), torch.tensor([3.86, 11.025]))
+
+
+def test_curriculum_report_covers_recovery_through_ground_births():
+    import math
+    from transformer_rl.formal.lab_env import entry
+    from transformer_rl.formal.lab_env.birth import BirthRandomizationConfig
+
+    settings = FormalTrainingSettings.load(SETTINGS)
+    with pytest.raises(ValueError, match='recovery_coverage'):
+        entry._curriculum_report(settings, seed=2102, sample_count=2000)
+    report = entry._curriculum_report(settings, seed=2102, births=BirthRandomizationConfig(enabled=True),
+                                      sample_count=2000)
+    assert report['final']['recovery_source'] == 'ground_births'
+    assert report['final']['declared_yaw_abs_max'] == pytest.approx(4.5 * math.pi)
+    assert all(report['final']['checks'].values())

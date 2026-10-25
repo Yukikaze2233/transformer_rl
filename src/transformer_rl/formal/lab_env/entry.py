@@ -154,8 +154,12 @@ def _validate_plan(settings, seed):
         raise ValueError('formal entry requires a positive checkpoint interval')
 
 
-def _curriculum_report(settings, *, seed, sample_count=12000):
-    """CPU-only coverage check over every declared stage and the final bucket."""
+def _curriculum_report(settings, *, seed, births=None, sample_count=12000):
+    """CPU-only coverage check over every declared stage and the final bucket.
+
+    Recovery is covered either by the posture catalogue (RECOVERY births with
+    all 16 postures) or, with that family reserved, by SCUT ground births.
+    """
     names, budgets, weights = (COMPLETE_STAGE_NAMES, COMPLETE_STAGE_BUDGETS,
                                COMPLETE_STAGE_WEIGHTS)
     if tuple(budgets) != (5000, 20000, 5000, 5000) or sum(budgets) != 35000:
@@ -174,13 +178,16 @@ def _curriculum_report(settings, *, seed, sample_count=12000):
     sampler = ContinuousTaskSampler(seed, domain=settings.domain, continuous=True,
                                     stage_weights=weights)
     final = sampler.sample(max(sample_count, 20000), len(COMPLETE_STAGE_NAMES) - 1)
-    stage_recovery = set()
+    stage_recovery, recovery_rows = set(), 0
     for stage in range(len(COMPLETE_STAGE_NAMES)):
         stage_sampler = ContinuousTaskSampler(seed, domain=settings.domain, continuous=True,
                                               stage_weights=weights)
         stage_draw = stage_sampler.sample(sample_count, stage)
-        stage_recovery.update(stage_draw.recovery_posture[
-            stage_draw.family == TaskFamily.RECOVERY].tolist())
+        recovery = stage_draw.family == TaskFamily.RECOVERY
+        stage_recovery.update(stage_draw.recovery_posture[recovery].tolist())
+        recovery_rows += int(recovery.sum())
+    ground_births = births is not None and births.enabled and births.ground_probability > 0
+    yaw_bound = max(-settings.domain.yaw_rad_s[0], settings.domain.yaw_rad_s[1])
     families = torch.bincount(final.family, minlength=len(TaskFamily))
     expected = [int(round(len(final.family) * value)) for value in COMPLETE_STAGE_WEIGHTS[-1]]
     if any(abs(actual - want) > 1 for actual, want in zip(families.tolist(), expected)):
@@ -201,7 +208,7 @@ def _curriculum_report(settings, *, seed, sample_count=12000):
         'height_endpoint_coverage': bool(final.requested_command[:, 3].min() <= settings.domain.height_m[0] + 1e-6
                                          and final.requested_command[:, 3].max() >= settings.domain.height_m[1] - 1e-6),
         'lateral_always_zero': bool((final.requested_command[:, 1] == 0).all()),
-        'yaw_within_declared_domain': bool((final.requested_command[:, 2].abs() <= 6 * torch.pi + 1e-6).all()),
+        'yaw_within_declared_domain': bool((final.requested_command[:, 2].abs() <= yaw_bound + 1e-6).all()),
         'normal_yaw_bucket': bool((rotation[normal, 2].abs() <= 2 * torch.pi + 1e-6).all()),
         'spin_low_present': int(modes[1]) > 0,
         'spin_mid_present': int(modes[2]) > 0,
@@ -213,7 +220,7 @@ def _curriculum_report(settings, *, seed, sample_count=12000):
                                    and (final.jump_height_m[request_mask] <= .40 + 1e-6).all()),
         'terrain_kinds': set(final.terrain_kind[terrain_mask].tolist()) >= set(range(1, 8)),
         'flat_rehearsal': bool((final.terrain_kind[terrain_mask] == 0).any()),
-        'recovery_postures': stage_recovery == set(range(16)),
+        'recovery_coverage': stage_recovery == set(range(16)) if recovery_rows else ground_births,
         'trajectory_kinds': set(final.trajectory_kind.tolist()) == set(range(7)),
     }
     if not all(checks.values()):
@@ -224,9 +231,10 @@ def _curriculum_report(settings, *, seed, sample_count=12000):
         'family_counts': families.tolist(),
         'rotation_modes': modes.tolist(),
         'rotation_sampled_yaw_abs_max': float(rotation[:, 2].abs().max()),
-        'declared_yaw_abs_max': float(6 * torch.pi),
+        'declared_yaw_abs_max': float(yaw_bound),
         'covered_yaw_abs_max': float(rotation[:, 2].abs().max()),
         'checks': checks,
+        'recovery_source': 'posture_catalogue' if recovery_rows else 'ground_births',
         'notice': ('birth draws only; spin/dash births stand first and the within-episode '
                    'command pool owns special modes'),
     }
@@ -280,7 +288,9 @@ def main(argv=None):
     settings = FormalTrainingSettings.load(args.settings)
     _validate_plan(settings, args.seed)
     runtime = _single_target_delay(_with_control_timing(read_json(args.runtime_json), args.control_timing_json))
-    curriculum = _curriculum_report(settings, seed=args.seed)
+    births = runtime.get('birth_randomization')
+    curriculum = _curriculum_report(settings, seed=args.seed,
+                                    births=None if births is None else BirthRandomizationConfig.from_dict(births))
     asset_report = _asset_report(runtime['asset_directory'])
     resources = read_json(args.resources_json)
     session = prepare_session(
